@@ -19,6 +19,8 @@ pub mod bgp_ext_comm;
 pub mod bgp_ls;
 pub mod bgp_ls_srv6;
 pub mod bgp_prefix_sid;
+pub mod bgp_rib;
+pub mod bgp_router;
 pub mod bus;
 pub mod cbs;
 pub mod cdp;
@@ -166,7 +168,11 @@ pub use arp::{ArpOpcode, ArpPacket, ArpTable};
 pub use ats::{AtsFrame, AtsStreamShaper, UrgencyBasedScheduler};
 pub use bfd::{BFD_CONTROL_PORT, BFD_ECHO_PORT, BfdControlPacket, BfdSession, BfdState};
 pub use bfd_v6::{BFD_MULTIHOP_PORT, BfdV6Manager, BfdV6Session};
-pub use bgp::{BGP_MSG_KEEPALIVE, BGP_MSG_OPEN, BGP_MSG_UPDATE, BGP_PORT, BgpMessage, BgpRib};
+pub use bgp::{
+    AsPath, BGP_MAX_MESSAGE_LEN, BGP_MSG_KEEPALIVE, BGP_MSG_OPEN, BGP_MSG_UPDATE, BGP_PORT,
+    BgpFramer, BgpMessage, BgpNotificationMessage, BgpOpenMessage, BgpOrigin, BgpPathAttributes,
+    BgpPdu, BgpRib, BgpUpdateMessage, Ipv4Prefix,
+};
 pub use bgp_epe::{
     BGP_EPE_PEER_ADJ_SID, BGP_EPE_PEER_NODE_SID, BGP_EPE_PEER_SET_SID, BgpEpeDatabase, PeerSid,
 };
@@ -186,6 +192,11 @@ pub use bgp_prefix_sid::{
     BGP_ATTR_PREFIX_SID, BGP_PREFIX_SID_TLV_IPV6_NODE_SID, BGP_PREFIX_SID_TLV_LABEL_INDEX,
     BGP_PREFIX_SID_TLV_ORIGINATOR_SRGB, BgpPrefixSidAttribute, LabelIndexTlv, OriginatorSrgbTlv,
 };
+pub use bgp_rib::{
+    AdjRibIn, AdjRibOut, BgpPath, LocRib, PathSource, PolicyAction, PolicyRule, PrefixMatch,
+    RoutePolicy,
+};
+pub use bgp_router::{BgpPeer, BgpPeerMode, BgpRouter, BgpState};
 pub use bus::VirtualNetworkBus;
 pub use cbs::CreditBasedShaper;
 pub use cdp::{CDP_MULTICAST_MAC, CdpNeighbor, CdpNeighborTable, CdpPacket, CdpTlv};
@@ -395,7 +406,7 @@ pub use roce::{
     BthHeader, ETHERTYPE_FLOW_CONTROL, PFC_MULTICAST_MAC, PfcPauseFrame, ROCEV2_UDP_PORT,
     RdmaQueuePair, RethHeader, RocePacket,
 };
-pub use router::{RouteEntry, RoutingTable};
+pub use router::{RouteEntry, RouteSource, RoutingTable};
 pub use rsvp::{IP_PROTO_RSVP, RSVP_MSG_PATH, RSVP_MSG_RESV, RsvpHeader, RsvpObject, RsvpPacket};
 pub use rtp::{RTP_PT_DYNAMIC, RTP_PT_PCMA, RTP_PT_PCMU, RtcpSenderReport, RtpPacket};
 pub use sai::{
