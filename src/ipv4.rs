@@ -56,6 +56,10 @@ impl Ipv4Address {
     pub fn is_broadcast(&self) -> bool {
         self.0 == [255, 255, 255, 255]
     }
+
+    pub fn is_unspecified(&self) -> bool {
+        self.0 == [0, 0, 0, 0]
+    }
 }
 
 impl fmt::Debug for Ipv4Address {

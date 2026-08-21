@@ -144,6 +144,7 @@ use crate::sflow::{
 };
 use crate::sip::{SIP_PORT, SipMessage, build_simple_sdp};
 use crate::snmp::{SnmpMessage, SnmpMib, SnmpValue, SnmpVarbind};
+use crate::socket::{TcpListenerHandle, TcpStreamHandle};
 use crate::sr_policy::{
     SrCandidatePath, SrPolicy, SrPolicyDatabase, SrProtocolOrigin, SrSegmentList,
 };
@@ -159,7 +160,7 @@ use crate::syslog::{
 };
 use crate::tacacs::{TACACS_AUTHEN_STATUS_PASS, TACACS_PORT, TacacsPacket, TacacsServer};
 use crate::tas::TimeAwareShaper;
-use crate::tcp::{SocketAddrV4, TcpFlags, TcpSegment};
+use crate::tcp::{SocketAddrV4, TcpFlags, TcpSegment, TcpState};
 use crate::tftp::{TftpFileServer, TftpPacket};
 use crate::ti_lfa::TiLfaEngine;
 use crate::tls::TlsRecord;
@@ -8027,6 +8028,22 @@ impl NetworkShell {
                 "  tcp-demo               - Full TCP connection lifecycle (3-way handshake, Data, Teardown)"
             );
             println!(
+                "  sockets                - SocketRuntime API (UDP bind, TCP listen, accept queue demo)"
+            );
+            println!(
+                "  tcp-reliable           - MSS segmentation, flow control, and large payload transfer"
+            );
+            println!(
+                "  tcp-loss               - Retransmission recovery under deterministic link packet drops"
+            );
+            println!(
+                "  tcp-reorder            - Out-of-order segment buffering and stream reassembly demo"
+            );
+            println!(
+                "  http                   - HTTP/1.1 client-server exchange over TcpStream API"
+            );
+            println!("  tcp-stats              - Transport layer telemetry and connection stats");
+            println!(
                 "  pcap [output.pcap]     - Run lab test suite with link packet tap and export PCAP"
             );
             return;
@@ -8397,7 +8414,7 @@ impl NetworkShell {
                     .host_mut("client")
                     .unwrap()
                     .stack
-                    .tcp_connect(host_b_ip, 50000, 80, 1000)
+                    .tcp_connect_raw(host_b_ip, 50000, 80, 1000)
                     .unwrap();
                 lab.send_from_host("client", syn);
                 lab.run_until_quiescent(10);
@@ -8424,7 +8441,7 @@ impl NetworkShell {
                     .host_mut("client")
                     .unwrap()
                     .stack
-                    .tcp_send_data(host_b_ip, 50000, 80, b"GET / HTTP/1.1\r\n\r\n")
+                    .tcp_send_data_raw(host_b_ip, 50000, 80, b"GET / HTTP/1.1\r\n\r\n")
                     .unwrap();
                 lab.send_from_host("client", data);
                 lab.run_until_quiescent(10);
@@ -8446,7 +8463,7 @@ impl NetworkShell {
                     .host_mut("client")
                     .unwrap()
                     .stack
-                    .tcp_close(host_b_ip, 50000, 80)
+                    .tcp_close_raw(host_b_ip, 50000, 80)
                     .unwrap();
                 lab.send_from_host("client", fin);
                 lab.run_until_quiescent(10);
@@ -9193,6 +9210,387 @@ impl NetworkShell {
                 }
             }
 
+            "sockets" => {
+                println!("=== Socket Runtime: UDP Datagrams, Listener Backlog, Accept Queue ===");
+                let mut lab = build_socket_lab("lan_sock", 1460);
+
+                // --- UDP: bind, ephemeral allocation, send_to / recv_from over the wire ---
+                let srv_udp = lab
+                    .host_mut("server")
+                    .unwrap()
+                    .stack
+                    .udp_bind(7777)
+                    .unwrap();
+                let cli_udp = lab.host_mut("client").unwrap().stack.udp_bind(0).unwrap();
+                let cli_port = lab
+                    .host("client")
+                    .unwrap()
+                    .stack
+                    .sockets
+                    .udp_sockets
+                    .get(&cli_udp)
+                    .unwrap()
+                    .local_addr
+                    .port;
+                println!("  client bound ephemeral UDP port :{}", cli_port);
+                println!("  server bound UDP :7777");
+
+                lab.host_mut("client")
+                    .unwrap()
+                    .stack
+                    .udp_send_to(
+                        cli_udp,
+                        b"hello from the socket API",
+                        SocketAddrV4 {
+                            ip: SOCKET_LAB_SERVER_IP,
+                            port: 7777,
+                        },
+                    )
+                    .unwrap();
+                lab.run_pumped(20);
+
+                match lab.host_mut("server").unwrap().stack.udp_recv_from(srv_udp) {
+                    Ok((data, from)) => println!(
+                        "  server recv_from {} -> {:?}",
+                        from,
+                        String::from_utf8_lossy(&data)
+                    ),
+                    Err(e) => println!("  server recv_from failed: {}", e),
+                }
+
+                // Bind conflict is refused, exactly as EADDRINUSE would be.
+                match lab.host_mut("server").unwrap().stack.udp_bind(7777) {
+                    Ok(_) => println!("  second bind on :7777 unexpectedly succeeded"),
+                    Err(e) => println!("  second bind on :7777 rejected: {}", e),
+                }
+
+                // --- TCP: one listener, three simultaneous clients, demultiplexed by 4-tuple ---
+                let listener = lab
+                    .host_mut("server")
+                    .unwrap()
+                    .stack
+                    .tcp_listen(80)
+                    .unwrap();
+                println!("\n  server listening on TCP :80");
+
+                for port in [50001u16, 50002, 50003] {
+                    lab.host_mut("client")
+                        .unwrap()
+                        .stack
+                        .tcp_connect_from(
+                            port,
+                            SocketAddrV4 {
+                                ip: SOCKET_LAB_SERVER_IP,
+                                port: 80,
+                            },
+                            1000 + port as u32,
+                        )
+                        .unwrap();
+                }
+                lab.run_until(50, 5_000, |l| {
+                    l.host("server").unwrap().stack.sockets.connection_count() >= 3
+                });
+
+                let mut accepted = 0;
+                while let Ok((stream, peer)) =
+                    lab.host_mut("server").unwrap().stack.tcp_accept(listener)
+                {
+                    accepted += 1;
+                    let state = lab.host("server").unwrap().stack.tcp_state(stream).unwrap();
+                    println!("  accept() -> peer {} state {}", peer, state);
+                }
+                println!(
+                    "  {} simultaneous connections accepted on one listening port",
+                    accepted
+                );
+            }
+
+            "tcp-reliable" => {
+                println!("=== Reliable Stream: MSS Segmentation and Windowed Transfer ===");
+                let mss = 256u16;
+                let payload_len = 24_576usize;
+                let mut lab = build_socket_lab("lan_reliable", mss);
+
+                let (client, server, listener) = socket_lab_connect(&mut lab);
+                println!("  connection established with MSS {}", mss);
+
+                let payload: Vec<u8> = (0..payload_len).map(|i| (i % 251) as u8).collect();
+                lab.host_mut("client")
+                    .unwrap()
+                    .stack
+                    .tcp_write(client, &payload)
+                    .unwrap();
+                println!("  application wrote {} bytes in one call", payload_len);
+
+                let done = lab.run_until(25, 60_000, |l| {
+                    l.host("server")
+                        .unwrap()
+                        .stack
+                        .tcp_stats(server)
+                        .map(|s| s.bytes_received as usize >= payload_len)
+                        .unwrap_or(false)
+                });
+
+                let received = drain_stream(&mut lab, "server", server);
+                let stats = lab.host("client").unwrap().stack.tcp_stats(client).unwrap();
+                println!(
+                    "  transfer {} : {} bytes received, byte-identical = {}",
+                    if done { "complete" } else { "TIMED OUT" },
+                    received.len(),
+                    received == payload
+                );
+                println!(
+                    "  sender emitted {} segments for {} bytes (~{} bytes/segment)",
+                    stats.segments_sent,
+                    stats.bytes_sent,
+                    stats.bytes_sent / stats.segments_sent.max(1)
+                );
+                let _ = listener;
+            }
+
+            "tcp-loss" => {
+                println!("=== Retransmission Recovery Under Deterministic Packet Loss ===");
+                let mss = 256u16;
+                let payload_len = 16_384usize;
+                let mut lab = build_socket_lab("lan_loss", mss);
+
+                let (client, server, _l) = socket_lab_connect(&mut lab);
+
+                // Drop a spread of data segments after the handshake has completed.
+                let drops: Vec<usize> = (0..12).map(|i| 6 + i * 7).collect();
+                lab.link_mut("lan_loss")
+                    .unwrap()
+                    .drop_packet_indices(&drops);
+                println!("  dropping frame indices {:?}", drops);
+
+                let payload: Vec<u8> = (0..payload_len)
+                    .map(|i| ((i * 31 + 7) % 256) as u8)
+                    .collect();
+                lab.host_mut("client")
+                    .unwrap()
+                    .stack
+                    .tcp_write(client, &payload)
+                    .unwrap();
+
+                let done = lab.run_until(25, 120_000, |l| {
+                    l.host("server")
+                        .unwrap()
+                        .stack
+                        .tcp_stats(server)
+                        .map(|s| s.bytes_received as usize >= payload_len)
+                        .unwrap_or(false)
+                });
+
+                let received = drain_stream(&mut lab, "server", server);
+                let stats = lab.host("client").unwrap().stack.tcp_stats(client).unwrap();
+                println!(
+                    "  recovery {} : {} / {} bytes, byte-identical = {}",
+                    if done { "complete" } else { "TIMED OUT" },
+                    received.len(),
+                    payload_len,
+                    received == payload
+                );
+                println!(
+                    "  retransmissions={} (fast={}) timeouts={} duplicate-acks={}",
+                    stats.retransmissions,
+                    stats.fast_retransmits,
+                    stats.timeouts,
+                    stats.duplicate_acks
+                );
+                println!(
+                    "  link forwarded {} frames, dropped {}",
+                    lab.link("lan_loss")
+                        .map(|l| l.frames_forwarded)
+                        .unwrap_or(0),
+                    lab.link("lan_loss").map(|l| l.frames_dropped).unwrap_or(0)
+                );
+            }
+
+            "tcp-reorder" => {
+                println!("=== Out-of-Order Delivery and Stream Reassembly ===");
+                let mss = 256u16;
+                let payload_len = 8_192usize;
+                let mut lab = build_socket_lab("lan_reorder", mss);
+
+                let (client, server, _l) = socket_lab_connect(&mut lab);
+
+                // Hold several frames back behind later ones. Because both hosts share the
+                // link, a spread of indices is what reliably lands on data segments and
+                // makes the receiver buffer out of order.
+                let holds = [(5usize, 8usize), (11, 14), (19, 23), (28, 32)];
+                for (hold, after) in holds {
+                    lab.link_mut("lan_reorder")
+                        .unwrap()
+                        .reorder_packet_indices
+                        .push((hold, after));
+                }
+                println!("  holding frames {:?} behind later frames", holds);
+
+                let payload: Vec<u8> = (0..payload_len).map(|i| (i % 97) as u8).collect();
+                lab.host_mut("client")
+                    .unwrap()
+                    .stack
+                    .tcp_write(client, &payload)
+                    .unwrap();
+
+                let mut received: Vec<u8> = Vec::new();
+                for _ in 0..20_000 {
+                    let moved = lab.step();
+                    received.extend(drain_stream(&mut lab, "server", server));
+                    if received.len() >= payload_len {
+                        break;
+                    }
+                    if moved == 0 {
+                        lab.advance_time(25);
+                    }
+                }
+
+                println!(
+                    "  reassembly {} : {} bytes, byte-identical = {}",
+                    if received.len() == payload_len {
+                        "complete"
+                    } else {
+                        "TIMED OUT"
+                    },
+                    received.len(),
+                    received == payload
+                );
+
+                // Evidence that reassembly was genuinely needed: every duplicate ACK the
+                // sender saw is the receiver reporting a hole in the sequence space that it
+                // had to buffer around, and every retransmission is the sender filling one.
+                let sender = lab.host("client").unwrap().stack.tcp_stats(client).unwrap();
+                let receiver = lab.host("server").unwrap().stack.tcp_stats(server).unwrap();
+                println!(
+                    "  receiver saw {} segments; sender observed {} duplicate ACKs and made {} retransmissions",
+                    receiver.segments_received, sender.duplicate_acks, sender.retransmissions
+                );
+            }
+
+            "http" => {
+                println!("=== HTTP/1.1 Over the Socket API (no hand-built packets) ===");
+                let mut lab = build_socket_lab("lan_http", 536);
+
+                let listener = lab
+                    .host_mut("server")
+                    .unwrap()
+                    .stack
+                    .tcp_listen(8080)
+                    .unwrap();
+                println!("  http server listening on :8080");
+
+                let client = lab
+                    .host_mut("client")
+                    .unwrap()
+                    .stack
+                    .tcp_connect(SocketAddrV4 {
+                        ip: SOCKET_LAB_SERVER_IP,
+                        port: 8080,
+                    })
+                    .unwrap();
+
+                lab.run_until(25, 10_000, |l| {
+                    l.host("client")
+                        .unwrap()
+                        .stack
+                        .tcp_state(client)
+                        .map(|s| s == TcpState::Established)
+                        .unwrap_or(false)
+                });
+                let (server, peer) = lab
+                    .host_mut("server")
+                    .unwrap()
+                    .stack
+                    .tcp_accept(listener)
+                    .unwrap();
+                println!("  accepted connection from {}", peer);
+
+                let request = "GET /hello HTTP/1.1\r\nHost: lab.local\r\nConnection: close\r\n\r\n";
+                lab.host_mut("client")
+                    .unwrap()
+                    .stack
+                    .tcp_write(client, request.as_bytes())
+                    .unwrap();
+                println!("  --> {}", request.lines().next().unwrap_or(""));
+
+                lab.run_until(25, 20_000, |l| {
+                    l.host("server")
+                        .unwrap()
+                        .stack
+                        .tcp_readable(server)
+                        .ge(&request.len())
+                });
+
+                let req_bytes = drain_stream(&mut lab, "server", server);
+                let response = http_respond(&String::from_utf8_lossy(&req_bytes));
+
+                lab.host_mut("server")
+                    .unwrap()
+                    .stack
+                    .tcp_write(server, response.as_bytes())
+                    .unwrap();
+                lab.host_mut("server").unwrap().stack.tcp_close(server).ok();
+
+                lab.run_until(25, 20_000, |l| {
+                    l.host("client")
+                        .unwrap()
+                        .stack
+                        .tcp_stats(client)
+                        .map(|s| s.bytes_received as usize >= response.len())
+                        .unwrap_or(false)
+                });
+
+                let resp_bytes = drain_stream(&mut lab, "client", client);
+                let resp = String::from_utf8_lossy(&resp_bytes);
+                for line in resp.lines() {
+                    println!("  <-- {}", line);
+                }
+                println!(
+                    "  response {} bytes, complete = {}",
+                    resp_bytes.len(),
+                    resp_bytes.len() == response.len()
+                );
+            }
+
+            "tcp-stats" => {
+                println!("=== Transport Diagnostics ===");
+                let mss = 512u16;
+                let payload_len = 32_768usize;
+                let mut lab = build_socket_lab("lan_stats", mss);
+
+                let (client, server, _l) = socket_lab_connect(&mut lab);
+                lab.link_mut("lan_stats")
+                    .unwrap()
+                    .drop_packet_indices(&[8, 21, 34, 55]);
+
+                let payload: Vec<u8> = (0..payload_len).map(|i| (i % 233) as u8).collect();
+                lab.host_mut("client")
+                    .unwrap()
+                    .stack
+                    .tcp_write(client, &payload)
+                    .unwrap();
+
+                lab.run_until(25, 120_000, |l| {
+                    l.host("server")
+                        .unwrap()
+                        .stack
+                        .tcp_stats(server)
+                        .map(|s| s.bytes_received as usize >= payload_len)
+                        .unwrap_or(false)
+                });
+
+                println!("\n-- client --");
+                match lab.host("client").unwrap().stack.tcp_diagnostics(client) {
+                    Ok(d) => println!("{}", d),
+                    Err(e) => println!("  unavailable: {}", e),
+                }
+                println!("\n-- server --");
+                match lab.host("server").unwrap().stack.tcp_diagnostics(server) {
+                    Ok(d) => println!("{}", d),
+                    Err(e) => println!("  unavailable: {}", e),
+                }
+            }
+
             other => {
                 println!(
                     "Unknown lab subcommand: '{}'. Type 'lab help' for usage.",
@@ -9201,4 +9599,145 @@ impl NetworkShell {
             }
         }
     }
+}
+
+// ===========================================================================
+// Socket-runtime lab helpers used by the `lab sockets`/`tcp-*`/`http` demos.
+//
+// These drive the real stack: they build a two-host virtual lab and then use
+// only the application-facing socket API. No demo constructs a TCP segment,
+// IPv4 packet, or Ethernet frame by hand.
+// ===========================================================================
+
+/// Server address used by every socket-runtime demo.
+const SOCKET_LAB_SERVER_IP: Ipv4Address = Ipv4Address([192, 168, 50, 2]);
+/// Client address used by every socket-runtime demo.
+const SOCKET_LAB_CLIENT_IP: Ipv4Address = Ipv4Address([192, 168, 50, 10]);
+
+/// Builds a two-host lab on one link with ARP pre-seeded, so frame indices line up with
+/// TCP segments and loss injection targets the segment a demo means to drop.
+fn build_socket_lab(link: &str, mss: u16) -> VirtualLab {
+    let server_mac = MacAddress([0x02, 0x00, 0x00, 0x00, 0x50, 0x02]);
+    let client_mac = MacAddress([0x02, 0x00, 0x00, 0x00, 0x50, 0x0A]);
+
+    let mut lab = VirtualLab::new();
+    lab.add_link(link);
+    lab.add_host(
+        "server",
+        link,
+        NetStackConfig {
+            mac: server_mac,
+            ip: SOCKET_LAB_SERVER_IP,
+            ipv6: None,
+            subnet_mask: 24,
+            gateway: None,
+        },
+    );
+    lab.add_host(
+        "client",
+        link,
+        NetStackConfig {
+            mac: client_mac,
+            ip: SOCKET_LAB_CLIENT_IP,
+            ipv6: None,
+            subnet_mask: 24,
+            gateway: None,
+        },
+    );
+
+    lab.host_mut("client")
+        .unwrap()
+        .stack
+        .arp_table
+        .insert(SOCKET_LAB_SERVER_IP.0, server_mac);
+    lab.host_mut("server")
+        .unwrap()
+        .stack
+        .arp_table
+        .insert(SOCKET_LAB_CLIENT_IP.0, client_mac);
+
+    lab.host_mut("client").unwrap().stack.set_tcp_mss(mss);
+    lab.host_mut("server").unwrap().stack.set_tcp_mss(mss);
+    lab
+}
+
+/// Completes a three-way handshake between the lab's client and server hosts and returns
+/// the two stream handles plus the listener.
+fn socket_lab_connect(
+    lab: &mut VirtualLab,
+) -> (TcpStreamHandle, TcpStreamHandle, TcpListenerHandle) {
+    let listener = lab
+        .host_mut("server")
+        .unwrap()
+        .stack
+        .tcp_listen(80)
+        .unwrap();
+    let client = lab
+        .host_mut("client")
+        .unwrap()
+        .stack
+        .tcp_connect(SocketAddrV4 {
+            ip: SOCKET_LAB_SERVER_IP,
+            port: 80,
+        })
+        .unwrap();
+
+    lab.run_until(50, 10_000, |l| {
+        l.host("client")
+            .unwrap()
+            .stack
+            .tcp_state(client)
+            .map(|s| s == TcpState::Established)
+            .unwrap_or(false)
+    });
+
+    let (server, _) = lab
+        .host_mut("server")
+        .unwrap()
+        .stack
+        .tcp_accept(listener)
+        .expect("listener accept queue");
+    (client, server, listener)
+}
+
+/// Reads every currently available byte from a stream through the socket API.
+fn drain_stream(lab: &mut VirtualLab, host: &str, stream: TcpStreamHandle) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut chunk = [0u8; 4096];
+    loop {
+        match lab
+            .host_mut(host)
+            .unwrap()
+            .stack
+            .tcp_read(stream, &mut chunk)
+        {
+            Ok(0) => break,
+            Ok(n) => out.extend_from_slice(&chunk[..n]),
+            Err(_) => break,
+        }
+    }
+    out
+}
+
+/// Minimal HTTP/1.1 origin server. Operates purely on the byte stream the socket API
+/// delivered; it has no idea TCP, IPv4, or Ethernet exist.
+fn http_respond(request: &str) -> String {
+    let mut lines = request.lines();
+    let request_line = lines.next().unwrap_or("");
+    let mut parts = request_line.split_whitespace();
+    let method = parts.next().unwrap_or("");
+    let target = parts.next().unwrap_or("");
+
+    let (status, body) = match (method, target) {
+        ("GET", "/hello") => ("200 OK", "Hello from the userspace TCP/IP stack!\n"),
+        ("GET", _) => ("404 Not Found", "not found\n"),
+        _ => ("405 Method Not Allowed", "method not allowed\n"),
+    };
+
+    format!(
+        "HTTP/1.1 {}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        status,
+        body.len(),
+        body
+    )
 }

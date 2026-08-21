@@ -2,11 +2,11 @@
 //!
 //! Provides a complete in-process virtual networking testbed supporting:
 //! - Multi-node, multi-subnet topologies with virtual links, switches, and routers
-//! - Deterministic link fault injection (MTU limits, packet drops, byte corruption)
+//! - Deterministic link fault injection (MTU limits, packet drops, byte corruption, packet reordering)
 //! - Multi-interface IPv4 routing, TTL decrementing, and ICMP Time Exceeded generation
 //! - Full dual-stack protocol operation (Ethernet, ARP, IPv4, IPv6, ICMP, ICMPv6, NDP, UDP, TCP)
 //! - Integrated PCAP capture tap per link with Wireshark compatibility
-//! - Discrete event stepping and run-to-quiescence simulation
+//! - Discrete event stepping, simulated logical clock advancement, and run-to-quiescence simulation
 
 use crate::arp::{ArpOpcode, ArpPacket, ArpTable};
 use crate::ethernet::{
@@ -33,6 +33,8 @@ pub struct VirtualLink {
     pub mtu: usize,
     pub drop_packet_indices: Vec<usize>,
     pub corrupt_packet_indices: Vec<usize>,
+    pub reorder_packet_indices: Vec<(usize, usize)>, // (hold_index, release_after_index)
+    pub held_frames: Vec<(usize, Vec<u8>)>,
     pub total_packets_seen: usize,
     pub frames_forwarded: usize,
     pub frames_dropped: usize,
@@ -48,6 +50,8 @@ impl VirtualLink {
             mtu: 1500,
             drop_packet_indices: Vec::new(),
             corrupt_packet_indices: Vec::new(),
+            reorder_packet_indices: Vec::new(),
+            held_frames: Vec::new(),
             total_packets_seen: 0,
             frames_forwarded: 0,
             frames_dropped: 0,
@@ -98,23 +102,31 @@ impl VirtualLink {
         self.corrupt_packet_indices.extend_from_slice(indices);
     }
 
-    /// Processes a frame attempting to cross this link.
-    /// Returns Some(frame) if delivered, or None if dropped/clipped.
-    pub fn process_frame_transit(&mut self, mut raw_frame: Vec<u8>) -> Option<Vec<u8>> {
+    /// Processes a frame attempting to cross this link, returning all delivered frames.
+    pub fn process_frames_transit(&mut self, mut raw_frame: Vec<u8>) -> Vec<Vec<u8>> {
         self.total_packets_seen += 1;
         let pkt_index = self.total_packets_seen;
+        let mut delivered = Vec::new();
+
+        // Check hold/reorder rule: (hold_idx, release_after_idx)
+        for &(hold_idx, release_after) in &self.reorder_packet_indices {
+            if pkt_index == hold_idx {
+                self.held_frames.push((release_after, raw_frame));
+                return delivered; // Held for reordering
+            }
+        }
 
         // 1. Check MTU
         if raw_frame.len() > self.mtu + 14 {
             // Frame payload + Ethernet header exceeds link capacity
             self.frames_dropped += 1;
-            return None;
+            return delivered;
         }
 
         // 2. Check deterministic drop rule
         if self.drop_packet_indices.contains(&pkt_index) {
             self.frames_dropped += 1;
-            return None;
+            return delivered;
         }
 
         // 3. Check deterministic corruption rule
@@ -132,7 +144,31 @@ impl VirtualLink {
         }
 
         self.frames_forwarded += 1;
-        Some(raw_frame)
+        delivered.push(raw_frame);
+
+        // Check if any held frames should now be released
+        let mut remaining_held = Vec::new();
+        for (release_after, held_frame) in std::mem::take(&mut self.held_frames) {
+            if pkt_index == release_after {
+                if let Some(ref mut writer) = self.pcap_writer {
+                    let ts_sec = (pkt_index as u32) / 10;
+                    let ts_usec = ((pkt_index as u32) % 10) * 100_000 + 50_000;
+                    let _ = writer.write_packet(ts_sec, ts_usec, &held_frame);
+                }
+                self.frames_forwarded += 1;
+                delivered.push(held_frame);
+            } else {
+                remaining_held.push((release_after, held_frame));
+            }
+        }
+        self.held_frames = remaining_held;
+
+        delivered
+    }
+
+    /// Single frame transit helper for legacy compatibility.
+    pub fn process_frame_transit(&mut self, raw_frame: Vec<u8>) -> Option<Vec<u8>> {
+        self.process_frames_transit(raw_frame).into_iter().next()
     }
 
     /// Enqueues a raw frame onto the virtual link for propagation.
@@ -861,6 +897,7 @@ pub struct VirtualLab {
     pub in_flight_frames: Vec<(String, String, Vec<u8>)>, // (sender_node, link_name, frame)
     pub total_steps_executed: usize,
     pub total_frames_delivered: usize,
+    pub current_time_ms: u64,
 }
 
 impl VirtualLab {
@@ -872,6 +909,7 @@ impl VirtualLab {
             in_flight_frames: Vec::new(),
             total_steps_executed: 0,
             total_frames_delivered: 0,
+            current_time_ms: 0,
         }
     }
 
@@ -945,11 +983,94 @@ impl VirtualLab {
         }
     }
 
+    /// Collects everything every host's socket runtime wants to transmit at the current
+    /// simulated time and queues it on the owning link, without advancing the clock.
+    ///
+    /// This is what turns an application-level `tcp_write` into frames on the wire: the
+    /// application never touches a packet, the lab pumps the stack instead.
+    pub fn pump(&mut self) -> usize {
+        let mut queued = 0;
+        let mut host_names: Vec<String> = self.hosts.keys().cloned().collect();
+        host_names.sort();
+        for h_name in host_names {
+            let host = self.hosts.get_mut(&h_name).unwrap();
+            let link_name = host.link_name.clone();
+            for f in host.stack.poll_transmit() {
+                self.in_flight_frames
+                    .push((h_name.clone(), link_name.clone(), f));
+                queued += 1;
+            }
+        }
+        queued
+    }
+
+    /// Advances simulated logical time by `ms` and runs every host's timers, queueing any
+    /// resulting frames (retransmissions, deferred FINs, window probes, new data).
+    pub fn advance_time(&mut self, ms: u64) -> usize {
+        self.current_time_ms += ms;
+        let mut queued = 0;
+        let mut host_names: Vec<String> = self.hosts.keys().cloned().collect();
+        host_names.sort();
+        for h_name in host_names {
+            let host = self.hosts.get_mut(&h_name).unwrap();
+            let link_name = host.link_name.clone();
+            let frames = host.stack.step_timers(self.current_time_ms);
+            for f in frames {
+                self.in_flight_frames
+                    .push((h_name.clone(), link_name.clone(), f));
+                queued += 1;
+            }
+        }
+        queued
+    }
+
+    /// Runs the network to quiescence at the current time, pumping host sockets between
+    /// steps so application writes turn into frames without needing the clock to move.
+    pub fn run_pumped(&mut self, max_rounds: usize) -> usize {
+        let mut steps = 0;
+        for _ in 0..max_rounds {
+            let queued = self.pump();
+            if queued == 0 && self.in_flight_frames.is_empty() {
+                break;
+            }
+            steps += self.run_until_quiescent(200);
+        }
+        steps
+    }
+
+    /// Drives the simulation until `predicate` holds or the simulated deadline passes.
+    ///
+    /// Each round pumps every host, runs the network to quiescence, then advances the
+    /// clock by `tick_ms` so retransmission timers can fire. Returns true if the
+    /// predicate was satisfied. Purely simulated time: no thread ever sleeps.
+    pub fn run_until<F>(&mut self, tick_ms: u64, max_sim_ms: u64, mut predicate: F) -> bool
+    where
+        F: FnMut(&VirtualLab) -> bool,
+    {
+        let deadline = self.current_time_ms + max_sim_ms;
+        self.run_pumped(50);
+        if predicate(self) {
+            return true;
+        }
+        while self.current_time_ms < deadline {
+            self.advance_time(tick_ms.max(1));
+            self.run_pumped(50);
+            if predicate(self) {
+                return true;
+            }
+        }
+        false
+    }
+
     /// Executes one discrete simulation step:
     /// Drains current in-flight frames, passes each through the corresponding link fault model,
     /// delivers ready frames to connected hosts and routers on that link, and collects newly
     /// generated reply or transit frames into the in-flight queue.
     pub fn step(&mut self) -> usize {
+        // Give every host's socket runtime a chance to emit before draining the wire, so a
+        // plain `step()` loop carries application data without an explicit pump.
+        self.pump();
+
         if self.in_flight_frames.is_empty() {
             return 0;
         }
@@ -962,42 +1083,41 @@ impl VirtualLab {
         for (sender, link_name, raw_frame) in current_batch {
             frames_processed += 1;
 
-            // 1. Traverse Link (applies MTU, Drops, Corruption, PCAP Tap)
-            let delivered_frame = match self.links.get_mut(&link_name) {
-                Some(link) => match link.process_frame_transit(raw_frame) {
-                    Some(f) => f,
-                    None => continue, // Dropped by link!
-                },
-                None => raw_frame,
+            // 1. Traverse Link (applies MTU, Drops, Corruption, Reordering, PCAP Tap)
+            let delivered_frames = match self.links.get_mut(&link_name) {
+                Some(link) => link.process_frames_transit(raw_frame),
+                None => vec![raw_frame],
             };
 
-            self.total_frames_delivered += 1;
+            for delivered_frame in delivered_frames {
+                self.total_frames_delivered += 1;
 
-            // 2. Deliver to all other Hosts on this link
-            let host_names: Vec<String> = self.hosts.keys().cloned().collect();
-            for h_name in host_names {
-                if h_name == sender {
-                    continue;
-                }
-                let host = self.hosts.get_mut(&h_name).unwrap();
-                if host.link_name == link_name {
-                    let replies = host.stack.process_frame(&delivered_frame);
-                    for reply in replies {
-                        next_batch.push((h_name.clone(), link_name.clone(), reply));
+                // 2. Deliver to all other Hosts on this link
+                let host_names: Vec<String> = self.hosts.keys().cloned().collect();
+                for h_name in host_names {
+                    if h_name == sender {
+                        continue;
+                    }
+                    let host = self.hosts.get_mut(&h_name).unwrap();
+                    if host.link_name == link_name {
+                        let replies = host.stack.process_frame(&delivered_frame);
+                        for reply in replies {
+                            next_batch.push((h_name.clone(), link_name.clone(), reply));
+                        }
                     }
                 }
-            }
 
-            // 3. Deliver to all Routers with an interface attached to this link
-            let router_names: Vec<String> = self.routers.keys().cloned().collect();
-            for r_name in router_names {
-                if r_name == sender {
-                    continue;
-                }
-                let router = self.routers.get_mut(&r_name).unwrap();
-                let outgoing = router.process_incoming_frame(&link_name, &delivered_frame);
-                for (egress_link, frame) in outgoing {
-                    next_batch.push((r_name.clone(), egress_link, frame));
+                // 3. Deliver to all Routers with an interface attached to this link
+                let router_names: Vec<String> = self.routers.keys().cloned().collect();
+                for r_name in router_names {
+                    if r_name == sender {
+                        continue;
+                    }
+                    let router = self.routers.get_mut(&r_name).unwrap();
+                    let outgoing = router.process_incoming_frame(&link_name, &delivered_frame);
+                    for (egress_link, frame) in outgoing {
+                        next_batch.push((r_name.clone(), egress_link, frame));
+                    }
                 }
             }
         }
@@ -1028,5 +1148,22 @@ impl VirtualLab {
                     .push((r_name.clone(), link_name, frame));
             }
         }
+    }
+
+    /// Advances simulated time in discrete ticks of `step_dt_ms` up to `max_sim_ms`,
+    /// running each step to quiescence until the network is idle.
+    pub fn run_until_idle_or_timeout(&mut self, max_sim_ms: u64, step_dt_ms: u64) -> u64 {
+        let start = self.current_time_ms;
+        let limit = start + max_sim_ms;
+        while self.current_time_ms < limit {
+            self.run_until_quiescent(50);
+            let queued = self.advance_time(step_dt_ms);
+            self.run_until_quiescent(50);
+            if queued == 0 && self.in_flight_frames.is_empty() {
+                // If quiescent and no new timer events triggered, jump ahead or complete
+                break;
+            }
+        }
+        self.current_time_ms - start
     }
 }

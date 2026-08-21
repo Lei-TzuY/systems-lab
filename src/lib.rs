@@ -130,6 +130,7 @@ pub mod sflow;
 pub mod shell;
 pub mod sip;
 pub mod snmp;
+pub mod socket;
 pub mod sr_policy;
 pub mod srv6;
 pub mod srv6_mup;
@@ -142,6 +143,7 @@ pub mod syslog;
 pub mod tacacs;
 pub mod tas;
 pub mod tcp;
+pub mod tcp_seq;
 pub mod tftp;
 pub mod ti_lfa;
 pub mod tls;
@@ -412,6 +414,7 @@ pub use sflow::{SFLOW_UDP_PORT, SflowCounterSample, SflowDatagram, SflowFlowSamp
 pub use shell::NetworkShell;
 pub use sip::{SIP_PORT, SipMessage, SipMethod, build_simple_sdp};
 pub use snmp::{SNMP_PORT, SnmpMessage, SnmpMib, SnmpPdu, SnmpValue, SnmpVarbind};
+pub use socket::{SocketError, SocketRuntime, TcpListenerHandle, TcpStreamHandle, UdpSocketHandle};
 pub use sr_policy::{
     BGP_EXT_COMMUNITY_COLOR, SR_POLICY_TUNNEL_TYPE, SrCandidatePath, SrPolicy, SrPolicyDatabase,
     SrProtocolOrigin, SrSegmentList,
@@ -429,7 +432,10 @@ pub use stun::{STUN_MAGIC_COOKIE, STUN_PORT, StunAttribute, StunPacket};
 pub use syslog::{SYSLOG_UDP_PORT, SyslogCollector, SyslogFacility, SyslogMessage, SyslogSeverity};
 pub use tacacs::{TACACS_PORT, TacacsHeader, TacacsPacket, TacacsServer};
 pub use tas::{GclEntry, TimeAwareShaper};
-pub use tcp::{TcpConnection, TcpFlags, TcpManager, TcpOption, TcpSegment, TcpState};
+pub use tcp::{
+    SocketAddrV4, TcpConnection, TcpFlags, TcpManager, TcpOption, TcpSegment, TcpState, TcpStats,
+};
+pub use tcp_seq::{seq_diff, seq_ge, seq_gt, seq_le, seq_lt};
 pub use tftp::{TFTP_BLOCK_SIZE, TftpFileServer, TftpPacket};
 pub use ti_lfa_reexport::*;
 pub use tls::{TLS_CONTENT_APPLICATION_DATA, TLS_CONTENT_HANDSHAKE, TlsRecord};

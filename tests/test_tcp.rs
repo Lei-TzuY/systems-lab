@@ -116,7 +116,35 @@ fn test_tcp_full_lifecycle_handshake_data_fin() {
     let fin_parsed = TcpSegment::parse(client_ip, server_ip, &fin_seg, true).unwrap();
     let fin_ack_raw = mgr
         .process_segment(client_ip, server_ip, &fin_parsed)
-        .expect("FIN-ACK");
+        .expect("ACK of the FIN");
+
+    // A passive close acknowledges the FIN and enters CLOSE_WAIT. The server's own FIN
+    // follows only when its application closes, so any data it still had queued is sent.
     let fin_ack = TcpSegment::parse(server_ip, client_ip, &fin_ack_raw, true).unwrap();
-    assert!(fin_ack.flags.fin && fin_ack.flags.ack);
+    assert!(fin_ack.flags.ack && !fin_ack.flags.fin);
+    assert_eq!(
+        fin_ack.ack_num, 1012,
+        "the FIN must consume one sequence number"
+    );
+    assert_eq!(
+        mgr.connections.get(&key).unwrap().state,
+        TcpState::CloseWait
+    );
+
+    // 5. Server application closes -> FIN-ACK, LAST_ACK.
+    let server_fin_raw = mgr
+        .close(
+            SocketAddrV4 {
+                ip: server_ip,
+                port,
+            },
+            SocketAddrV4 {
+                ip: client_ip,
+                port: client_port,
+            },
+        )
+        .expect("server FIN");
+    let server_fin = TcpSegment::parse(server_ip, client_ip, &server_fin_raw, true).unwrap();
+    assert!(server_fin.flags.fin && server_fin.flags.ack);
+    assert_eq!(mgr.connections.get(&key).unwrap().state, TcpState::LastAck);
 }

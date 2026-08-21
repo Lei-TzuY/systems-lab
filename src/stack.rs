@@ -14,7 +14,10 @@ use crate::ipv4::{IP_PROTO_ICMP, IP_PROTO_TCP, IP_PROTO_UDP, IpProtocol, Ipv4Add
 use crate::ipv6::{Ipv6Address, Ipv6Packet, NEXT_HEADER_ICMPV6};
 use crate::nat::NatTable;
 use crate::router::RoutingTable;
-use crate::tcp::{TcpManager, TcpSegment};
+use crate::socket::{
+    SocketError, SocketRuntime, TcpDiagnostics, TcpListenerHandle, TcpStreamHandle, UdpSocketHandle,
+};
+use crate::tcp::{SocketAddrV4, TcpManager, TcpSegment, TcpState, TcpStats};
 use crate::udp::{UdpDatagram, UdpSocketTable};
 use std::collections::HashMap;
 
@@ -36,7 +39,9 @@ pub struct NetStack {
     pub nat: Option<NatTable>,
     pub udp_sockets: UdpSocketTable,
     pub tcp_manager: TcpManager,
+    pub sockets: SocketRuntime,
     pub ip_id_counter: u16,
+    pub current_time_ms: u64,
     pub pending_arp_packets: HashMap<Ipv4Address, Vec<Vec<u8>>>,
     pub pending_ndp_packets: HashMap<Ipv6Address, Vec<Vec<u8>>>,
     pub dhcp_server: Option<crate::dhcp::DhcpServer>,
@@ -62,6 +67,8 @@ impl NetStack {
             routing_table.add_route(Ipv4Address::UNSPECIFIED, 0, Some(gw), "eth0");
         }
 
+        let sockets = SocketRuntime::new(config.ip);
+
         NetStack {
             config,
             arp_table: ArpTable::new(),
@@ -71,7 +78,9 @@ impl NetStack {
             nat: None,
             udp_sockets: UdpSocketTable::new(),
             tcp_manager: TcpManager::new(),
+            sockets,
             ip_id_counter: 1,
+            current_time_ms: 0,
             pending_arp_packets: HashMap::new(),
             pending_ndp_packets: HashMap::new(),
             dhcp_server: None,
@@ -190,14 +199,15 @@ impl NetStack {
         self.send_ip_packet(dst_ip, ip_bytes)
     }
 
-    pub fn tcp_connect(
+    /// Legacy raw-segment helper driving `TcpManager` directly, retained for the
+    /// pre-socket `lab tcp-demo` walkthrough. Applications should use `tcp_connect`.
+    pub fn tcp_connect_raw(
         &mut self,
         dst_ip: Ipv4Address,
         src_port: u16,
         dst_port: u16,
         isn: u32,
     ) -> Option<Vec<u8>> {
-        use crate::tcp::SocketAddrV4;
         let local = SocketAddrV4 {
             ip: self.config.ip,
             port: src_port,
@@ -219,14 +229,14 @@ impl NetStack {
         self.send_ip_packet(dst_ip, ip_bytes)
     }
 
-    pub fn tcp_send_data(
+    /// Legacy raw-segment helper driving `TcpManager` directly. Use `tcp_write` instead.
+    pub fn tcp_send_data_raw(
         &mut self,
         dst_ip: Ipv4Address,
         src_port: u16,
         dst_port: u16,
         data: &[u8],
     ) -> Option<Vec<u8>> {
-        use crate::tcp::SocketAddrV4;
         let local = SocketAddrV4 {
             ip: self.config.ip,
             port: src_port,
@@ -248,13 +258,13 @@ impl NetStack {
         self.send_ip_packet(dst_ip, ip_bytes)
     }
 
-    pub fn tcp_close(
+    /// Legacy raw-segment helper driving `TcpManager` directly. Use `tcp_close` instead.
+    pub fn tcp_close_raw(
         &mut self,
         dst_ip: Ipv4Address,
         src_port: u16,
         dst_port: u16,
     ) -> Option<Vec<u8>> {
-        use crate::tcp::SocketAddrV4;
         let local = SocketAddrV4 {
             ip: self.config.ip,
             port: src_port,
@@ -354,6 +364,197 @@ impl NetStack {
             rt.add_route(Ipv4Address::UNSPECIFIED, 0, Some(gw), "eth0");
         }
         self.routing_table = rt;
+    }
+
+    /// Advances internal simulation timers and generates scheduled/retransmission frames.
+    pub fn step_timers(&mut self, now_ms: u64) -> Vec<Vec<u8>> {
+        self.current_time_ms = now_ms;
+        let mut out_frames = Vec::new();
+
+        // 1. Socket runtime: newly segmented data, retransmissions, FINs, UDP datagrams.
+        for tx in self.sockets.step_timers(now_ms) {
+            let ip_id = self.next_ip_id();
+            let ip_bytes = Ipv4Packet::serialize(
+                tx.local.ip,
+                tx.remote.ip,
+                tx.protocol,
+                ip_id,
+                64,
+                &tx.payload,
+            );
+            if let Some(frame) = self.send_ip_packet(tx.remote.ip, ip_bytes) {
+                out_frames.push(frame);
+            }
+        }
+
+        // 2. Legacy TcpManager timer pump, kept for the pre-socket TCP demos.
+        let legacy_pkts = self.tcp_manager.step_timers(now_ms);
+        for (local, remote, tcp_bytes) in legacy_pkts {
+            let ip_id = self.next_ip_id();
+            let ip_bytes =
+                Ipv4Packet::serialize(local.ip, remote.ip, IP_PROTO_TCP, ip_id, 64, &tcp_bytes);
+            if let Some(frame) = self.send_ip_packet(remote.ip, ip_bytes) {
+                out_frames.push(frame);
+            }
+        }
+
+        out_frames
+    }
+
+    // ==========================================================================
+    // Application-facing socket API.
+    //
+    // Everything below encapsulates transport PDUs in IPv4 and Ethernet on the
+    // application's behalf, resolving the next hop through the routing and ARP
+    // tables. Applications call only these methods: they never build a segment,
+    // datagram, packet, or frame, and never touch `TcpConnection` directly.
+    // ==========================================================================
+
+    /// Drains everything the socket runtime wants to transmit at the current simulated
+    /// time and returns it as ready-to-send Ethernet frames. Idempotent: calling it with
+    /// no pending work returns an empty vector.
+    pub fn poll_transmit(&mut self) -> Vec<Vec<u8>> {
+        let now = self.current_time_ms;
+        self.step_timers(now)
+    }
+
+    /// Binds a UDP socket. A port of 0 allocates an ephemeral port.
+    pub fn udp_bind(&mut self, port: u16) -> Result<UdpSocketHandle, SocketError> {
+        self.sockets.udp_bind(SocketAddrV4 {
+            ip: self.config.ip,
+            port,
+        })
+    }
+
+    /// Queues a datagram for transmission to `remote`.
+    pub fn udp_send_to(
+        &mut self,
+        handle: UdpSocketHandle,
+        data: &[u8],
+        remote: SocketAddrV4,
+    ) -> Result<usize, SocketError> {
+        self.sockets.udp_send_to(handle, data, remote)
+    }
+
+    /// Pops the next received datagram and its sender.
+    pub fn udp_recv_from(
+        &mut self,
+        handle: UdpSocketHandle,
+    ) -> Result<(Vec<u8>, SocketAddrV4), SocketError> {
+        self.sockets.udp_recv_from(handle)
+    }
+
+    /// Closes a UDP socket and releases its port.
+    pub fn udp_close(&mut self, handle: UdpSocketHandle) -> Result<(), SocketError> {
+        self.sockets.udp_close(handle)
+    }
+
+    /// Starts listening for inbound connections on `port`.
+    pub fn tcp_listen(&mut self, port: u16) -> Result<TcpListenerHandle, SocketError> {
+        self.sockets.tcp_listen(SocketAddrV4 {
+            ip: self.config.ip,
+            port,
+        })
+    }
+
+    /// Pops the next fully or partially established connection from the accept queue.
+    /// Returns `WouldBlock` when no connection is pending.
+    pub fn tcp_accept(
+        &mut self,
+        listener: TcpListenerHandle,
+    ) -> Result<(TcpStreamHandle, SocketAddrV4), SocketError> {
+        self.sockets.tcp_accept(listener)
+    }
+
+    /// Stops listening and releases the port.
+    pub fn tcp_listener_close(&mut self, listener: TcpListenerHandle) -> Result<(), SocketError> {
+        self.sockets.tcp_listener_close(listener)
+    }
+
+    /// Opens an active connection from an ephemeral local port. The SYN is queued and
+    /// leaves on the next `poll_transmit`.
+    pub fn tcp_connect(&mut self, remote: SocketAddrV4) -> Result<TcpStreamHandle, SocketError> {
+        self.sockets.tcp_connect(remote)
+    }
+
+    /// Opens an active connection from a chosen local port with a chosen ISN. Used by
+    /// tests that need a reproducible sequence space, including wraparound scenarios.
+    pub fn tcp_connect_from(
+        &mut self,
+        local_port: u16,
+        remote: SocketAddrV4,
+        isn: u32,
+    ) -> Result<TcpStreamHandle, SocketError> {
+        let local = SocketAddrV4 {
+            ip: self.config.ip,
+            port: local_port,
+        };
+        self.sockets.tcp_connect_from(local, remote, isn)
+    }
+
+    /// Queues application bytes on a stream. Large writes are segmented to the negotiated
+    /// MSS by the transport, not by the caller.
+    pub fn tcp_write(
+        &mut self,
+        handle: TcpStreamHandle,
+        data: &[u8],
+    ) -> Result<usize, SocketError> {
+        self.sockets.tcp_write(handle, data)
+    }
+
+    /// Reads received stream bytes. `Ok(0)` means end of stream.
+    pub fn tcp_read(
+        &mut self,
+        handle: TcpStreamHandle,
+        buf: &mut [u8],
+    ) -> Result<usize, SocketError> {
+        self.sockets.tcp_read(handle, buf)
+    }
+
+    /// Bytes readable on a stream right now.
+    pub fn tcp_readable(&self, handle: TcpStreamHandle) -> usize {
+        self.sockets.tcp_readable(handle)
+    }
+
+    /// Unused send-buffer capacity on a stream, in bytes. `tcp_write` accepts at most this
+    /// much and reports a short write beyond it.
+    pub fn tcp_writable(&self, handle: TcpStreamHandle) -> usize {
+        self.sockets.tcp_writable(handle)
+    }
+
+    /// Half-closes the sending direction; the FIN follows any still-queued data.
+    pub fn tcp_shutdown(&mut self, handle: TcpStreamHandle) -> Result<(), SocketError> {
+        self.sockets.tcp_shutdown(handle)
+    }
+
+    /// Closes a stream gracefully.
+    pub fn tcp_close(&mut self, handle: TcpStreamHandle) -> Result<(), SocketError> {
+        self.sockets.tcp_close(handle)
+    }
+
+    /// Current finite-state-machine state of a stream.
+    pub fn tcp_state(&self, handle: TcpStreamHandle) -> Result<TcpState, SocketError> {
+        self.sockets.tcp_state(handle)
+    }
+
+    /// Byte, segment, and recovery counters for a stream.
+    pub fn tcp_stats(&self, handle: TcpStreamHandle) -> Result<TcpStats, SocketError> {
+        self.sockets.tcp_stats(handle)
+    }
+
+    /// Full transport diagnostics for a live stream.
+    pub fn tcp_diagnostics(&self, handle: TcpStreamHandle) -> Result<TcpDiagnostics, SocketError> {
+        self.sockets.tcp_diagnostics(handle)
+    }
+
+    /// Diagnostics for every live connection on this host.
+    pub fn tcp_connections(&self) -> Vec<TcpDiagnostics> {
+        self.sockets.all_tcp_diagnostics()
+    }
+
+    /// Sets the MSS advertised by connections opened after this call.
+    pub fn set_tcp_mss(&mut self, mss: u16) {
+        self.sockets.set_default_mss(mss);
     }
 
     /// Primary entry point: process incoming raw Ethernet frame bytes,
@@ -548,6 +749,18 @@ impl NetStack {
                                     }
                                 }
 
+                                // Dispatch into SocketRuntime queues
+                                let src_addr = SocketAddrV4 {
+                                    ip: ip_pkt.header.src_ip,
+                                    port: udp.src_port,
+                                };
+                                let dst_addr = SocketAddrV4 {
+                                    ip: ip_pkt.header.dst_ip,
+                                    port: udp.dst_port,
+                                };
+                                self.sockets.dispatch_udp(src_addr, dst_addr, udp.payload);
+
+                                // Legacy UdpSocketTable dispatch
                                 if let Some(resp_payload) = self.udp_sockets.dispatch(
                                     ip_pkt.header.src_ip,
                                     udp.src_port,
@@ -587,27 +800,107 @@ impl NetStack {
                                 ip_pkt.header.dst_ip,
                                 ip_pkt.payload,
                                 true,
-                            ) && let Some(resp_seg) = self.tcp_manager.process_segment(
-                                ip_pkt.header.src_ip,
-                                ip_pkt.header.dst_ip,
-                                &tcp,
                             ) {
-                                let ip_id = self.next_ip_id();
-                                let ip_out = Ipv4Packet::serialize(
-                                    self.config.ip,
+                                if self.sockets.has_endpoint(
+                                    ip_pkt.header.dst_ip,
+                                    tcp.dst_port,
                                     ip_pkt.header.src_ip,
-                                    IP_PROTO_TCP,
-                                    ip_id,
-                                    64,
-                                    &resp_seg,
-                                );
-                                let eth_out = EthernetFrame::serialize(
-                                    eth.src_mac,
-                                    self.config.mac,
-                                    ETHERTYPE_IPV4,
-                                    &ip_out,
-                                );
-                                out_frames.push(eth_out);
+                                    tcp.src_port,
+                                ) {
+                                    let resp_segs = self.sockets.dispatch_tcp_segment(
+                                        ip_pkt.header.src_ip,
+                                        ip_pkt.header.dst_ip,
+                                        &tcp,
+                                        self.current_time_ms,
+                                    );
+                                    for resp_seg in resp_segs {
+                                        let ip_id = self.next_ip_id();
+                                        let ip_out = Ipv4Packet::serialize(
+                                            self.config.ip,
+                                            ip_pkt.header.src_ip,
+                                            IP_PROTO_TCP,
+                                            ip_id,
+                                            64,
+                                            &resp_seg,
+                                        );
+                                        let eth_out = EthernetFrame::serialize(
+                                            eth.src_mac,
+                                            self.config.mac,
+                                            ETHERTYPE_IPV4,
+                                            &ip_out,
+                                        );
+                                        out_frames.push(eth_out);
+                                    }
+                                } else if self.tcp_manager.has_endpoint(
+                                    ip_pkt.header.dst_ip,
+                                    tcp.dst_port,
+                                    ip_pkt.header.src_ip,
+                                    tcp.src_port,
+                                ) {
+                                    if let Some(resp_seg) = self.tcp_manager.process_segment_at(
+                                        ip_pkt.header.src_ip,
+                                        ip_pkt.header.dst_ip,
+                                        &tcp,
+                                        self.current_time_ms,
+                                    ) {
+                                        let ip_id = self.next_ip_id();
+                                        let ip_out = Ipv4Packet::serialize(
+                                            self.config.ip,
+                                            ip_pkt.header.src_ip,
+                                            IP_PROTO_TCP,
+                                            ip_id,
+                                            64,
+                                            &resp_seg,
+                                        );
+                                        let eth_out = EthernetFrame::serialize(
+                                            eth.src_mac,
+                                            self.config.mac,
+                                            ETHERTYPE_IPV4,
+                                            &ip_out,
+                                        );
+                                        out_frames.push(eth_out);
+                                    }
+                                } else if !tcp.flags.rst {
+                                    let rst_seq = if tcp.flags.ack { tcp.ack_num } else { 0 };
+                                    let rst_ack = tcp.seq_num.wrapping_add(
+                                        if tcp.flags.syn || tcp.flags.fin {
+                                            1
+                                        } else {
+                                            tcp.payload.len() as u32
+                                        },
+                                    );
+                                    let mut flags = crate::tcp::TcpFlags::rst();
+                                    if !tcp.flags.ack {
+                                        flags.ack = true;
+                                    }
+                                    let rst_bytes = TcpSegment::serialize(
+                                        ip_pkt.header.dst_ip,
+                                        ip_pkt.header.src_ip,
+                                        tcp.dst_port,
+                                        tcp.src_port,
+                                        rst_seq,
+                                        rst_ack,
+                                        flags,
+                                        0,
+                                        &[],
+                                    );
+                                    let ip_id = self.next_ip_id();
+                                    let ip_out = Ipv4Packet::serialize(
+                                        self.config.ip,
+                                        ip_pkt.header.src_ip,
+                                        IP_PROTO_TCP,
+                                        ip_id,
+                                        64,
+                                        &rst_bytes,
+                                    );
+                                    let eth_out = EthernetFrame::serialize(
+                                        eth.src_mac,
+                                        self.config.mac,
+                                        ETHERTYPE_IPV4,
+                                        &ip_out,
+                                    );
+                                    out_frames.push(eth_out);
+                                }
                             }
                         }
 

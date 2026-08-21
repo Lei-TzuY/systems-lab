@@ -366,7 +366,7 @@ fn test_scenario_e_tcp_end_to_end_full_lifecycle() {
         .host_mut("client")
         .unwrap()
         .stack
-        .tcp_connect(host_b_ip, 50000, 80, 1000)
+        .tcp_connect_raw(host_b_ip, 50000, 80, 1000)
         .expect("SYN frame");
 
     lab.send_from_host("client", syn_frame);
@@ -396,7 +396,7 @@ fn test_scenario_e_tcp_end_to_end_full_lifecycle() {
         .host_mut("client")
         .unwrap()
         .stack
-        .tcp_send_data(host_b_ip, 50000, 80, b"GET /healthz HTTP/1.1\r\n\r\n")
+        .tcp_send_data_raw(host_b_ip, 50000, 80, b"GET /healthz HTTP/1.1\r\n\r\n")
         .expect("Data frame");
 
     lab.send_from_host("client", data_frame);
@@ -419,12 +419,14 @@ fn test_scenario_e_tcp_end_to_end_full_lifecycle() {
         .host_mut("client")
         .unwrap()
         .stack
-        .tcp_close(host_b_ip, 50000, 80)
+        .tcp_close_raw(host_b_ip, 50000, 80)
         .expect("FIN frame");
 
     lab.send_from_host("client", fin_frame);
     lab.run_until_quiescent(10);
 
+    // The server acknowledges the FIN and parks in CLOSE_WAIT: a passive close must let
+    // the receiving application finish sending before its own FIN goes out.
     let server_conn_final = lab
         .host("server")
         .unwrap()
@@ -432,7 +434,35 @@ fn test_scenario_e_tcp_end_to_end_full_lifecycle() {
         .tcp_manager
         .get_connection(server_sock, client_sock)
         .unwrap();
-    assert_eq!(server_conn_final.state, TcpState::Closed);
+    assert_eq!(server_conn_final.state, TcpState::CloseWait);
+
+    // 4. The server application closes in turn, completing the teardown.
+    let server_fin = lab
+        .host_mut("server")
+        .unwrap()
+        .stack
+        .tcp_close_raw(host_a_ip, 80, 50000)
+        .expect("server FIN frame");
+    lab.send_from_host("server", server_fin);
+    lab.run_until_quiescent(10);
+
+    let server_conn_closed = lab
+        .host("server")
+        .unwrap()
+        .stack
+        .tcp_manager
+        .get_connection(server_sock, client_sock)
+        .unwrap();
+    assert_eq!(server_conn_closed.state, TcpState::Closed);
+
+    let client_conn_final = lab
+        .host("client")
+        .unwrap()
+        .stack
+        .tcp_manager
+        .get_connection(client_sock, server_sock)
+        .unwrap();
+    assert_eq!(client_conn_final.state, TcpState::TimeWait);
 }
 
 #[test]
