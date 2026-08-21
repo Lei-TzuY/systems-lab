@@ -1,0 +1,401 @@
+//! Simple Network Management Protocol Version 2c (SNMPv2c - RFC 1901 / RFC 3416).
+//!
+//! Features ASN.1 / BER (Basic Encoding Rules) TLV parser & serializer,
+//! SNMP message framing, and an in-memory MIB-II management instrumentation store.
+
+use std::collections::HashMap;
+use std::fmt;
+
+pub const SNMP_PORT: u16 = 161;
+pub const SNMP_TRAP_PORT: u16 = 162;
+pub const SNMP_VERSION_2C: i32 = 1;
+
+// BER Tags
+pub const BER_TAG_INTEGER: u8 = 0x02;
+pub const BER_TAG_OCTET_STRING: u8 = 0x04;
+pub const BER_TAG_NULL: u8 = 0x05;
+pub const BER_TAG_OID: u8 = 0x06;
+pub const BER_TAG_SEQUENCE: u8 = 0x30;
+
+// SNMP PDU Tags
+pub const SNMP_PDU_GET_REQUEST: u8 = 0xA0;
+pub const SNMP_PDU_GET_NEXT_REQUEST: u8 = 0xA1;
+pub const SNMP_PDU_RESPONSE: u8 = 0xA2;
+pub const SNMP_PDU_SET_REQUEST: u8 = 0xA3;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SnmpValue {
+    Integer(i32),
+    OctetString(Vec<u8>),
+    Null,
+    Oid(String),
+}
+
+impl fmt::Display for SnmpValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SnmpValue::Integer(i) => write!(f, "INTEGER: {}", i),
+            SnmpValue::OctetString(s) => write!(f, "STRING: \"{}\"", String::from_utf8_lossy(s)),
+            SnmpValue::Null => write!(f, "NULL"),
+            SnmpValue::Oid(o) => write!(f, "OID: {}", o),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SnmpVarbind {
+    pub oid: String,
+    pub value: SnmpValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SnmpPdu {
+    pub pdu_type: u8,
+    pub request_id: i32,
+    pub error_status: i32,
+    pub error_index: i32,
+    pub varbinds: Vec<SnmpVarbind>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SnmpMessage {
+    pub version: i32,
+    pub community: String,
+    pub pdu: SnmpPdu,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SnmpError {
+    PacketTooShort,
+    InvalidBerEncoding,
+    UnsupportedTag(u8),
+}
+
+impl fmt::Display for SnmpError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SnmpError::PacketTooShort => write!(f, "SNMP packet too short"),
+            SnmpError::InvalidBerEncoding => write!(f, "Invalid ASN.1 BER TLV encoding"),
+            SnmpError::UnsupportedTag(t) => write!(f, "Unsupported BER tag 0x{:02x}", t),
+        }
+    }
+}
+
+impl std::error::Error for SnmpError {}
+
+// --- BER TLV Helpers ---
+
+pub fn encode_ber_length(len: usize) -> Vec<u8> {
+    if len < 128 {
+        vec![len as u8]
+    } else if len <= 255 {
+        vec![0x81, len as u8]
+    } else {
+        vec![0x82, (len >> 8) as u8, (len & 0xFF) as u8]
+    }
+}
+
+pub fn decode_ber_tlv(data: &[u8]) -> Result<(u8, &[u8], usize), SnmpError> {
+    if data.len() < 2 {
+        return Err(SnmpError::PacketTooShort);
+    }
+    let tag = data[0];
+    let len_byte = data[1];
+
+    let (len, header_len) = if (len_byte & 0x80) == 0 {
+        (len_byte as usize, 2)
+    } else {
+        let num_octets = (len_byte & 0x7F) as usize;
+        if data.len() < 2 + num_octets {
+            return Err(SnmpError::PacketTooShort);
+        }
+        let mut l = 0usize;
+        for i in 0..num_octets {
+            l = (l << 8) | (data[2 + i] as usize);
+        }
+        (l, 2 + num_octets)
+    };
+
+    if data.len() < header_len + len {
+        return Err(SnmpError::PacketTooShort);
+    }
+
+    Ok((tag, &data[header_len..header_len + len], header_len + len))
+}
+
+pub fn encode_ber_integer(val: i32) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.push(BER_TAG_INTEGER);
+    let bytes = val.to_be_bytes();
+    out.push(4);
+    out.extend_from_slice(&bytes);
+    out
+}
+
+pub fn encode_ber_string(s: &str) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.push(BER_TAG_OCTET_STRING);
+    out.extend(encode_ber_length(s.len()));
+    out.extend_from_slice(s.as_bytes());
+    out
+}
+
+pub fn encode_ber_null() -> Vec<u8> {
+    vec![BER_TAG_NULL, 0]
+}
+
+impl SnmpMessage {
+    pub fn parse(data: &[u8]) -> Result<Self, SnmpError> {
+        let (root_tag, root_body, _) = decode_ber_tlv(data)?;
+        if root_tag != BER_TAG_SEQUENCE {
+            return Err(SnmpError::InvalidBerEncoding);
+        }
+
+        // 1. Version
+        let (v_tag, v_body, v_len) = decode_ber_tlv(root_body)?;
+        if v_tag != BER_TAG_INTEGER || v_body.is_empty() {
+            return Err(SnmpError::InvalidBerEncoding);
+        }
+        let version = v_body.iter().fold(0i32, |acc, &b| (acc << 8) | (b as i32));
+
+        // 2. Community
+        let rem1 = &root_body[v_len..];
+        let (c_tag, c_body, c_len) = decode_ber_tlv(rem1)?;
+        if c_tag != BER_TAG_OCTET_STRING {
+            return Err(SnmpError::InvalidBerEncoding);
+        }
+        let community = String::from_utf8_lossy(c_body).to_string();
+
+        // 3. PDU
+        let rem2 = &rem1[c_len..];
+        let (pdu_tag, pdu_body, _) = decode_ber_tlv(rem2)?;
+
+        let (req_tag, req_body, req_len) = decode_ber_tlv(pdu_body)?;
+        if req_tag != BER_TAG_INTEGER {
+            return Err(SnmpError::InvalidBerEncoding);
+        }
+        let request_id = req_body.iter().fold(0i32, |acc, &b| (acc << 8) | (b as i32));
+
+        let rem_pdu1 = &pdu_body[req_len..];
+        let (err_tag, err_body, err_len) = decode_ber_tlv(rem_pdu1)?;
+        let error_status = if err_tag == BER_TAG_INTEGER {
+            err_body.iter().fold(0i32, |acc, &b| (acc << 8) | (b as i32))
+        } else {
+            0
+        };
+
+        let rem_pdu2 = &rem_pdu1[err_len..];
+        let (idx_tag, idx_body, idx_len) = decode_ber_tlv(rem_pdu2)?;
+        let error_index = if idx_tag == BER_TAG_INTEGER {
+            idx_body.iter().fold(0i32, |acc, &b| (acc << 8) | (b as i32))
+        } else {
+            0
+        };
+
+        let rem_pdu3 = &rem_pdu2[idx_len..];
+        let mut varbinds = Vec::new();
+
+        if let Ok((vb_list_tag, mut vb_list_body, _)) = decode_ber_tlv(rem_pdu3) {
+            if vb_list_tag == BER_TAG_SEQUENCE {
+                while !vb_list_body.is_empty() {
+                    if let Ok((vb_tag, vb_body, vb_len)) = decode_ber_tlv(vb_list_body) {
+                        if vb_tag == BER_TAG_SEQUENCE {
+                            if let Ok((oid_tag, oid_body, o_len)) = decode_ber_tlv(vb_body) {
+                                if oid_tag == BER_TAG_OID || oid_tag == BER_TAG_OCTET_STRING {
+                                    let oid_str = String::from_utf8_lossy(oid_body).to_string();
+                                    let val_rem = &vb_body[o_len..];
+                                    let value = if let Ok((v_t, v_b, _)) = decode_ber_tlv(val_rem) {
+                                        match v_t {
+                                            BER_TAG_INTEGER => SnmpValue::Integer(v_b.iter().fold(0i32, |acc, &b| (acc << 8) | (b as i32))),
+                                            BER_TAG_OCTET_STRING => SnmpValue::OctetString(v_b.to_vec()),
+                                            BER_TAG_NULL => SnmpValue::Null,
+                                            _ => SnmpValue::Null,
+                                        }
+                                    } else {
+                                        SnmpValue::Null
+                                    };
+                                    varbinds.push(SnmpVarbind { oid: oid_str, value });
+                                }
+                            }
+                        }
+                        vb_list_body = &vb_list_body[vb_len..];
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+
+        Ok(SnmpMessage {
+            version,
+            community,
+            pdu: SnmpPdu {
+                pdu_type: pdu_tag,
+                request_id,
+                error_status,
+                error_index,
+                varbinds,
+            },
+        })
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        // Encode Varbinds
+        let mut vb_list_bytes = Vec::new();
+        for vb in &self.pdu.varbinds {
+            let mut vb_bytes = Vec::new();
+            // OID encoded as string for simplicity
+            vb_bytes.push(BER_TAG_OCTET_STRING);
+            vb_bytes.extend(encode_ber_length(vb.oid.len()));
+            vb_bytes.extend_from_slice(vb.oid.as_bytes());
+
+            match &vb.value {
+                SnmpValue::Integer(i) => vb_bytes.extend(encode_ber_integer(*i)),
+                SnmpValue::OctetString(s) => {
+                    vb_bytes.push(BER_TAG_OCTET_STRING);
+                    vb_bytes.extend(encode_ber_length(s.len()));
+                    vb_bytes.extend_from_slice(s);
+                }
+                SnmpValue::Null => vb_bytes.extend(encode_ber_null()),
+                SnmpValue::Oid(o) => {
+                    vb_bytes.push(BER_TAG_OCTET_STRING);
+                    vb_bytes.extend(encode_ber_length(o.len()));
+                    vb_bytes.extend_from_slice(o.as_bytes());
+                }
+            }
+
+            let mut seq_vb = Vec::new();
+            seq_vb.push(BER_TAG_SEQUENCE);
+            seq_vb.extend(encode_ber_length(vb_bytes.len()));
+            seq_vb.extend(vb_bytes);
+            vb_list_bytes.extend(seq_vb);
+        }
+
+        let mut vb_seq = Vec::new();
+        vb_seq.push(BER_TAG_SEQUENCE);
+        vb_seq.extend(encode_ber_length(vb_list_bytes.len()));
+        vb_seq.extend(vb_list_bytes);
+
+        // Encode PDU
+        let mut pdu_bytes = Vec::new();
+        pdu_bytes.extend(encode_ber_integer(self.pdu.request_id));
+        pdu_bytes.extend(encode_ber_integer(self.pdu.error_status));
+        pdu_bytes.extend(encode_ber_integer(self.pdu.error_index));
+        pdu_bytes.extend(vb_seq);
+
+        let mut pdu_wrapper = Vec::new();
+        pdu_wrapper.push(self.pdu.pdu_type);
+        pdu_wrapper.extend(encode_ber_length(pdu_bytes.len()));
+        pdu_wrapper.extend(pdu_bytes);
+
+        // Encode Message
+        let mut msg_body = Vec::new();
+        msg_body.extend(encode_ber_integer(self.version));
+        msg_body.extend(encode_ber_string(&self.community));
+        msg_body.extend(pdu_wrapper);
+
+        let mut msg = Vec::new();
+        msg.push(BER_TAG_SEQUENCE);
+        msg.extend(encode_ber_length(msg_body.len()));
+        msg.extend(msg_body);
+
+        msg
+    }
+
+    pub fn build_get_request(community: &str, request_id: i32, oids: &[&str]) -> Self {
+        let varbinds = oids
+            .iter()
+            .map(|&o| SnmpVarbind {
+                oid: o.to_string(),
+                value: SnmpValue::Null,
+            })
+            .collect();
+
+        SnmpMessage {
+            version: SNMP_VERSION_2C,
+            community: community.to_string(),
+            pdu: SnmpPdu {
+                pdu_type: SNMP_PDU_GET_REQUEST,
+                request_id,
+                error_status: 0,
+                error_index: 0,
+                varbinds,
+            },
+        }
+    }
+
+    pub fn build_response(req: &SnmpMessage, results: Vec<SnmpVarbind>) -> Self {
+        SnmpMessage {
+            version: req.version,
+            community: req.community.clone(),
+            pdu: SnmpPdu {
+                pdu_type: SNMP_PDU_RESPONSE,
+                request_id: req.pdu.request_id,
+                error_status: 0,
+                error_index: 0,
+                varbinds: results,
+            },
+        }
+    }
+}
+
+/// In-Memory Management Information Base (MIB-II) Store
+pub struct SnmpMib {
+    objects: HashMap<String, SnmpValue>,
+}
+
+impl Default for SnmpMib {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SnmpMib {
+    pub fn new() -> Self {
+        let mut mib = SnmpMib {
+            objects: HashMap::new(),
+        };
+        mib.set("1.3.6.1.2.1.1.1.0", SnmpValue::OctetString(b"Toy TCP/IP Stack on Safe Rust".to_vec()));
+        mib.set("1.3.6.1.2.1.1.3.0", SnmpValue::Integer(360000)); // sysUpTime (1 hr)
+        mib.set("1.3.6.1.2.1.1.5.0", SnmpValue::OctetString(b"toy-router.local".to_vec()));
+        mib.set("1.3.6.1.2.1.2.2.1.10.1", SnmpValue::Integer(1048576)); // ifInOctets (1MB)
+        mib
+    }
+
+    pub fn get(&self, oid: &str) -> Option<&SnmpValue> {
+        self.objects.get(oid)
+    }
+
+    pub fn set(&mut self, oid: &str, val: SnmpValue) {
+        self.objects.insert(oid.to_string(), val);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_snmp_get_request_and_response_roundtrip() {
+        let req = SnmpMessage::build_get_request("public", 42, &["1.3.6.1.2.1.1.1.0"]);
+        let raw = req.serialize();
+
+        let parsed = SnmpMessage::parse(&raw).unwrap();
+        assert_eq!(parsed.version, SNMP_VERSION_2C);
+        assert_eq!(parsed.community, "public");
+        assert_eq!(parsed.pdu.request_id, 42);
+        assert_eq!(parsed.pdu.varbinds.len(), 1);
+        assert_eq!(parsed.pdu.varbinds[0].oid, "1.3.6.1.2.1.1.1.0");
+    }
+
+    #[test]
+    fn test_snmp_mib_store() {
+        let mib = SnmpMib::new();
+        let sys_descr = mib.get("1.3.6.1.2.1.1.1.0").unwrap();
+        if let SnmpValue::OctetString(s) = sys_descr {
+            assert!(String::from_utf8_lossy(s).contains("Toy TCP/IP Stack"));
+        } else {
+            panic!("Expected OctetString");
+        }
+    }
+}

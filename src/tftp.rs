@@ -1,0 +1,233 @@
+//! Application Layer: Trivial File Transfer Protocol (TFTP - RFC 1350).
+//!
+//! Lock-step stop-and-wait reliable file transfer over UDP port 69 with 512-byte blocks.
+
+use std::collections::HashMap;
+use std::fmt;
+
+pub const TFTP_PORT: u16 = 69;
+pub const TFTP_BLOCK_SIZE: usize = 512;
+
+// TFTP Opcodes
+pub const TFTP_OPCODE_RRQ: u16 = 1;
+pub const TFTP_OPCODE_WRQ: u16 = 2;
+pub const TFTP_OPCODE_DATA: u16 = 3;
+pub const TFTP_OPCODE_ACK: u16 = 4;
+pub const TFTP_OPCODE_ERROR: u16 = 5;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TftpPacket {
+    Rrq { filename: String, mode: String },
+    Wrq { filename: String, mode: String },
+    Data { block_num: u16, data: Vec<u8> },
+    Ack { block_num: u16 },
+    Error { error_code: u16, message: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TftpError {
+    PacketTooShort(usize),
+    InvalidOpcode(u16),
+    MissingNullTerminator,
+}
+
+impl fmt::Display for TftpError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TftpError::PacketTooShort(len) => write!(f, "TFTP packet too short ({} bytes, min 4)", len),
+            TftpError::InvalidOpcode(op) => write!(f, "Invalid TFTP opcode: {}", op),
+            TftpError::MissingNullTerminator => write!(f, "TFTP string missing null terminator"),
+        }
+    }
+}
+
+impl std::error::Error for TftpError {}
+
+impl TftpPacket {
+    pub fn parse(data: &[u8]) -> Result<Self, TftpError> {
+        if data.len() < 4 {
+            return Err(TftpError::PacketTooShort(data.len()));
+        }
+
+        let opcode = u16::from_be_bytes([data[0], data[1]]);
+
+        match opcode {
+            TFTP_OPCODE_RRQ | TFTP_OPCODE_WRQ => {
+                let rest = &data[2..];
+                let null1 = rest.iter().position(|&b| b == 0).ok_or(TftpError::MissingNullTerminator)?;
+                let filename = String::from_utf8_lossy(&rest[..null1]).to_string();
+
+                let mode_rest = &rest[null1 + 1..];
+                let null2 = mode_rest.iter().position(|&b| b == 0).ok_or(TftpError::MissingNullTerminator)?;
+                let mode = String::from_utf8_lossy(&mode_rest[..null2]).to_string();
+
+                if opcode == TFTP_OPCODE_RRQ {
+                    Ok(TftpPacket::Rrq { filename, mode })
+                } else {
+                    Ok(TftpPacket::Wrq { filename, mode })
+                }
+            }
+            TFTP_OPCODE_DATA => {
+                let block_num = u16::from_be_bytes([data[2], data[3]]);
+                let chunk = data[4..].to_vec();
+                Ok(TftpPacket::Data {
+                    block_num,
+                    data: chunk,
+                })
+            }
+            TFTP_OPCODE_ACK => {
+                let block_num = u16::from_be_bytes([data[2], data[3]]);
+                Ok(TftpPacket::Ack { block_num })
+            }
+            TFTP_OPCODE_ERROR => {
+                let error_code = u16::from_be_bytes([data[2], data[3]]);
+                let msg_bytes = &data[4..];
+                let msg_len = msg_bytes.iter().position(|&b| b == 0).unwrap_or(msg_bytes.len());
+                let message = String::from_utf8_lossy(&msg_bytes[..msg_len]).to_string();
+                Ok(TftpPacket::Error { error_code, message })
+            }
+            _ => Err(TftpError::InvalidOpcode(opcode)),
+        }
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut buf = Vec::new();
+
+        match self {
+            TftpPacket::Rrq { filename, mode } => {
+                buf.extend_from_slice(&TFTP_OPCODE_RRQ.to_be_bytes());
+                buf.extend_from_slice(filename.as_bytes());
+                buf.push(0);
+                buf.extend_from_slice(mode.as_bytes());
+                buf.push(0);
+            }
+            TftpPacket::Wrq { filename, mode } => {
+                buf.extend_from_slice(&TFTP_OPCODE_WRQ.to_be_bytes());
+                buf.extend_from_slice(filename.as_bytes());
+                buf.push(0);
+                buf.extend_from_slice(mode.as_bytes());
+                buf.push(0);
+            }
+            TftpPacket::Data { block_num, data } => {
+                buf.extend_from_slice(&TFTP_OPCODE_DATA.to_be_bytes());
+                buf.extend_from_slice(&block_num.to_be_bytes());
+                buf.extend_from_slice(data);
+            }
+            TftpPacket::Ack { block_num } => {
+                buf.extend_from_slice(&TFTP_OPCODE_ACK.to_be_bytes());
+                buf.extend_from_slice(&block_num.to_be_bytes());
+            }
+            TftpPacket::Error { error_code, message } => {
+                buf.extend_from_slice(&TFTP_OPCODE_ERROR.to_be_bytes());
+                buf.extend_from_slice(&error_code.to_be_bytes());
+                buf.extend_from_slice(message.as_bytes());
+                buf.push(0);
+            }
+        }
+
+        buf
+    }
+}
+
+/// Virtual in-memory TFTP File Server
+pub struct TftpFileServer {
+    files: HashMap<String, Vec<u8>>,
+}
+
+impl Default for TftpFileServer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TftpFileServer {
+    pub fn new() -> Self {
+        let mut server = TftpFileServer {
+            files: HashMap::new(),
+        };
+        server.add_file("pxeboot.bin", b"VIRTUAL PXE BOOTLOADER PAYLOAD 1234567890".to_vec());
+        server.add_file("firmware.img", vec![0xaa; 1000]); // 2 blocks (512B + 488B)
+        server
+    }
+
+    pub fn add_file(&mut self, filename: &str, content: Vec<u8>) {
+        self.files.insert(filename.to_string(), content);
+    }
+
+    pub fn handle_read_request(&self, filename: &str, block_num: u16) -> TftpPacket {
+        if let Some(content) = self.files.get(filename) {
+            let offset = ((block_num.saturating_sub(1)) as usize) * TFTP_BLOCK_SIZE;
+            if offset >= content.len() && !content.is_empty() {
+                return TftpPacket::Data {
+                    block_num,
+                    data: Vec::new(), // Empty data block marks end of transfer
+                };
+            }
+
+            let end = (offset + TFTP_BLOCK_SIZE).min(content.len());
+            let chunk = content[offset..end].to_vec();
+
+            TftpPacket::Data {
+                block_num,
+                data: chunk,
+            }
+        } else {
+            TftpPacket::Error {
+                error_code: 1, // File not found
+                message: format!("File '{}' not found", filename),
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tftp_rrq_ack_and_data_roundtrips() {
+        // 1. RRQ
+        let rrq = TftpPacket::Rrq {
+            filename: "kernel.bin".to_string(),
+            mode: "octet".to_string(),
+        };
+        let parsed_rrq = TftpPacket::parse(&rrq.serialize()).unwrap();
+        assert_eq!(parsed_rrq, rrq);
+
+        // 2. DATA
+        let data = TftpPacket::Data {
+            block_num: 1,
+            data: vec![0x11, 0x22, 0x33, 0x44],
+        };
+        let parsed_data = TftpPacket::parse(&data.serialize()).unwrap();
+        assert_eq!(parsed_data, data);
+
+        // 3. ACK
+        let ack = TftpPacket::Ack { block_num: 1 };
+        let parsed_ack = TftpPacket::parse(&ack.serialize()).unwrap();
+        assert_eq!(parsed_ack, ack);
+    }
+
+    #[test]
+    fn test_tftp_virtual_server_multi_block() {
+        let server = TftpFileServer::new();
+
+        // Request block 1 of 1000-byte firmware.img
+        let blk1 = server.handle_read_request("firmware.img", 1);
+        if let TftpPacket::Data { block_num, data } = blk1 {
+            assert_eq!(block_num, 1);
+            assert_eq!(data.len(), TFTP_BLOCK_SIZE);
+        } else {
+            panic!("Expected Data packet");
+        }
+
+        // Request block 2 (remaining 488 bytes)
+        let blk2 = server.handle_read_request("firmware.img", 2);
+        if let TftpPacket::Data { block_num, data } = blk2 {
+            assert_eq!(block_num, 2);
+            assert_eq!(data.len(), 488); // < 512 indicates final block
+        } else {
+            panic!("Expected Data packet");
+        }
+    }
+}
