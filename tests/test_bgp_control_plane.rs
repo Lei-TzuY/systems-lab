@@ -1094,3 +1094,107 @@ fn test_a_peer_exceeding_its_prefix_limit_is_cut_off() {
     assert_eq!(peer.victim_bgp().adj_rib_in.path_count(), 0);
     assert!(peer.victim_bgp().loc_rib.is_empty());
 }
+
+#[test]
+fn test_an_identical_re_advertisement_does_not_rerun_the_decision_process() {
+    use common::bgp_lab::RawBgpPeer;
+
+    let mut peer = RawBgpPeer::connect(AS1, AS2, ip(9, 9, 9, 9));
+    peer.establish();
+
+    let announce = || {
+        BgpPdu::Update(BgpUpdateMessage::announce(
+            BgpPathAttributes::new(
+                BgpOrigin::Igp,
+                AsPath::sequence(vec![AS2]),
+                ip(10, 50, 0, 2),
+            ),
+            vec![prefix(10, 99, 0, 0, 24)],
+        ))
+        .serialize()
+    };
+
+    peer.write(&announce());
+    let after_first = peer.victim_bgp().decision_runs;
+    assert_eq!(peer.victim_bgp().adj_rib_in.path_count(), 1);
+
+    // Send the very same route again, at a different simulated time. A peer doing this
+    // is ordinary - a refresh, a duplicate, a neighbour that repeats itself - and it
+    // must cost nothing. The arrival timestamp is a diagnostic, so if it were allowed
+    // into the comparison every duplicate would look like a change and the whole
+    // decision process would run again for a table that did not move.
+    peer.run_until(4_000, |_| false);
+    peer.write(&announce());
+
+    assert_eq!(
+        peer.victim_bgp().decision_runs,
+        after_first,
+        "an identical re-advertisement reran the decision process"
+    );
+    assert_eq!(peer.victim_bgp().adj_rib_in.path_count(), 1);
+    assert_eq!(peer.state(), BgpState::Established);
+
+    // A real change still gets through: same prefix, different next hop.
+    peer.write(
+        &BgpPdu::Update(BgpUpdateMessage::announce(
+            BgpPathAttributes::new(
+                BgpOrigin::Igp,
+                AsPath::sequence(vec![AS2]),
+                ip(10, 50, 0, 3),
+            ),
+            vec![prefix(10, 99, 0, 0, 24)],
+        ))
+        .serialize(),
+    );
+    assert!(
+        peer.victim_bgp().decision_runs > after_first,
+        "a changed next hop was ignored"
+    );
+}
+
+#[test]
+fn test_a_flapping_origin_reconverges_every_time_and_settles_afterwards() {
+    // Repeated withdrawal and re-announcement is where oscillation and stale state
+    // show up: a FIB entry that never comes back, one that never leaves, or a network
+    // that keeps chattering once the flapping stops.
+    let mut lab = build_linear_lab();
+    converge_linear(&mut lab);
+
+    for round in 0..5 {
+        lab.router_mut("r3")
+            .unwrap()
+            .bgp_mut()
+            .unwrap()
+            .withdraw_originated(P_C);
+        assert!(
+            run_until(&mut lab, 60_000, |l| !has_bgp_fib_route(l, "r1", P_C)),
+            "round {}: the withdrawal never reached R1's FIB",
+            round
+        );
+
+        lab.router_mut("r3").unwrap().originate_bgp_prefix(P_C);
+        assert!(
+            run_until(&mut lab, 60_000, |l| has_bgp_fib_route(l, "r1", P_C)),
+            "round {}: the re-announcement never reached R1's FIB",
+            round
+        );
+    }
+
+    // The data plane still works after all that.
+    assert!(ping(&mut lab, "host_a", ip(10, 3, 0, 2), 0x3003, 1, 30_000));
+
+    // And the network goes quiet again rather than oscillating.
+    for _ in 0..6 {
+        lab.advance_time(1_000);
+        lab.run_pumped(30);
+    }
+    let settled_updates = total_updates_sent(&lab);
+    let settled_decisions = total_decision_runs(&lab);
+    for _ in 0..20 {
+        lab.advance_time(1_000);
+        lab.run_pumped(30);
+    }
+    assert_eq!(total_updates_sent(&lab), settled_updates);
+    assert_eq!(total_decision_runs(&lab), settled_decisions);
+    assert!(has_bgp_fib_route(&lab, "r1", P_C));
+}

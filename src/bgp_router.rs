@@ -1230,8 +1230,11 @@ impl BgpRouter {
                 received_at_ms: now_ms,
             };
 
+            // Only a genuine change to the route reruns the decision process. An
+            // identical re-advertisement still refreshes the stored path, so the
+            // Adj-RIB-In timestamp tracks when this peer last spoke about it.
             let previous = self.adj_rib_in.insert(addr, path.clone());
-            if previous.as_ref() != Some(&path) {
+            if previous.is_none_or(|prev| !prev.same_route_as(&path)) {
                 self.dirty = true;
             }
 

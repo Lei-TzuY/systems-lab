@@ -88,6 +88,46 @@ impl BgpPath {
     pub fn as_path_len(&self) -> usize {
         self.as_path.length()
     }
+
+    /// True when two paths describe the same route: everything the decision process
+    /// and the forwarding table can actually see.
+    ///
+    /// `received_at_ms` is deliberately left out. It is a diagnostic, and a peer that
+    /// re-sends a route it has already sent - a refresh, a duplicate, a chatty
+    /// neighbour - would otherwise look like a change every single time, marking the
+    /// RIB dirty and rerunning the whole decision process for nothing.
+    ///
+    /// Every other field is listed by name rather than skipped with `..`, so adding an
+    /// attribute to `BgpPath` fails to compile here until someone decides whether it
+    /// belongs in this comparison.
+    pub fn same_route_as(&self, other: &BgpPath) -> bool {
+        let BgpPath {
+            prefix,
+            source,
+            peer_addr,
+            peer_as,
+            peer_router_id,
+            origin,
+            as_path,
+            next_hop,
+            med,
+            local_pref,
+            atomic_aggregate,
+            received_at_ms: _,
+        } = self;
+
+        *prefix == other.prefix
+            && *source == other.source
+            && *peer_addr == other.peer_addr
+            && *peer_as == other.peer_as
+            && *peer_router_id == other.peer_router_id
+            && *origin == other.origin
+            && *as_path == other.as_path
+            && *next_hop == other.next_hop
+            && *med == other.med
+            && *local_pref == other.local_pref
+            && *atomic_aggregate == other.atomic_aggregate
+    }
 }
 
 /// Orders two candidate paths for the same prefix. `Ordering::Less` means `a` wins.
