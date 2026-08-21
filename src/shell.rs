@@ -75,6 +75,7 @@ use crate::ipv6::{Ipv6Address, Ipv6Packet, NEXT_HEADER_ICMPV6, NEXT_HEADER_UDP};
 use crate::isis::{ETHERTYPE_ISIS, IsisHelloPacket};
 use crate::l2tp::{IP_PROTO_L2TPV3, L2tpv3Packet};
 use crate::lab::{LabRouter, VirtualLab};
+use crate::lab::{build_bgp_demo_fabric, converge_bgp};
 use crate::lacp::{
     ETHERTYPE_SLOW_PROTOCOLS, LACP_STATE_ACTIVITY, LACP_STATE_AGGREGATION, LACP_STATE_COLLECTING,
     LACP_STATE_DISTRIBUTING, LACP_STATE_SYNCHRONIZATION, LacpPacket, LacpPortInfo,
@@ -211,6 +212,10 @@ pub struct NetworkShell {
     lfib: LfibTable,
     _ldp_session: LdpSession,
     bgp_rib: BgpRib,
+    /// Live three-AS BGP fabric backing the `bgp` diagnostics. Built and converged
+    /// on first use, so the shell reports real session and RIB state rather than a
+    /// hard-coded sample.
+    bgp_fabric: Option<VirtualLab>,
     lldp_table: LldpNeighborTable,
     cdp_table: CdpNeighborTable,
     ospf_lsdb: OspfLsdb,
@@ -1218,6 +1223,7 @@ impl NetworkShell {
             lfib,
             _ldp_session: ldp_session,
             bgp_rib,
+            bgp_fabric: None,
             lldp_table,
             cdp_table,
             ospf_lsdb,
@@ -1817,7 +1823,9 @@ impl NetworkShell {
         println!(
             "  mpls [push <label> <msg> | lfib]    - Multi-Protocol Label Switching (RFC 3031)"
         );
-        println!("  bgp [status | rib | open]           - Border Gateway Protocol 4 (RFC 4271)");
+        println!(
+            "  bgp [summary|peers|routes|rib|route] - Border Gateway Protocol 4 control plane (RFC 4271)"
+        );
         println!(
             "  lldp [neighbors | announce]         - Link Layer Discovery Protocol (IEEE 802.1AB)"
         );
@@ -7046,17 +7054,166 @@ impl NetworkShell {
         }
     }
 
+    /// Builds and converges the BGP fabric on first use.
+    ///
+    /// Everything the `bgp` subcommands print afterwards is read out of that running
+    /// control plane: the sessions really completed a TCP handshake on port 179 and
+    /// exchanged OPEN, KEEPALIVE, and UPDATE messages over this stack.
+    fn ensure_bgp_fabric(&mut self) -> u64 {
+        if self.bgp_fabric.is_none() {
+            let mut lab = build_bgp_demo_fabric();
+            let converged = converge_bgp(&mut lab, 60_000);
+            if !converged {
+                println!("(warning: the BGP fabric did not fully converge)");
+            }
+            // Let the fabric idle for a few simulated seconds so the keepalive timers
+            // fire at least once and the reported uptimes are meaningful.
+            for _ in 0..8 {
+                lab.advance_time(1_000);
+                lab.run_pumped(20);
+            }
+            self.bgp_fabric = Some(lab);
+        }
+        self.bgp_fabric
+            .as_ref()
+            .map(|l| l.current_time_ms)
+            .unwrap_or(0)
+    }
+
+    /// Router names in the demo fabric, in a stable order.
+    fn bgp_routers(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .bgp_fabric
+            .as_ref()
+            .map(|l| l.routers.keys().cloned().collect())
+            .unwrap_or_default();
+        names.sort();
+        names
+    }
+
     fn cmd_bgp(&mut self, args: &[&str]) {
-        if args.is_empty() || args[0] == "status" {
-            println!("Border Gateway Protocol 4 (BGP-4) Status (Port 179):");
-            println!("  Local AS : 65001");
-            println!("  BGP ID   : {}", self.stack.config.ip);
-            println!(
-                "  Neighbor : {} (Remote AS: 65002, State: ESTABLISHED)",
-                self.remote_host_ip
-            );
-        } else if args[0] == "rib" {
-            println!("BGP Routing Information Base (RIB):");
+        let sub = args.first().copied().unwrap_or("summary");
+
+        match sub {
+            "help" => {
+                println!("bgp <subcommand>  - BGP-4 control plane running on TCP port 179");
+                println!("  summary | status  - one line per neighbor per router");
+                println!("  peers | neighbors - full per-neighbor state, timers, counters");
+                println!("  routes | loc-rib  - the best path per prefix (Loc-RIB)");
+                println!("  rib | adj-rib-in  - every path received, best paths marked");
+                println!("  advertised        - the Adj-RIB-Out, per neighbor");
+                println!("  route | fib       - each router's real IPv4 forwarding table");
+                println!("  events | log      - the control-plane event log");
+                println!("  open              - show the framing of a BGP OPEN message");
+                println!("  local-rib         - the static sample RIB kept for reference");
+                return;
+            }
+            "open" => {
+                let open = BgpMessage::build_open(65001, 180, self.stack.config.ip);
+                let raw = open.serialize();
+                println!(
+                    "BGP OPEN Message Framed ({} bytes): Marker=0xFF*16, MyAS=65001, HoldTime=180",
+                    raw.len()
+                );
+                return;
+            }
+            _ => {}
+        }
+
+        let now = self.ensure_bgp_fabric();
+        let names = self.bgp_routers();
+        let Some(lab) = self.bgp_fabric.as_ref() else {
+            return;
+        };
+
+        match sub {
+            "summary" | "status" => {
+                println!(
+                    "BGP-4 fabric (RFC 4271) - AS65001 <-> AS65002 <-> AS65003, simulated time {}ms",
+                    now
+                );
+                for name in &names {
+                    if let Some(bgp) = lab.routers[name].bgp() {
+                        println!("\n== {} ==", name);
+                        print!("{}", bgp.format_summary(now));
+                    }
+                }
+            }
+            "peers" | "neighbors" | "neighbor" => {
+                for name in &names {
+                    if let Some(bgp) = lab.routers[name].bgp() {
+                        println!("== {} ==", name);
+                        print!("{}", bgp.format_peers(now));
+                    }
+                }
+            }
+            "routes" | "loc-rib" => {
+                for name in &names {
+                    if let Some(bgp) = lab.routers[name].bgp() {
+                        println!("== {} Loc-RIB ==", name);
+                        print!("{}", bgp.format_routes());
+                    }
+                }
+            }
+            "rib" | "adj-rib-in" => {
+                for name in &names {
+                    if let Some(bgp) = lab.routers[name].bgp() {
+                        println!("== {} Adj-RIB-In ==", name);
+                        print!("{}", bgp.format_rib());
+                    }
+                }
+            }
+            "advertised" | "adj-rib-out" => {
+                for name in &names {
+                    if let Some(bgp) = lab.routers[name].bgp() {
+                        println!("== {} Adj-RIB-Out ==", name);
+                        for peer in bgp.peers() {
+                            let prefixes = bgp.adj_rib_out.prefixes(peer.addr);
+                            if prefixes.is_empty() {
+                                println!("  to {}: nothing advertised", peer.addr);
+                                continue;
+                            }
+                            for prefix in prefixes {
+                                if let Some(r) = bgp.adj_rib_out.get(peer.addr, &prefix) {
+                                    println!(
+                                        "  to {}: {} as-path [{}] next-hop {}",
+                                        peer.addr, prefix, r.as_path, r.next_hop
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            "route" | "fib" => {
+                for name in &names {
+                    println!("== {} IPv4 forwarding table ==", name);
+                    for r in lab.routers[name].routing_table.all_routes() {
+                        println!("  {}", r);
+                    }
+                }
+            }
+            "events" | "log" => {
+                for name in &names {
+                    if let Some(bgp) = lab.routers[name].bgp() {
+                        println!("== {} control-plane log ==", name);
+                        for e in bgp.events() {
+                            println!("  {}", e);
+                        }
+                    }
+                }
+            }
+            "local-rib" => self.cmd_bgp_static_rib(),
+            other => {
+                println!("unknown bgp subcommand '{}'; try 'bgp help'", other);
+            }
+        }
+    }
+
+    /// The original static sample RIB, kept as a reference table.
+    fn cmd_bgp_static_rib(&self) {
+        {
+            println!("BGP sample Routing Information Base (static reference data):");
             println!("┌──────────────────────┬──────────────────┬────────────────────────┐");
             println!("│ Network Prefix       │ Next Hop         │ AS Path                │");
             println!("├──────────────────────┼──────────────────┼────────────────────────┤");
@@ -7070,13 +7227,6 @@ impl NetworkShell {
                 println!("│ {:<20} │ {:<16} │ {:<22} │", p_str, nh, path_str);
             }
             println!("└──────────────────────┴──────────────────┴────────────────────────┘");
-        } else if args[0] == "open" {
-            let open = BgpMessage::build_open(65001, 180, self.stack.config.ip);
-            let raw = open.serialize();
-            println!(
-                "BGP OPEN Message Framed ({} bytes): Marker=0xFF*16, MyAS=65001, HoldTime=180",
-                raw.len()
-            );
         }
     }
 
