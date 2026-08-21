@@ -10,6 +10,7 @@ pub const ETHERTYPE_IPV4: u16 = 0x0800;
 pub const ETHERTYPE_ARP: u16 = 0x0806;
 pub const ETHERTYPE_IPV6: u16 = 0x86DD;
 pub const ETHERTYPE_VLAN: u16 = 0x8100;
+pub const ETHERTYPE_MPLS: u16 = 0x8847;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct MacAddress(pub [u8; 6]);
@@ -76,6 +77,7 @@ pub enum EtherType {
     Arp,
     IPv6,
     Vlan,
+    Mpls,
     Unknown(u16),
 }
 
@@ -86,6 +88,7 @@ impl EtherType {
             ETHERTYPE_ARP => EtherType::Arp,
             ETHERTYPE_IPV6 => EtherType::IPv6,
             ETHERTYPE_VLAN => EtherType::Vlan,
+            ETHERTYPE_MPLS => EtherType::Mpls,
             other => EtherType::Unknown(other),
         }
     }
@@ -96,6 +99,7 @@ impl EtherType {
             EtherType::Arp => ETHERTYPE_ARP,
             EtherType::IPv6 => ETHERTYPE_IPV6,
             EtherType::Vlan => ETHERTYPE_VLAN,
+            EtherType::Mpls => ETHERTYPE_MPLS,
             EtherType::Unknown(val) => *val,
         }
     }
@@ -108,6 +112,7 @@ impl fmt::Display for EtherType {
             EtherType::Arp => write!(f, "ARP (0x0806)"),
             EtherType::IPv6 => write!(f, "IPv6 (0x86DD)"),
             EtherType::Vlan => write!(f, "802.1Q VLAN (0x8100)"),
+            EtherType::Mpls => write!(f, "MPLS (0x8847)"),
             EtherType::Unknown(val) => write!(f, "Unknown (0x{:04x})", val),
         }
     }

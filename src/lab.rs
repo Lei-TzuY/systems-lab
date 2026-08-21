@@ -9,15 +9,21 @@
 //! - Discrete event stepping and run-to-quiescence simulation
 
 use crate::arp::{ArpOpcode, ArpPacket, ArpTable};
-use crate::ethernet::{ETHERTYPE_ARP, ETHERTYPE_IPV4, EtherType, EthernetFrame, MacAddress};
+use crate::ethernet::{
+    ETHERTYPE_ARP, ETHERTYPE_IPV4, ETHERTYPE_MPLS, EtherType, EthernetFrame, MacAddress,
+};
+use crate::firewall::{Firewall, FirewallAction, FirewallChain};
 use crate::icmp::{IcmpPacket, IcmpType};
 use crate::ipv4::{IP_PROTO_ICMP, IP_PROTO_UDP, Ipv4Address, Ipv4Packet};
+use crate::mpls::{LfibAction, LfibTable, MplsHeader, MplsPacket};
 use crate::nat::NatTable;
+use crate::ospf::OspfLsdb;
 use crate::pcap::{LINKTYPE_ETHERNET, PcapWriter};
 use crate::rip::{RIP_PORT, RipEngine, RipPacket};
 use crate::router::RoutingTable;
 use crate::stack::{NetStack, NetStackConfig};
 use crate::udp::UdpDatagram;
+use crate::vxlan::{VXLAN_UDP_PORT, VxlanPacket};
 use std::collections::HashMap;
 
 /// Fault injection configuration and frame accounting for a virtual point-to-point or broadcast link.
@@ -170,7 +176,8 @@ pub struct RouterInterface {
 }
 
 /// A multi-interface Router node with hardware-like packet forwarding, TTL decrementing,
-/// NAT translation (SNAT & DNAT), dynamic routing (RIPv2), and ICMP error generation.
+/// NAT translation (SNAT & DNAT), dynamic routing (RIPv2 & OSPFv2), stateful firewalling,
+/// VXLAN overlay bridging, MPLS label switching, and ICMP error generation.
 pub struct LabRouter {
     pub name: String,
     pub interfaces: Vec<RouterInterface>,
@@ -181,6 +188,12 @@ pub struct LabRouter {
     pub nat_lan_iface: Option<String>,
     pub nat_wan_iface: Option<String>,
     pub rip_engine: Option<RipEngine>,
+    pub firewall: Option<Firewall>,
+    pub vxlan_tunnels: HashMap<String, (u32, Ipv4Address, String)>,
+    pub vxlan_vni_to_access: HashMap<u32, String>,
+    pub ospf_lsdb: Option<OspfLsdb>,
+    pub lfib: Option<LfibTable>,
+    pub mpls_push_routes: HashMap<Ipv4Address, (u32, String)>,
     pub ip_id_counter: u16,
 }
 
@@ -196,8 +209,91 @@ impl LabRouter {
             nat_lan_iface: None,
             nat_wan_iface: None,
             rip_engine: None,
+            firewall: None,
+            vxlan_tunnels: HashMap::new(),
+            vxlan_vni_to_access: HashMap::new(),
+            ospf_lsdb: None,
+            lfib: None,
+            mpls_push_routes: HashMap::new(),
             ip_id_counter: 100,
         }
+    }
+
+    pub fn set_firewall(&mut self, fw: Firewall) {
+        self.firewall = Some(fw);
+    }
+
+    pub fn add_vxlan_tunnel(
+        &mut self,
+        access_iface: &str,
+        vni: u32,
+        remote_vtep_ip: Ipv4Address,
+        underlay_iface: &str,
+    ) {
+        self.vxlan_tunnels.insert(
+            access_iface.to_string(),
+            (vni, remote_vtep_ip, underlay_iface.to_string()),
+        );
+        self.vxlan_vni_to_access
+            .insert(vni, access_iface.to_string());
+    }
+
+    pub fn enable_ospf(&mut self) {
+        self.ospf_lsdb = Some(OspfLsdb::new());
+    }
+
+    pub fn add_ospf_link(&mut self, from: Ipv4Address, to: Ipv4Address, cost: u32) {
+        if let Some(ref mut lsdb) = self.ospf_lsdb {
+            lsdb.add_link(from, to, cost);
+        }
+    }
+
+    pub fn run_ospf_spf(
+        &mut self,
+        router_id: Ipv4Address,
+        neighbor_subnets: &HashMap<Ipv4Address, (Ipv4Address, u8, String, Ipv4Address)>,
+    ) {
+        if let Some(ref lsdb) = self.ospf_lsdb {
+            let shortest_paths = lsdb.compute_shortest_paths(router_id);
+            for (dest_router, (_cost, next_hop_opt)) in shortest_paths {
+                if let Some(next_hop_router) = next_hop_opt
+                    && let Some((dest_net, mask, iface_name, next_hop_ip)) =
+                        neighbor_subnets.get(&dest_router)
+                {
+                    let n_hop = if next_hop_router == dest_router {
+                        *next_hop_ip
+                    } else if let Some((_, _, _, nh_ip)) = neighbor_subnets.get(&next_hop_router) {
+                        *nh_ip
+                    } else {
+                        *next_hop_ip
+                    };
+                    self.routing_table
+                        .add_route(*dest_net, *mask, Some(n_hop), iface_name);
+                }
+            }
+        }
+    }
+
+    pub fn enable_mpls(&mut self) {
+        self.lfib = Some(LfibTable::new());
+    }
+
+    pub fn add_mpls_push_route(&mut self, dst_ip: Ipv4Address, label: u32, egress_iface: &str) {
+        self.mpls_push_routes
+            .insert(dst_ip, (label, egress_iface.to_string()));
+    }
+
+    pub fn add_mpls_swap_route(&mut self, in_label: u32, out_label: u32, egress_iface: &str) {
+        let lfib = self.lfib.get_or_insert_with(LfibTable::new);
+        lfib.insert(
+            in_label,
+            LfibAction::Swap(out_label, egress_iface.to_string()),
+        );
+    }
+
+    pub fn add_mpls_pop_route(&mut self, in_label: u32) {
+        let lfib = self.lfib.get_or_insert_with(LfibTable::new);
+        lfib.insert(in_label, LfibAction::Pop);
     }
 
     pub fn enable_nat(&mut self, lan_iface: &str, wan_iface: &str, public_ip: Ipv4Address) {
@@ -305,6 +401,67 @@ impl LabRouter {
             None => return out_transmissions,
         };
 
+        // Check if this ingress interface is a VXLAN Access port
+        if let Some(&(vni, remote_vtep_ip, ref underlay_iface_name)) =
+            self.vxlan_tunnels.get(&ingress_iface.name)
+        {
+            if let Some(underlay_iface) = self
+                .interfaces
+                .iter()
+                .find(|i| i.name == *underlay_iface_name)
+                .cloned()
+                && let Ok(vxlan_bytes) = VxlanPacket::encapsulate(vni, raw_frame)
+            {
+                let udp_bytes = UdpDatagram::serialize(
+                    underlay_iface.ip,
+                    remote_vtep_ip,
+                    VXLAN_UDP_PORT,
+                    VXLAN_UDP_PORT,
+                    &vxlan_bytes,
+                );
+                let ip_id = self.next_ip_id();
+                let ip_bytes = Ipv4Packet::serialize(
+                    underlay_iface.ip,
+                    remote_vtep_ip,
+                    IP_PROTO_UDP,
+                    ip_id,
+                    64,
+                    &udp_bytes,
+                );
+
+                if let Some(route) = self.routing_table.lookup(remote_vtep_ip)
+                    && let Some(egress) = self.interfaces.iter().find(|i| i.name == route.interface)
+                {
+                    let next_hop = route.next_hop(remote_vtep_ip);
+                    let egress_arp = self.arp_tables.entry(egress.name.clone()).or_default();
+                    if let Some(dst_mac) = egress_arp.lookup(&next_hop.0) {
+                        let eth_out = EthernetFrame::serialize(
+                            dst_mac,
+                            egress.mac,
+                            ETHERTYPE_IPV4,
+                            &ip_bytes,
+                        );
+                        out_transmissions.push((egress.link_name.clone(), eth_out));
+                    } else {
+                        let pending_key = (egress.name.clone(), next_hop);
+                        self.pending_transit_packets
+                            .entry(pending_key)
+                            .or_default()
+                            .push(ip_bytes);
+                        let arp_req = ArpPacket::build_request(egress.mac, egress.ip.0, next_hop.0);
+                        let eth_arp = EthernetFrame::serialize(
+                            MacAddress::BROADCAST,
+                            egress.mac,
+                            ETHERTYPE_ARP,
+                            &arp_req.serialize(),
+                        );
+                        out_transmissions.push((egress.link_name.clone(), eth_arp));
+                    }
+                }
+            }
+            return out_transmissions;
+        }
+
         let eth = match EthernetFrame::parse(raw_frame) {
             Ok(f) => f,
             Err(_) => return out_transmissions,
@@ -361,8 +518,99 @@ impl LabRouter {
                 }
             }
 
+            EtherType::Mpls => {
+                if let Ok(mpls_pkt) = MplsPacket::parse(eth.payload)
+                    && let Some(top_hdr) = mpls_pkt.labels.first()
+                    && let Some(ref lfib) = self.lfib
+                {
+                    match lfib.lookup(top_hdr.label) {
+                        Some(LfibAction::Swap(out_label, egress_name)) => {
+                            let mut new_labels = mpls_pkt.labels.clone();
+                            new_labels[0].label = *out_label;
+                            if new_labels[0].ttl > 1 {
+                                new_labels[0].ttl -= 1;
+                            }
+                            let new_mpls = MplsPacket::new(new_labels, mpls_pkt.payload);
+                            let mpls_bytes = new_mpls.serialize();
+
+                            if let Some(egress_iface) =
+                                self.interfaces.iter().find(|i| i.name == *egress_name)
+                            {
+                                let eth_out = EthernetFrame::serialize(
+                                    MacAddress::BROADCAST,
+                                    egress_iface.mac,
+                                    ETHERTYPE_MPLS,
+                                    &mpls_bytes,
+                                );
+                                out_transmissions.push((egress_iface.link_name.clone(), eth_out));
+                            }
+                        }
+                        Some(LfibAction::Pop) => {
+                            if top_hdr.bottom_of_stack
+                                && let Ok(inner_ip) = Ipv4Packet::parse(&mpls_pkt.payload, false)
+                                && let Some(route) =
+                                    self.routing_table.lookup(inner_ip.header.dst_ip)
+                                && let Some(egress_iface) =
+                                    self.interfaces.iter().find(|i| i.name == route.interface)
+                            {
+                                let next_hop = route.next_hop(inner_ip.header.dst_ip);
+                                let egress_arp = self
+                                    .arp_tables
+                                    .entry(egress_iface.name.clone())
+                                    .or_default();
+                                if let Some(dst_mac) = egress_arp.lookup(&next_hop.0) {
+                                    let eth_out = EthernetFrame::serialize(
+                                        dst_mac,
+                                        egress_iface.mac,
+                                        ETHERTYPE_IPV4,
+                                        &mpls_pkt.payload,
+                                    );
+                                    out_transmissions
+                                        .push((egress_iface.link_name.clone(), eth_out));
+                                } else {
+                                    let pending_key = (egress_iface.name.clone(), next_hop);
+                                    self.pending_transit_packets
+                                        .entry(pending_key)
+                                        .or_default()
+                                        .push(mpls_pkt.payload);
+                                    let arp_req = ArpPacket::build_request(
+                                        egress_iface.mac,
+                                        egress_iface.ip.0,
+                                        next_hop.0,
+                                    );
+                                    let eth_arp = EthernetFrame::serialize(
+                                        MacAddress::BROADCAST,
+                                        egress_iface.mac,
+                                        ETHERTYPE_ARP,
+                                        &arp_req.serialize(),
+                                    );
+                                    out_transmissions
+                                        .push((egress_iface.link_name.clone(), eth_arp));
+                                }
+                            }
+                        }
+                        None | Some(LfibAction::Push(_)) => {}
+                    }
+                }
+            }
+
             EtherType::IPv4 => {
                 if let Ok(ip_pkt) = Ipv4Packet::parse(eth.payload, true) {
+                    let is_for_router =
+                        self.interfaces.iter().any(|i| i.ip == ip_pkt.header.dst_ip);
+
+                    // 1. Evaluate Firewall Input or Forward Chain
+                    if let Some(ref fw) = self.firewall {
+                        let chain = if is_for_router {
+                            FirewallChain::Input
+                        } else {
+                            FirewallChain::Forward
+                        };
+                        if fw.evaluate(chain, &ip_pkt) != FirewallAction::Accept {
+                            return out_transmissions; // Dropped by firewall!
+                        }
+                    }
+
                     // Update ARP table on ingress interface with sender
                     let arp_table = self
                         .arp_tables
@@ -378,23 +626,36 @@ impl LabRouter {
                             ip_pkt.payload,
                             false,
                         )
-                        && udp.dst_port == RIP_PORT
                     {
-                        if let Some(ref mut rip) = self.rip_engine
-                            && let Ok(rip_pkt) = RipPacket::parse(udp.payload)
-                        {
-                            rip.process_advertisement(
-                                ip_pkt.header.src_ip,
-                                &rip_pkt,
-                                &ingress_iface.name,
-                            );
-                            self.routing_table = rip.routes.clone();
+                        // RIPv2
+                        if udp.dst_port == RIP_PORT {
+                            if let Some(ref mut rip) = self.rip_engine
+                                && let Ok(rip_pkt) = RipPacket::parse(udp.payload)
+                            {
+                                rip.process_advertisement(
+                                    ip_pkt.header.src_ip,
+                                    &rip_pkt,
+                                    &ingress_iface.name,
+                                );
+                                self.routing_table = rip.routes.clone();
+                            }
+                            return out_transmissions;
                         }
-                        return out_transmissions;
-                    }
 
-                    let is_for_router =
-                        self.interfaces.iter().any(|i| i.ip == ip_pkt.header.dst_ip);
+                        // VXLAN Decapsulation (UDP 4789)
+                        if udp.dst_port == VXLAN_UDP_PORT
+                            && is_for_router
+                            && let Ok(vxlan) = VxlanPacket::parse(udp.payload)
+                            && let Some(access_name) =
+                                self.vxlan_vni_to_access.get(&vxlan.header.vni)
+                            && let Some(access_iface) =
+                                self.interfaces.iter().find(|i| i.name == *access_name)
+                        {
+                            out_transmissions
+                                .push((access_iface.link_name.clone(), vxlan.inner_frame));
+                            return out_transmissions;
+                        }
+                    }
 
                     if is_for_router {
                         // Check if Inbound NAT (DNAT) translates this WAN packet for a LAN host
@@ -493,6 +754,25 @@ impl LabRouter {
                                 &ip_out,
                             );
                             out_transmissions.push((ingress_link.to_string(), eth_out));
+                            return out_transmissions;
+                        }
+
+                        // Check MPLS Ingress Push route
+                        if let Some(&(push_label, ref egress_name)) =
+                            self.mpls_push_routes.get(&ip_pkt.header.dst_ip)
+                            && let Some(egress_iface) =
+                                self.interfaces.iter().find(|i| i.name == *egress_name)
+                        {
+                            let mpls_hdr = MplsHeader::new(push_label, 0, true, 64);
+                            let mpls_pkt = MplsPacket::new(vec![mpls_hdr], eth.payload.to_vec());
+                            let mpls_bytes = mpls_pkt.serialize();
+                            let eth_out = EthernetFrame::serialize(
+                                MacAddress::BROADCAST,
+                                egress_iface.mac,
+                                ETHERTYPE_MPLS,
+                                &mpls_bytes,
+                            );
+                            out_transmissions.push((egress_iface.link_name.clone(), eth_out));
                             return out_transmissions;
                         }
 

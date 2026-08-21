@@ -27,10 +27,13 @@ fn test_mpls_shim_header_encoding_and_bos() {
 fn test_mpls_lfib_operations() {
     let mut lfib = LfibTable::new();
     lfib.insert(1001, LfibAction::Push(2001));
-    lfib.insert(2001, LfibAction::Swap(3001, "eth1"));
+    lfib.insert(2001, LfibAction::Swap(3001, "eth1".to_string()));
     lfib.insert(3001, LfibAction::Pop);
 
     assert_eq!(lfib.lookup(1001), Some(&LfibAction::Push(2001)));
-    assert_eq!(lfib.lookup(2001), Some(&LfibAction::Swap(3001, "eth1")));
+    assert_eq!(
+        lfib.lookup(2001),
+        Some(&LfibAction::Swap(3001, "eth1".to_string()))
+    );
     assert_eq!(lfib.lookup(3001), Some(&LfibAction::Pop));
 }

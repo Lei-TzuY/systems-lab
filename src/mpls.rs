@@ -129,9 +129,9 @@ impl MplsPacket {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LfibAction {
-    Push(u32),               // Ingress LER: Encapsulate with new Label
-    Swap(u32, &'static str), // Core LSR: Replace incoming label with outgoing label + interface
-    Pop,                     // Egress LER / PHP: Strip outer label
+    Push(u32),         // Ingress LER: Encapsulate with new Label
+    Swap(u32, String), // Core LSR: Replace incoming label with outgoing label + interface
+    Pop,               // Egress LER / PHP: Strip outer label
 }
 
 impl fmt::Display for LfibAction {
@@ -161,8 +161,8 @@ impl LfibTable {
             entries: HashMap::new(),
         };
         // Standard virtual MPLS paths
-        lfib.insert(100, LfibAction::Swap(200, "eth1"));
-        lfib.insert(200, LfibAction::Swap(300, "eth2"));
+        lfib.insert(100, LfibAction::Swap(200, "eth1".to_string()));
+        lfib.insert(200, LfibAction::Swap(300, "eth2".to_string()));
         lfib.insert(300, LfibAction::Pop);
         lfib
     }
@@ -221,7 +221,10 @@ mod tests {
     #[test]
     fn test_lfib_lookup_and_actions() {
         let lfib = LfibTable::new();
-        assert_eq!(lfib.lookup(100), Some(&LfibAction::Swap(200, "eth1")));
+        assert_eq!(
+            lfib.lookup(100),
+            Some(&LfibAction::Swap(200, "eth1".to_string()))
+        );
         assert_eq!(lfib.lookup(300), Some(&LfibAction::Pop));
     }
 }

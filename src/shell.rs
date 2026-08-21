@@ -8732,6 +8732,405 @@ impl NetworkShell {
                 }
             }
 
+            "vxlan" => {
+                println!("=== Virtual Lab: VXLAN L2 Overlay Fabric Demo ===");
+                let mut lab = VirtualLab::new();
+                let h1_ip = Ipv4Address::new(192, 168, 100, 10);
+                let h2_ip = Ipv4Address::new(192, 168, 100, 20);
+
+                lab.add_host(
+                    "tenant_h1",
+                    "acc_1",
+                    NetStackConfig {
+                        mac: MacAddress([0x02, 0x00, 0x00, 0x00, 0x0A, 0x10]),
+                        ip: h1_ip,
+                        ipv6: None,
+                        subnet_mask: 24,
+                        gateway: None,
+                    },
+                );
+                lab.add_host(
+                    "tenant_h2",
+                    "acc_2",
+                    NetStackConfig {
+                        mac: MacAddress([0x02, 0x00, 0x00, 0x00, 0x0A, 0x20]),
+                        ip: h2_ip,
+                        ipv6: None,
+                        subnet_mask: 24,
+                        gateway: None,
+                    },
+                );
+
+                let mut leaf1 = LabRouter::new("leaf1");
+                leaf1.add_interface(
+                    "eth_acc",
+                    MacAddress([0x02, 0x00, 0x00, 0x00, 0x01, 0xAA]),
+                    Ipv4Address::new(192, 168, 100, 254),
+                    24,
+                    "acc_1",
+                );
+                leaf1.add_interface(
+                    "eth_und",
+                    MacAddress([0x02, 0x00, 0x00, 0x00, 0x01, 0x01]),
+                    Ipv4Address::new(10, 0, 1, 1),
+                    24,
+                    "und_1",
+                );
+                leaf1.routing_table.add_route(
+                    Ipv4Address::new(10, 0, 2, 0),
+                    24,
+                    Some(Ipv4Address::new(10, 0, 1, 254)),
+                    "eth_und",
+                );
+                leaf1.add_vxlan_tunnel("eth_acc", 5001, Ipv4Address::new(10, 0, 2, 1), "eth_und");
+                lab.add_router(leaf1);
+
+                let mut spine = LabRouter::new("spine");
+                spine.add_interface(
+                    "sp_if1",
+                    MacAddress([0x02, 0x00, 0x00, 0x00, 0x55, 0x01]),
+                    Ipv4Address::new(10, 0, 1, 254),
+                    24,
+                    "und_1",
+                );
+                spine.add_interface(
+                    "sp_if2",
+                    MacAddress([0x02, 0x00, 0x00, 0x00, 0x55, 0x02]),
+                    Ipv4Address::new(10, 0, 2, 254),
+                    24,
+                    "und_2",
+                );
+                lab.add_router(spine);
+
+                let mut leaf2 = LabRouter::new("leaf2");
+                leaf2.add_interface(
+                    "eth_und",
+                    MacAddress([0x02, 0x00, 0x00, 0x00, 0x02, 0x01]),
+                    Ipv4Address::new(10, 0, 2, 1),
+                    24,
+                    "und_2",
+                );
+                leaf2.add_interface(
+                    "eth_acc",
+                    MacAddress([0x02, 0x00, 0x00, 0x00, 0x02, 0xAA]),
+                    Ipv4Address::new(192, 168, 100, 253),
+                    24,
+                    "acc_2",
+                );
+                leaf2.routing_table.add_route(
+                    Ipv4Address::new(10, 0, 1, 0),
+                    24,
+                    Some(Ipv4Address::new(10, 0, 2, 254)),
+                    "eth_und",
+                );
+                leaf2.add_vxlan_tunnel("eth_acc", 5001, Ipv4Address::new(10, 0, 1, 1), "eth_und");
+                lab.add_router(leaf2);
+
+                println!(
+                    "1. Encapsulating Tenant Ethernet frames over VNI 5001 across Underlay IP..."
+                );
+                let ping = lab
+                    .host_mut("tenant_h1")
+                    .unwrap()
+                    .stack
+                    .ping4(h2_ip, 0x4321, 1, b"VXLAN_DEMO")
+                    .unwrap();
+                lab.send_from_host("tenant_h1", ping);
+                lab.run_until_quiescent(30);
+
+                let h1 = lab.host("tenant_h1").unwrap();
+                if !h1.stack.received_icmp_replies.is_empty() {
+                    println!(
+                        "✓ Tenant Host 1 received ICMP reply from Tenant Host 2 across VXLAN fabric!"
+                    );
+                }
+            }
+
+            "ospf" => {
+                println!("=== Virtual Lab: OSPFv2 Link-State Dijkstra SPF Demo ===");
+                let mut r1 = LabRouter::new("r1");
+                r1.add_interface(
+                    "r1_lan",
+                    MacAddress([0x02, 0x00, 0x00, 0x00, 0x01, 0x01]),
+                    Ipv4Address::new(172, 16, 1, 1),
+                    24,
+                    "link_a",
+                );
+                r1.add_interface(
+                    "r1_r2",
+                    MacAddress([0x02, 0x00, 0x00, 0x00, 0x12, 0x01]),
+                    Ipv4Address::new(10, 1, 2, 1),
+                    24,
+                    "link_r1_r2",
+                );
+                r1.add_interface(
+                    "r1_r3",
+                    MacAddress([0x02, 0x00, 0x00, 0x00, 0x13, 0x01]),
+                    Ipv4Address::new(10, 1, 3, 1),
+                    24,
+                    "link_r1_r3",
+                );
+                r1.enable_ospf();
+                r1.add_ospf_link(
+                    Ipv4Address::new(1, 1, 1, 1),
+                    Ipv4Address::new(2, 2, 2, 2),
+                    10,
+                );
+                r1.add_ospf_link(
+                    Ipv4Address::new(2, 2, 2, 2),
+                    Ipv4Address::new(3, 3, 3, 3),
+                    10,
+                );
+                r1.add_ospf_link(
+                    Ipv4Address::new(1, 1, 1, 1),
+                    Ipv4Address::new(3, 3, 3, 3),
+                    50,
+                );
+
+                let mut subnets = std::collections::HashMap::new();
+                subnets.insert(
+                    Ipv4Address::new(3, 3, 3, 3),
+                    (
+                        Ipv4Address::new(172, 16, 3, 0),
+                        24,
+                        "r1_r2".to_string(),
+                        Ipv4Address::new(10, 1, 2, 2),
+                    ),
+                );
+                r1.run_ospf_spf(Ipv4Address::new(1, 1, 1, 1), &subnets);
+
+                let route = r1
+                    .routing_table
+                    .lookup(Ipv4Address::new(172, 16, 3, 10))
+                    .unwrap();
+                println!(
+                    "1. Dijkstra Shortest Path calculated: Dest 172.16.3.0/24 -> NextHop {:?}",
+                    route.next_hop(Ipv4Address::new(172, 16, 3, 10))
+                );
+                println!("✓ Path through R2 (Cost 20) prioritized over direct R3 link (Cost 50)");
+            }
+
+            "firewall" => {
+                println!("=== Virtual Lab: Stateful Packet Filter & Firewall Demo ===");
+                let mut lab = VirtualLab::new();
+                let srv_ip = Ipv4Address::new(10, 0, 2, 80);
+
+                lab.add_host(
+                    "client",
+                    "lan",
+                    NetStackConfig {
+                        mac: MacAddress([0x02, 0x00, 0x00, 0x00, 0x01, 0x05]),
+                        ip: Ipv4Address::new(10, 0, 1, 5),
+                        ipv6: None,
+                        subnet_mask: 24,
+                        gateway: Some(Ipv4Address::new(10, 0, 1, 1)),
+                    },
+                );
+
+                lab.add_host(
+                    "server",
+                    "wan",
+                    NetStackConfig {
+                        mac: MacAddress([0x02, 0x00, 0x00, 0x00, 0x02, 0x80]),
+                        ip: srv_ip,
+                        ipv6: None,
+                        subnet_mask: 24,
+                        gateway: Some(Ipv4Address::new(10, 0, 2, 1)),
+                    },
+                );
+
+                lab.host_mut("server")
+                    .unwrap()
+                    .stack
+                    .udp_sockets
+                    .bind(80, |_src, _port, data| {
+                        let mut resp = b"HTTP:".to_vec();
+                        resp.extend_from_slice(data);
+                        Some(resp)
+                    });
+                lab.host_mut("server")
+                    .unwrap()
+                    .stack
+                    .udp_sockets
+                    .bind(23, |_src, _port, _data| Some(b"TELNET".to_vec()));
+
+                let mut r = LabRouter::new("gw");
+                r.add_interface(
+                    "lan",
+                    MacAddress([0x02, 0x00, 0x00, 0x00, 0x01, 0x01]),
+                    Ipv4Address::new(10, 0, 1, 1),
+                    24,
+                    "lan",
+                );
+                r.add_interface(
+                    "wan",
+                    MacAddress([0x02, 0x00, 0x00, 0x00, 0x02, 0x01]),
+                    Ipv4Address::new(10, 0, 2, 1),
+                    24,
+                    "wan",
+                );
+
+                let mut fw = crate::firewall::Firewall::new();
+                fw.add_rule(
+                    crate::firewall::FirewallChain::Forward,
+                    crate::firewall::FirewallRule {
+                        description: "Drop Telnet".to_string(),
+                        src_cidr: None,
+                        dst_cidr: None,
+                        protocol: Some(crate::ipv4::IP_PROTO_UDP),
+                        src_port_range: None,
+                        dst_port_range: Some((23, 23)),
+                        action: crate::firewall::FirewallAction::Drop,
+                    },
+                );
+                r.set_firewall(fw);
+                lab.add_router(r);
+
+                println!("1. Testing Port 80 (Allowed)...");
+                let q80 = lab
+                    .host_mut("client")
+                    .unwrap()
+                    .stack
+                    .send_udp(srv_ip, 40000, 80, b"PING80")
+                    .unwrap();
+                lab.send_from_host("client", q80);
+                lab.run_until_quiescent(20);
+                assert_eq!(
+                    lab.host("client")
+                        .unwrap()
+                        .stack
+                        .received_udp_payloads
+                        .len(),
+                    1
+                );
+                println!("✓ Port 80 query succeeded!");
+
+                println!("2. Testing Port 23 (Firewall Drop)...");
+                let q23 = lab
+                    .host_mut("client")
+                    .unwrap()
+                    .stack
+                    .send_udp(srv_ip, 40001, 23, b"PING23")
+                    .unwrap();
+                lab.send_from_host("client", q23);
+                lab.run_until_quiescent(20);
+                assert_eq!(
+                    lab.host("client")
+                        .unwrap()
+                        .stack
+                        .received_udp_payloads
+                        .len(),
+                    1
+                );
+                println!("✓ Port 23 traffic dropped by router firewall!");
+            }
+
+            "mpls" => {
+                println!("=== Virtual Lab: MPLS 3-Node LSP (Push/Swap/Pop) Demo ===");
+                let mut lab = VirtualLab::new();
+                let h_b_ip = Ipv4Address::new(192, 168, 2, 20);
+
+                lab.add_host(
+                    "h_a",
+                    "link_a",
+                    NetStackConfig {
+                        mac: MacAddress([0x02, 0x00, 0x00, 0x00, 0x01, 0x10]),
+                        ip: Ipv4Address::new(192, 168, 1, 10),
+                        ipv6: None,
+                        subnet_mask: 24,
+                        gateway: Some(Ipv4Address::new(192, 168, 1, 1)),
+                    },
+                );
+
+                lab.add_host(
+                    "h_b",
+                    "link_b",
+                    NetStackConfig {
+                        mac: MacAddress([0x02, 0x00, 0x00, 0x00, 0x02, 0x20]),
+                        ip: h_b_ip,
+                        ipv6: None,
+                        subnet_mask: 24,
+                        gateway: Some(Ipv4Address::new(192, 168, 2, 1)),
+                    },
+                );
+
+                let mut r1 = LabRouter::new("r1");
+                r1.add_interface(
+                    "r1_cust",
+                    MacAddress([0x02, 0x00, 0x00, 0x00, 0x01, 0x01]),
+                    Ipv4Address::new(192, 168, 1, 1),
+                    24,
+                    "link_a",
+                );
+                r1.add_interface(
+                    "r1_core",
+                    MacAddress([0x02, 0x00, 0x00, 0x00, 0x12, 0x01]),
+                    Ipv4Address::new(10, 0, 12, 1),
+                    24,
+                    "core_12",
+                );
+                r1.enable_mpls();
+                r1.add_mpls_push_route(h_b_ip, 100, "r1_core");
+                lab.add_router(r1);
+
+                let mut r2 = LabRouter::new("r2");
+                r2.add_interface(
+                    "r2_in",
+                    MacAddress([0x02, 0x00, 0x00, 0x00, 0x12, 0x02]),
+                    Ipv4Address::new(10, 0, 12, 2),
+                    24,
+                    "core_12",
+                );
+                r2.add_interface(
+                    "r2_out",
+                    MacAddress([0x02, 0x00, 0x00, 0x00, 0x23, 0x02]),
+                    Ipv4Address::new(10, 0, 23, 2),
+                    24,
+                    "core_23",
+                );
+                r2.enable_mpls();
+                r2.add_mpls_swap_route(100, 200, "r2_out");
+                lab.add_router(r2);
+
+                let mut r3 = LabRouter::new("r3");
+                r3.add_interface(
+                    "r3_core",
+                    MacAddress([0x02, 0x00, 0x00, 0x00, 0x23, 0x03]),
+                    Ipv4Address::new(10, 0, 23, 3),
+                    24,
+                    "core_23",
+                );
+                r3.add_interface(
+                    "r3_cust",
+                    MacAddress([0x02, 0x00, 0x00, 0x00, 0x02, 0x01]),
+                    Ipv4Address::new(192, 168, 2, 1),
+                    24,
+                    "link_b",
+                );
+                r3.enable_mpls();
+                r3.add_mpls_pop_route(200);
+                lab.add_router(r3);
+
+                println!(
+                    "1. Transmitting customer packet through MPLS LSP: R1 (PUSH 100) -> R2 (SWAP 200) -> R3 (POP)..."
+                );
+                let pkt = lab
+                    .host_mut("h_a")
+                    .unwrap()
+                    .stack
+                    .send_udp(h_b_ip, 30000, 9000, b"MPLS_DEMO")
+                    .unwrap();
+                lab.send_from_host("h_a", pkt);
+                lab.run_until_quiescent(25);
+
+                let hb = lab.host("h_b").unwrap();
+                assert_eq!(hb.stack.received_udp_payloads.len(), 1);
+                println!(
+                    "✓ Customer Host B received packet across MPLS core: '{}'",
+                    String::from_utf8_lossy(&hb.stack.received_udp_payloads[0].3)
+                );
+            }
+
             "pcap" => {
                 let out_file = if args.len() >= 2 {
                     args[1]

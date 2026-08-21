@@ -444,7 +444,8 @@ TCP-IP Stack/
 │   ├── test_bus.rs        # Virtual network bus multi-node tests
 │   ├── test_stack.rs      # End-to-end PCAP pipeline integration tests
 │   ├── test_lab_e2e.rs    # Integrated Virtual Network Lab end-to-end data plane tests
-│   └── test_lab_advanced.rs # Advanced Virtual Lab: DHCP DORA, NAT, RIPv2 & TCP OOO reassembly
+│   ├── test_lab_advanced.rs # Advanced Virtual Lab: DHCP DORA, NAT, RIPv2 & TCP OOO reassembly
+│   └── test_lab_fabric.rs   # Fabric & Transport: VXLAN Leaf-Spine-Leaf, OSPF Dijkstra SPF, Firewall & MPLS 3-Node LSP
 ```
 
 ---
@@ -453,7 +454,10 @@ TCP-IP Stack/
 
 The project includes an in-process **Deterministic Virtual Network Lab** (`src/lab.rs`) allowing realistic multi-node, multi-subnet networking topologies without external kernel privileges, root access, or physical hardware:
 
-* **Topologies**: Arbitrary point-to-point and switched multi-access broadcast links (`VirtualLink`), multi-homed routers (`LabRouter`), and dual-stack end hosts (`LabHost`).
+* **VXLAN Leaf-Spine-Leaf Overlay Fabric**: L2 Ethernet frame encapsulation over multi-hop underlay IP fabrics with 24-bit VNI segmentation, transparent tenant host bridging, and outer UDP 4789 encapsulation.
+* **OSPFv2 Link-State Topology & Dijkstra SPF Engine**: Multi-router link-state graph building and Dijkstra Shortest Path First (SPF) algorithm to dynamically compute optimal loop-free cost paths across multi-node topologies.
+* **Stateful Firewall & Security Policies**: Router data-plane filter evaluating `Input` and `Forward` chains against CIDR ranges, transport protocols (TCP/UDP/ICMP), and port ranges with line-rate `ACCEPT` / `DROP` / `REJECT` actions.
+* **MPLS 3-Node Label Switched Path (LSP)**: End-to-end label switching data plane featuring Ingress LER Label PUSH (`0x8847`), Core LSR Label SWAP, and Egress LER Penultimate Hop Popping (PHP) delivering transparent customer transport.
 * **Dynamic Network Auto-Configuration**: Full DHCPv4 DORA (Discover $\rightarrow$ Offer $\rightarrow$ Request $\rightarrow$ ACK) engine with dynamic IP pool allocation, lease management, and client stack auto-reconfiguration (`dhcp_discover`, `apply_dhcp_ack`).
 * **Network Address Translation (NAPT)**: Multi-interface gateway router SNAT masquerading for outbound LAN traffic and bidirectional DNAT connection tracking (`NatTable`).
 * **Dynamic Routing Convergence**: Multi-router distance-vector routing (`RIPv2`) over multicast `224.0.0.9:520` with split horizon, poison reverse, and automatic forwarding information base (FIB) synchronization.
@@ -475,6 +479,7 @@ cargo test
 ```bash
 cargo test --test test_lab_e2e
 cargo test --test test_lab_advanced
+cargo test --test test_lab_fabric
 ```
 
 ### 3. Launch the Dual-Stack Interactive Shell (REPL)
@@ -487,6 +492,10 @@ netstack > lab topology
 netstack > lab dhcp
 netstack > lab nat
 netstack > lab rip
+netstack > lab vxlan
+netstack > lab ospf
+netstack > lab firewall
+netstack > lab mpls
 netstack > lab ping4 192.168.1.20
 netstack > lab ping6 2001:db8:1::20
 netstack > lab route4 10.0.2.2 64
