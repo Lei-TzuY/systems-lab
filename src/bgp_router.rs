@@ -146,6 +146,10 @@ pub struct BgpPeer {
     /// Require an eBGP UPDATE to lead with this neighbour's own ASN (RFC 4271
     /// section 6.3). On by default, as it is on modern production routers.
     pub enforce_first_as: bool,
+    /// Set when a BGP message could only be written to the transport in part. The
+    /// stream then carries half a message and cannot be repaired by retrying, so the
+    /// session is reset instead of being allowed to desynchronise the peer's framer.
+    tx_desynced: bool,
     pub counters: BgpPeerCounters,
     pub last_error: Option<String>,
     /// How many times this peer has reached ESTABLISHED.
@@ -175,6 +179,7 @@ impl BgpPeer {
             next_hop_self: false,
             max_prefixes: DEFAULT_MAX_PREFIXES,
             enforce_first_as: true,
+            tx_desynced: false,
             counters: BgpPeerCounters::default(),
             last_error: None,
             establishment_count: 0,
@@ -577,6 +582,21 @@ impl BgpRouter {
             return;
         }
 
+        // A half-written message means the peer's framer is about to lose sync with
+        // us. Nothing can be salvaged by writing more, so reset the session.
+        if self.peers[idx].tx_desynced {
+            self.teardown(
+                idx,
+                now_ms,
+                sockets,
+                Teardown::Transport(
+                    "a BGP message was only partially written; the stream is desynchronised"
+                        .to_string(),
+                ),
+            );
+            return;
+        }
+
         // A dead transport ends the session from any state that owns one.
         if let Some(stream) = self.peers[idx].stream
             && !sockets.tcp_is_live(stream)
@@ -702,18 +722,11 @@ impl BgpRouter {
     /// OpenSent / OpenConfirm / Established: read the stream, decode complete
     /// messages, then run the hold and keepalive timers.
     fn run_session(&mut self, idx: usize, now_ms: u64, sockets: &mut SocketRuntime) {
-        // 1. Drain whatever TCP has delivered into the reassembly buffer.
-        match self.read_stream(idx, sockets) {
-            Ok(true) => {}
-            Ok(false) => {
-                self.teardown(
-                    idx,
-                    now_ms,
-                    sockets,
-                    Teardown::Transport("peer closed the TCP connection".to_string()),
-                );
-                return;
-            }
+        // 1. Drain whatever TCP has delivered into the reassembly buffer. A stream
+        //    that has already ended still hands back everything delivered before the
+        //    FIN, so end-of-stream is remembered rather than acted on straight away.
+        let eof = match self.read_stream(idx, sockets) {
+            Ok(open) => !open,
             Err(e) => {
                 let note = BgpNotificationMessage::new(e.code, e.subcode);
                 self.teardown(
@@ -724,9 +737,13 @@ impl BgpRouter {
                 );
                 return;
             }
-        }
+        };
 
-        // 2. Decode and handle every complete message currently buffered.
+        // 2. Decode and handle every complete message currently buffered. This runs
+        //    even once the stream has ended: a peer that sends a final NOTIFICATION
+        //    and closes in the same breath delivers both in a single read, and the
+        //    NOTIFICATION is the real reason the session is going down. Reporting
+        //    "peer closed the TCP connection" instead would throw that away.
         loop {
             let frame = match self.peers[idx].framer.next_frame() {
                 Ok(Some(f)) => f,
@@ -763,7 +780,18 @@ impl BgpRouter {
             }
         }
 
-        // 3. Timers.
+        // 3. The peer closed, and everything it said beforehand has now been acted on.
+        if eof {
+            self.teardown(
+                idx,
+                now_ms,
+                sockets,
+                Teardown::Transport("peer closed the TCP connection".to_string()),
+            );
+            return;
+        }
+
+        // 4. Timers.
         self.run_timers(idx, now_ms, sockets);
     }
 
@@ -980,10 +1008,23 @@ impl BgpRouter {
             return false;
         };
         let bytes = pdu.serialize();
+        // Checking capacity first lets the caller retry the whole message later. The
+        // alternative - writing a prefix now and the whole message again next time -
+        // would put one header on the wire twice and desynchronise the peer.
         if sockets.tcp_writable(stream) < bytes.len() {
             return false;
         }
-        matches!(sockets.tcp_write(stream, &bytes), Ok(n) if n == bytes.len())
+        match sockets.tcp_write(stream, &bytes) {
+            Ok(n) if n == bytes.len() => true,
+            Ok(_) => {
+                // Unreachable while the capacity check above holds, but if it ever did
+                // happen the stream would already carry half a message, and no retry
+                // could repair it. Flag it so the session is reset instead.
+                self.peers[idx].tx_desynced = true;
+                false
+            }
+            Err(_) => false,
+        }
     }
 
     /// Ends a session: tell the peer if we still can, drop the transport, purge
@@ -1023,6 +1064,7 @@ impl BgpRouter {
         peer.keepalive_interval_ms = 0;
         peer.remote_router_id = None;
         peer.established_since_ms = None;
+        peer.tx_desynced = false;
         peer.last_error = Some(reason.clone());
         peer.connect_retry_deadline = Some(now_ms + self.connect_retry_ms);
 

@@ -362,6 +362,9 @@ pub const BGP_ATTR_FLAG_TRANSITIVE: u8 = 0x40;
 pub const BGP_ATTR_FLAG_PARTIAL: u8 = 0x20;
 pub const BGP_ATTR_FLAG_EXT_LEN: u8 = 0x10;
 
+/// Largest number of ASNs one AS_PATH segment can carry: the count is a single octet.
+pub const AS_PATH_MAX_SEGMENT_ASNS: usize = 255;
+
 pub const BGP_AS_SET: u8 = 1;
 pub const BGP_AS_SEQUENCE: u8 = 2;
 
@@ -643,6 +646,13 @@ impl AsPath {
         self.segments.iter().flat_map(|s| s.asns.clone()).collect()
     }
 
+    /// Encodes the path.
+    ///
+    /// A segment holding more than [`AS_PATH_MAX_SEGMENT_ASNS`] entries is emitted as
+    /// several segments of the same kind. Writing the length as a single octet instead
+    /// would truncate the count and put an AS_PATH on the wire that no decoder can
+    /// read. An empty segment is dropped rather than encoded, because the wire format
+    /// gives it no meaning and a decoder is required to reject it.
     pub fn encode(&self) -> Vec<u8> {
         let mut out = Vec::new();
         for seg in &self.segments {
@@ -650,10 +660,12 @@ impl AsPath {
                 AsPathSegmentKind::Set => BGP_AS_SET,
                 AsPathSegmentKind::Sequence => BGP_AS_SEQUENCE,
             };
-            out.push(kind);
-            out.push(seg.asns.len() as u8);
-            for asn in &seg.asns {
-                out.extend_from_slice(&asn.to_be_bytes());
+            for chunk in seg.asns.chunks(AS_PATH_MAX_SEGMENT_ASNS) {
+                out.push(kind);
+                out.push(chunk.len() as u8);
+                for asn in chunk {
+                    out.extend_from_slice(&asn.to_be_bytes());
+                }
             }
         }
         out
@@ -1521,6 +1533,38 @@ mod tests {
         } else {
             panic!("Expected Update message");
         }
+    }
+
+    #[test]
+    fn test_a_segment_longer_than_255_asns_is_split_rather_than_truncated() {
+        // The segment count is one octet. Writing 300 as a u8 would put 44 on the
+        // wire and leave the remaining ASNs to be read as segment headers, producing
+        // a stream no decoder can follow.
+        let asns: Vec<u16> = (0..300u16).map(|i| 1_000u16 + i).collect();
+        let encoded = AsPath::sequence(asns.clone()).encode();
+        let decoded = AsPath::decode(&encoded).expect("a 300-ASN path must survive encoding");
+
+        assert_eq!(decoded.segments.len(), 2);
+        assert_eq!(decoded.segments[0].asns.len(), AS_PATH_MAX_SEGMENT_ASNS);
+        assert_eq!(decoded.segments[1].asns.len(), 45);
+        // Splitting an AS_SEQUENCE changes nothing that matters: same ASNs, same
+        // order, and the decision process still counts the same number of hops.
+        assert_eq!(decoded.flatten(), asns);
+        assert_eq!(decoded.length(), 300);
+    }
+
+    #[test]
+    fn test_an_empty_segment_is_dropped_instead_of_encoded() {
+        let path = AsPath {
+            segments: vec![AsPathSegment {
+                kind: AsPathSegmentKind::Sequence,
+                asns: Vec::new(),
+            }],
+        };
+        // A zero-length segment is what a decoder is required to reject, so emitting
+        // one would mean generating a message we would refuse ourselves.
+        assert!(path.encode().is_empty());
+        assert!(AsPath::decode(&path.encode()).unwrap().is_empty());
     }
 
     #[test]

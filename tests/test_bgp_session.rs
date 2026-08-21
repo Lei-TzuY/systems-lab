@@ -585,3 +585,76 @@ fn test_header_length_field_is_validated_before_the_body_is_trusted() {
     let err = BgpPdu::parse(&frame).unwrap_err();
     assert_eq!(err.code, BGP_ERR_MESSAGE_HEADER);
 }
+
+#[test]
+fn test_a_final_notification_is_read_even_when_the_peer_closes_in_the_same_breath() {
+    let mut peer = RawBgpPeer::connect(AS1, AS2, ip(9, 9, 9, 9));
+    peer.establish();
+
+    // A real speaker sends its Cease NOTIFICATION and closes immediately afterwards,
+    // so both arrive in a single socket read. Whatever the peer said before the FIN
+    // has to be decoded before end-of-stream is acted on: the NOTIFICATION is the
+    // reason the session ended, and "peer closed the TCP connection" is only how.
+    peer.write_only(
+        &BgpPdu::Notification(BgpNotificationMessage::new(
+            toy_tcpip::bgp::BGP_ERR_CEASE,
+            2,
+        ))
+        .serialize(),
+    );
+    peer.disconnect();
+    peer.pump();
+
+    let addr = peer.peer;
+    let bgp = peer.victim_bgp();
+    let p = bgp.peer(addr).unwrap();
+    assert_eq!(
+        p.counters.notifications_received, 1,
+        "the NOTIFICATION delivered ahead of the FIN was thrown away"
+    );
+    assert!(
+        p.last_error
+            .as_deref()
+            .is_some_and(|e| e.contains("NOTIFICATION")),
+        "last error should name the NOTIFICATION, got {:?}",
+        p.last_error
+    );
+    assert_eq!(p.state, BgpState::Idle);
+}
+
+#[test]
+fn test_an_update_delivered_with_the_fin_still_reaches_the_rib_before_the_session_ends() {
+    use toy_tcpip::bgp::{AsPath, BgpOrigin, BgpPathAttributes, BgpUpdateMessage};
+
+    let mut peer = RawBgpPeer::connect(AS1, AS2, ip(9, 9, 9, 9));
+    peer.establish();
+
+    // Same race, with an UPDATE. It must be imported rather than silently dropped -
+    // and then purged again with the rest of the peer's state when the session goes,
+    // which is what proves the teardown still runs after the decode.
+    let attrs = BgpPathAttributes::new(
+        BgpOrigin::Igp,
+        AsPath::sequence(vec![AS2]),
+        ip(10, 50, 0, 2),
+    );
+    peer.write_only(
+        &BgpPdu::Update(BgpUpdateMessage::announce(
+            attrs,
+            vec![prefix(10, 77, 0, 0, 24)],
+        ))
+        .serialize(),
+    );
+    peer.disconnect();
+    peer.pump();
+
+    let addr = peer.peer;
+    let bgp = peer.victim_bgp();
+    assert_eq!(bgp.peer(addr).unwrap().counters.updates_received, 1);
+    assert_eq!(bgp.peer(addr).unwrap().state, BgpState::Idle);
+    assert_eq!(
+        bgp.adj_rib_in.path_count(),
+        0,
+        "the closed peer's paths must not outlive its session"
+    );
+    assert!(bgp.loc_rib.is_empty());
+}

@@ -598,6 +598,15 @@ optional ones are ignored, duplicate attributes are rejected, an `AS_PATH` segme
 overruns its attribute is rejected, and each peer has a prefix limit whose breach closes
 the session with a Cease NOTIFICATION.
 
+The send path is held to the same standard. A BGP message is only written when the
+transport can take all of it, so one message is never split across two writes and a
+retry can never put the same header on the wire twice; an `AS_PATH` segment longer than
+the 255 its count octet can express is emitted as several segments rather than being
+silently truncated into an unparseable stream. On the receive side, everything a peer
+delivered before closing is decoded before end-of-stream is acted on, so a final
+NOTIFICATION is reported as the reason a session ended rather than being lost behind
+the FIN.
+
 ### Shell diagnostics
 
 `bgp <subcommand>` in the interactive shell builds and converges a real three-AS fabric,
