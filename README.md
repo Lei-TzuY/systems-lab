@@ -59,7 +59,7 @@ A complete educational dual-stack IPv4/IPv6 network protocol stack built from sc
 | **Link-State Routing** | **OSPFv2 (RFC 2328)** | Link-State Interior Gateway Protocol over IP 89 / `224.0.0.5`, 24-byte OSPF headers, Hello packets, LSDB graph, Dijkstra SPF calculation. |
 | **Advanced Routing** | **Cisco EIGRP & DUAL (RFC 7868)** | IP Protocol 88 over Multicast `224.0.0.10`, 20-byte EIGRP header, composite metric formula ($256 \times (10^7/\text{BW} + \text{Delay})$), Feasibility Condition ($RD < FD$), Successor & Feasible Successor loop-free backup path. |
 | **Dynamic Routing** | **RIPv2 (RFC 2453)** | Distance-Vector dynamic routing protocol over UDP 520, Bellman-Ford algorithm with Split Horizon & Poison Reverse, metric calculations (1..16). |
-| **Inter-Domain Route**| **BGP-4 (RFC 4271)** | Border Gateway Protocol over TCP port 179, 19-byte framing (Marker `0xFF`*16), OPEN, UPDATE with AS_PATH & NEXT_HOP attributes, BGP RIB table. |
+| **Inter-Domain Route**| **BGP-4 (RFC 4271)** | Packet-driven BGP speaker running over this stack's own TCP sockets on port 179: full Idle/Connect/Active/OpenSent/OpenConfirm/Established FSM, OPEN negotiation, ConnectRetry / Hold / Keepalive timers, stream reassembly, Adj-RIB-In / Loc-RIB / Adj-RIB-Out, best-path selection, and installation into the real IPv4 forwarding table. |
 | **BGP EVPN Fabric** | **BGP EVPN (RFC 7432 / RFC 8365)** | BGP L2VPN EVPN (AFI 25, SAFI 70), Route Type 2 (MAC/IP Advertisement) & Route Type 3 (Inclusive Multicast), `EvpnMacTable` control-plane forwarding. |
 | **Fragmentation (L3)** | **IP Fragmenter & Reassembler** | Splits $> \text{MTU}$ packets into 8-byte aligned slices with `MF` flags; reassembles out-of-order fragment streams. |
 | **Control (L3.5)** | **ICMP (RFC 792)** | Type 8 (Echo Request / Ping) and Type 0 (Echo Reply), identifier & sequence number tracking, payload preservation. |
@@ -159,7 +159,9 @@ TCP-IP Stack/
 │   ├── ospf.rs            # Layer 3: OSPFv2 Link-State Dynamic Routing & SPF (RFC 2328)
 │   ├── eigrp.rs           # Layer 3: Cisco EIGRP & DUAL Routing Engine (RFC 7868)
 │   ├── rip.rs             # Layer 3: Routing Information Protocol v2 (RFC 2453)
-│   ├── bgp.rs             # Layer 3/4: Border Gateway Protocol 4 (RFC 4271)
+│   ├── bgp.rs             # Layer 3/4: BGP-4 wire format, path attributes & TCP stream framer (RFC 4271)
+│   ├── bgp_rib.rs         # Layer 3: BGP Adj-RIB-In / Loc-RIB / Adj-RIB-Out, decision process & route policy
+│   ├── bgp_router.rs      # Layer 3: BGP-4 speaker - FSM, timers, sockets on port 179, FIB installation
 │   ├── evpn.rs            # Datacenter Fabric: BGP EVPN Type 2/3 Control Plane (RFC 7432)
 │   ├── tunnel.rs          # Layer 3: GRE (RFC 2784) & IP-in-IP (RFC 2003) Tunneling
 │   ├── igmp.rs            # Layer 3.5: IGMPv2 (RFC 2236) & Multicast MAC (RFC 1112)
@@ -411,7 +413,11 @@ TCP-IP Stack/
 │   ├── test_ospf.rs       # OSPFv2 link-state & SPF tests
 │   ├── test_eigrp.rs      # EIGRP DUAL metric & topology tests
 │   ├── test_rip.rs        # RIPv2 distance-vector routing tests
-│   ├── test_bgp.rs        # BGP-4 inter-domain routing tests
+│   ├── test_bgp.rs        # BGP-4 message codec tests
+│   ├── test_bgp_session.rs # BGP-4 FSM, OPEN negotiation, timers & TCP stream framing tests
+│   ├── test_bgp_control_plane.rs # BGP-4 UPDATE, RIBs, AS_PATH, withdrawal, FIB & data-plane tests
+│   ├── test_bgp_failover.rs # BGP-4 best path, MED, iBGP, route policy & failover tests
+│   ├── test_bgp_malformed.rs # BGP-4 hostile and malformed input tests
 │   ├── test_tunnel.rs     # GRE and IP-in-IP tunneling tests
 │   ├── test_igmp.rs       # IGMPv2 and Multicast MAC mapping tests
 │   ├── test_fragment.rs   # IPv4 fragmentation & reassembly tests
@@ -467,11 +473,138 @@ The project includes an in-process **Deterministic Virtual Network Lab** (`src/l
 * **Dynamic Network Auto-Configuration**: Full DHCPv4 DORA (Discover $\rightarrow$ Offer $\rightarrow$ Request $\rightarrow$ ACK) engine with dynamic IP pool allocation, lease management, and client stack auto-reconfiguration (`dhcp_discover`, `apply_dhcp_ack`).
 * **Network Address Translation (NAPT)**: Multi-interface gateway router SNAT masquerading for outbound LAN traffic and bidirectional DNAT connection tracking (`NatTable`).
 * **Dynamic Routing Convergence**: Multi-router distance-vector routing (`RIPv2`) over multicast `224.0.0.9:520` with split horizon, poison reverse, and automatic forwarding information base (FIB) synchronization.
+* **Multi-AS BGP-4 Routing**: Routers run a real BGP speaker on TCP port 179 over this stack, establish sessions through a genuine three-way handshake and OPEN negotiation, propagate prefixes across autonomous systems with correct `AS_PATH` prepending, and install the selected paths into the forwarding table that actually carries host traffic.
 * **Reliable TCP Under Loss**: Application-driven socket streams over lossy, reordering links — MSS segmentation, RTO and fast retransmit, out-of-order reassembly, congestion and flow control, and the full RFC 9293 lifecycle including `CLOSE_WAIT` and `TIME_WAIT`.
 * **Deterministic Fault Injection & Simulated Time**: Per-link packet drops, hold-and-release reordering, MTU limits, and bit-level corruption, advanced by a logical clock (`advance_time`, `run_until`, `pump`) so every scenario is byte-for-byte reproducible.
 * **Hardware-like Forwarding Plane**: LPM route table lookup, TTL decrementing & header checksum recalculation, cold ARP resolution queuing, and ICMP Time Exceeded (Type 11 Code 0) generation.
 * **Fault Injection Engine**: Configurable link MTU limits, deterministic drop sequences, and bit-level payload corruption to verify strict checksum rejection.
 * **Integrated PCAP Tap**: Continuous packet capture on every virtual link, exportable directly to Wireshark-compatible `.pcap` trace files.
+
+---
+
+## 🛣️ BGP-4 Control Plane
+
+BGP is a routing process, not a codec. It runs on top of this repository's own reliable
+TCP runtime, and the routes it selects are installed into the same `RoutingTable` the IPv4
+forwarding path consults:
+
+```text
+BGP Routing Process        (src/bgp_router.rs — FSM, peers, timers, policy)
+    ↓  tcp_listen_any(179) · tcp_connect · tcp_write · tcp_read
+Socket Runtime             (src/socket.rs)
+    ↓
+Reliable TCP               (src/tcp.rs — RTO, congestion & flow control)
+    ↓
+IPv4  →  ARP  →  Ethernet
+    ↓
+Virtual Network Lab        (src/lab.rs)
+    ↓
+Remote BGP peer
+```
+
+and the route pipeline inside a speaker:
+
+```text
+BGP UPDATE → Adj-RIB-In → best-path selection → Loc-RIB → RoutingTable → IPv4 forwarding
+```
+
+### Modules
+
+| File | Role |
+|---|---|
+| `src/bgp.rs` | Wire format: 19-byte framing, OPEN, UPDATE, KEEPALIVE, NOTIFICATION, path attributes, `AsPath`, `Ipv4Prefix`, and `BgpFramer` (TCP stream reassembly). |
+| `src/bgp_rib.rs` | `AdjRibIn`, `LocRib`, `AdjRibOut`, `BgpPath`, the decision process, and the prefix policy engine. |
+| `src/bgp_router.rs` | `BgpRouter` / `BgpPeer`: the finite state machine, timers, socket I/O, import and export, and FIB synchronisation. |
+| `src/router.rs` | `RouteSource` and administrative distance, so BGP routes can be installed and withdrawn without disturbing connected or static entries. |
+
+### Session establishment
+
+One end of each session is configured `Active` and the other `Passive`, which is standard
+operational practice and removes connection-collision ambiguity:
+
+```text
+TCP SYN → SYN-ACK → ACK  →  BGP OPEN ⇄ BGP OPEN  →  KEEPALIVE ⇄ KEEPALIVE  →  Established
+```
+
+An OPEN is validated before it is acted on — version, ASN, BGP identifier, and hold time —
+and a structurally invalid one is answered with the NOTIFICATION RFC 4271 prescribes rather
+than silently accepted.
+
+### Timers
+
+`ConnectRetryTimer`, `HoldTimer`, and `KeepaliveTimer` all run off the lab's simulated
+logical clock. There are no wall-clock sleeps, no threads, and no async runtime, so a
+hold-timer expiry is reproducible to the millisecond. The negotiated hold time is the lower
+of the two proposals, and the keepalive interval is a third of it.
+
+### Message framing over a byte stream
+
+TCP has no message boundaries. `BgpFramer` buffers whatever arrives and hands back one
+complete message at a time, so a message split across several reads, several messages
+delivered in one read, and a peer that disappears mid-message are all handled. The buffer is
+hard-capped: the marker, length, and type fields are validated as soon as 19 bytes are
+present, so a peer cannot make it grow without bound.
+
+### Best-path selection
+
+Deterministic, in this order:
+
+1. locally originated paths
+2. highest `LOCAL_PREF`
+3. shortest `AS_PATH` (an `AS_SET` counts as one hop)
+4. lowest `ORIGIN`
+5. lowest `MULTI_EXIT_DISC`, compared **only** between paths from the same neighbouring AS
+6. eBGP over iBGP
+7. lowest peer BGP identifier, then lowest peer address
+
+The chain ends in comparisons that are unique per peer, so no two paths can tie and the
+winner never depends on arrival order.
+
+### Loop prevention and propagation
+
+* Advertising over eBGP prepends the local ASN; advertising over iBGP does not.
+* An UPDATE whose `AS_PATH` already contains the local ASN is discarded.
+* A route is never advertised back to the peer it was learned from, nor into an AS already
+  on its path, nor from one iBGP peer to another.
+* eBGP advertisements rewrite `NEXT_HOP` to the session's own address; iBGP sessions can
+  opt into the same behaviour with `set_next_hop_self`.
+
+### Withdrawal and session loss
+
+Withdrawn NLRI is removed from the Adj-RIB-In, the decision process reruns, and the FIB
+entry goes with it. Losing a session — hold timer, TCP failure, NOTIFICATION, or an
+administrative shutdown — purges everything learned from that peer, reruns best-path
+selection, installs an alternate path if one exists, and withdraws downstream. Nothing
+stale is left in any RIB or in the forwarding table.
+
+### Route policy
+
+A small ordered prefix policy per peer, in each direction: `permit`, `deny`, `set
+local-pref`, and `set med`, matched by exact prefix, prefix-or-longer, or any. First match
+wins; unmatched prefixes fall through to the default action.
+
+### Hardening
+
+Network input is never trusted. Length fields are bounds-checked before use, attribute
+flags and lengths are validated, unknown well-known attributes are an error while unknown
+optional ones are ignored, duplicate attributes are rejected, an `AS_PATH` segment that
+overruns its attribute is rejected, and each peer has a prefix limit whose breach closes
+the session with a Cease NOTIFICATION.
+
+### Shell diagnostics
+
+`bgp <subcommand>` in the interactive shell builds and converges a real three-AS fabric,
+then reports what that running control plane actually holds:
+
+```text
+netstack > bgp summary      # per-neighbor state, uptime, hold time, prefix counts
+netstack > bgp peers        # timers, message counters, discard reasons, last error
+netstack > bgp routes       # the Loc-RIB, with FIB status per prefix
+netstack > bgp rib          # the Adj-RIB-In, best paths marked
+netstack > bgp advertised   # the Adj-RIB-Out, per neighbor
+netstack > bgp route        # each router's real IPv4 forwarding table
+netstack > bgp events       # the control-plane event log
+```
 
 ---
 
@@ -581,7 +714,15 @@ cargo test --test test_tcp_reliability    # MSS, congestion, fast retransmit, wr
 cargo test --test test_tcp_loss           # loss/reorder torture, HTTP/1.1, 128 KiB + PCAP
 ```
 
-### 4. Launch the Dual-Stack Interactive Shell (REPL)
+### 4. Run the BGP-4 Control Plane Suites
+```bash
+cargo test --test test_bgp_session        # FSM, OPEN negotiation, timers, stream framing
+cargo test --test test_bgp_control_plane  # UPDATE, RIBs, AS_PATH, withdrawal, FIB, data plane
+cargo test --test test_bgp_failover       # best path, MED, iBGP rules, policy, failover
+cargo test --test test_bgp_malformed      # hostile and malformed input
+```
+
+### 5. Launch the Dual-Stack Interactive Shell (REPL)
 ```bash
 cargo run -- shell
 ```
@@ -608,6 +749,9 @@ netstack > lab tcp-reorder
 netstack > lab http
 netstack > lab tcp-stats
 netstack > lab pcap lab_capture.pcap
+netstack > bgp summary
+netstack > bgp routes
+netstack > bgp route
 netstack > status
 netstack > exit
 ```
