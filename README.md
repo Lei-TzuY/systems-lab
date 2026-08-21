@@ -288,7 +288,9 @@ TCP-IP Stack/
 │   ├── tunnel.rs          # Layer 3: GRE (RFC 2784) & IP-in-IP (RFC 2003)
 │   ├── igmp.rs            # Layer 3: IGMPv2 Multicast Group Management (RFC 2236)
 │   ├── rip.rs             # Layer 3: RIPv2 Distance-Vector Routing (RFC 2453)
-│   ├── tcp.rs             # Layer 4: TCP Full State Machine & Congestion Control
+│   ├── socket.rs          # Layer 4/Application: Socket Runtime, UDP Sockets, TCP Listeners & Streams
+│   ├── tcp.rs             # Layer 4: TCP Full State Machine, Retransmission & Congestion Control
+│   ├── tcp_seq.rs         # Layer 4: RFC 1982 Serial Number Arithmetic & Wraparound Comparisons
 │   ├── udp.rs             # Layer 4: UDP Datagram Sockets & Multi-Port Dispatch
 │   ├── icmp.rs            # Layer 3: ICMP Echo Request & Reply (Ping)
 │   ├── icmpv6.rs          # Layer 3: ICMPv6 & NDP Neighbor Discovery
@@ -300,6 +302,10 @@ TCP-IP Stack/
 │   ├── checksum.rs        # RFC 1071 16-bit One's Complement Checksum Engine
 │   └── pcap.rs            # PCAP File Format Global Header & Packet Records
 ├── tests/
+│   ├── common/mod.rs          # Shared socket-API test harness (no hand-built packets)
+│   ├── test_socket_runtime.rs # Socket Runtime, UDP ephemeral ports, TCP listen & accept queues
+│   ├── test_tcp_reliability.rs# MSS segmentation, Fast Retransmit, Flow Control & Wraparound
+│   ├── test_tcp_loss.rs       # Lossy Network Torture (Lost SYN/SYN-ACK/Data/FIN), HTTP/1.1 & PCAP
 │   ├── test_bgp_prefix_sid.rs # BGP Prefix-SID Attribute (RFC 8669) tests
 │   ├── test_cqf_enhanced.rs   # IEEE 802.1Qch CQF Ping-Pong Dual Buffer tests
 │   ├── test_nrf_oauth.rs      # 5G Core NRF OAuth 2.0 Access Token Authorization tests
@@ -461,18 +467,104 @@ The project includes an in-process **Deterministic Virtual Network Lab** (`src/l
 * **Dynamic Network Auto-Configuration**: Full DHCPv4 DORA (Discover $\rightarrow$ Offer $\rightarrow$ Request $\rightarrow$ ACK) engine with dynamic IP pool allocation, lease management, and client stack auto-reconfiguration (`dhcp_discover`, `apply_dhcp_ack`).
 * **Network Address Translation (NAPT)**: Multi-interface gateway router SNAT masquerading for outbound LAN traffic and bidirectional DNAT connection tracking (`NatTable`).
 * **Dynamic Routing Convergence**: Multi-router distance-vector routing (`RIPv2`) over multicast `224.0.0.9:520` with split horizon, poison reverse, and automatic forwarding information base (FIB) synchronization.
-* **TCP Sliding Window & Out-of-Order Reassembly**: TCP segment buffering queue (`ooo_queue`), contiguous stream reassembly, and RFC 793 connection lifecycle (`SYN` $\rightarrow$ `ESTABLISHED` $\rightarrow$ `FIN-ACK` $\rightarrow$ `CLOSED`).
+* **Reliable TCP Under Loss**: Application-driven socket streams over lossy, reordering links — MSS segmentation, RTO and fast retransmit, out-of-order reassembly, congestion and flow control, and the full RFC 9293 lifecycle including `CLOSE_WAIT` and `TIME_WAIT`.
+* **Deterministic Fault Injection & Simulated Time**: Per-link packet drops, hold-and-release reordering, MTU limits, and bit-level corruption, advanced by a logical clock (`advance_time`, `run_until`, `pump`) so every scenario is byte-for-byte reproducible.
 * **Hardware-like Forwarding Plane**: LPM route table lookup, TTL decrementing & header checksum recalculation, cold ARP resolution queuing, and ICMP Time Exceeded (Type 11 Code 0) generation.
 * **Fault Injection Engine**: Configurable link MTU limits, deterministic drop sequences, and bit-level payload corruption to verify strict checksum rejection.
 * **Integrated PCAP Tap**: Continuous packet capture on every virtual link, exportable directly to Wireshark-compatible `.pcap` trace files.
 
 ---
 
+## 🔌 Application Socket Runtime & Reliable TCP
+
+The stack is usable by ordinary applications. An application talks to sockets; the runtime
+owns everything below that line, including segmentation, retransmission, and encapsulation:
+
+```text
+Application  (HTTP client / HTTP server / any byte-stream app)
+    ↓  tcp_listen · tcp_connect · tcp_write · tcp_read · tcp_close
+Socket API   (src/socket.rs — socket tables, ports, accept queues)
+    ↓
+TCP / UDP Runtime  (src/tcp.rs, src/udp.rs — FSM, RTO, congestion & flow control)
+    ↓
+IPv4  →  ARP  →  Ethernet
+    ↓
+Deterministic Virtual Network Lab  (src/lab.rs — loss, reordering, MTU, PCAP tap)
+```
+
+No application ever builds a TCP segment, IPv4 packet, or Ethernet frame, and no
+application touches `TcpConnection` directly.
+
+### Socket API
+
+```rust
+// Server
+let listener        = stack.tcp_listen(8080)?;
+let (stream, peer)  = stack.tcp_accept(listener)?;   // WouldBlock until one arrives
+
+// Client
+let stream = stack.tcp_connect(SocketAddrV4 { ip, port: 8080 })?;
+
+// Byte stream — segmentation, retransmission and ordering are the transport's job
+stack.tcp_write(stream, &payload)?;   // may report a short write; the buffer is bounded
+stack.tcp_read(stream, &mut buf)?;    // Ok(0) == end of stream
+stack.tcp_close(stream)?;             // FIN follows any data still queued
+
+// UDP
+let sock = stack.udp_bind(0)?;                       // 0 allocates an ephemeral port
+stack.udp_send_to(sock, b"hello", remote)?;
+let (data, from) = stack.udp_recv_from(sock)?;
+```
+
+Several clients may share one listening port; connections are demultiplexed by the TCP
+4-tuple. Ports come from the ephemeral range 49152–65535 and are released when a
+connection is reclaimed.
+
+### Reliability mechanisms
+
+* **Deterministic timers.** Every timer is driven by a caller-supplied simulated clock
+  (`lab.advance_time`, `lab.run_until`, `stack.step_timers`). Nothing consults the wall
+  clock, sleeps, or spawns a thread, so every test is reproducible.
+* **Real retransmission.** Every sequence-space-consuming transmission — SYN, data, FIN —
+  is tracked until acknowledged and resent on RTO expiry, with exponential backoff and a
+  retransmission cap that aborts instead of looping forever.
+* **RFC 6298 RTO.** Initial RTO of 1 s, SRTT/RTTVAR smoothing (α = 1/8, β = 1/4),
+  `RTO = SRTT + 4·RTTVAR` clamped to [200 ms, 60 s]. **Karn's algorithm** discards the
+  ambiguous samples that retransmitted segments would otherwise contribute.
+* **MSS segmentation.** A single large `tcp_write` is split to the negotiated MSS; the
+  receiver reconstructs the original byte stream exactly.
+* **Congestion control that actually gates transmission.** Slow start, congestion
+  avoidance, and fast recovery decide what may be sent:
+  `bytes_in_flight ≤ min(cwnd, rwnd)` is enforced by the send path, not merely recorded.
+* **Fast retransmit.** Three duplicate ACKs resend the missing range without waiting for
+  the RTO.
+* **Flow control.** The advertised receive window shrinks as the receive buffer fills and a
+  window update is emitted when it reopens; a persist timer probes a closed window so a
+  lost update cannot deadlock the sender.
+* **Wraparound-safe sequence arithmetic.** All comparisons go through RFC 1982 serial
+  arithmetic (`src/tcp_seq.rs`), verified across `0xFFFF_FFFF` for handshake, data,
+  acknowledgement, and out-of-order reassembly.
+* **Bounded buffers.** The send buffer, receive buffer, out-of-order reassembly queue,
+  listener backlog, and finished-connection history all have explicit caps.
+* **Hostile input.** Malformed, truncated, out-of-window, and replayed segments are
+  rejected without panicking; resets are validated against the receive window (RFC 5961)
+  and ACKs of unsent data are refused.
+
+### Diagnostics
+
+`stack.tcp_diagnostics(stream)` returns a snapshot per connection — state, bytes and
+segments sent/received, retransmissions, fast retransmits, timeouts, duplicate ACKs,
+`cwnd`, `ssthresh`, `srtt`, `rttvar`, `rto`, bytes in flight, send and receive windows,
+unacknowledged segments, and buffer occupancy. All of it is owned by the connection; there
+is no global mutable state.
+
+---
+
 ## 🚀 Quickstart & Commands
 
-### 1. Run All Tests (225 Unit Tests & 75+ Integration Test Suites)
+### 1. Run All Tests
 ```bash
-cargo test
+cargo test --all-targets
 ```
 
 ### 2. Run Virtual Lab Integration Suites
@@ -482,7 +574,14 @@ cargo test --test test_lab_advanced
 cargo test --test test_lab_fabric
 ```
 
-### 3. Launch the Dual-Stack Interactive Shell (REPL)
+### 3. Run the Socket Runtime & TCP Reliability Suites
+```bash
+cargo test --test test_socket_runtime     # socket API, ports, accept queues, reaping
+cargo test --test test_tcp_reliability    # MSS, congestion, fast retransmit, wraparound
+cargo test --test test_tcp_loss           # loss/reorder torture, HTTP/1.1, 128 KiB + PCAP
+```
+
+### 4. Launch the Dual-Stack Interactive Shell (REPL)
 ```bash
 cargo run -- shell
 ```
@@ -502,6 +601,12 @@ netstack > lab route4 10.0.2.2 64
 netstack > lab route4 10.0.2.2 1
 netstack > lab udp-echo "Hello Virtual Network Lab"
 netstack > lab tcp-demo
+netstack > lab sockets
+netstack > lab tcp-reliable
+netstack > lab tcp-loss
+netstack > lab tcp-reorder
+netstack > lab http
+netstack > lab tcp-stats
 netstack > lab pcap lab_capture.pcap
 netstack > status
 netstack > exit
