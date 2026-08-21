@@ -457,6 +457,16 @@ impl NetStack {
         })
     }
 
+    /// Starts listening on every local address (`0.0.0.0:port`).
+    pub fn tcp_listen_any(&mut self, port: u16) -> Result<TcpListenerHandle, SocketError> {
+        self.sockets.tcp_listen_any(port)
+    }
+
+    /// True while a stream still owns a usable connection.
+    pub fn tcp_is_live(&self, handle: TcpStreamHandle) -> bool {
+        self.sockets.tcp_is_live(handle)
+    }
+
     /// Pops the next fully or partially established connection from the accept queue.
     /// Returns `WouldBlock` when no connection is pending.
     pub fn tcp_accept(

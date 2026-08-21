@@ -378,6 +378,41 @@ impl SocketRuntime {
         Ok(handle)
     }
 
+    /// Listens on every local address (`0.0.0.0:port`).
+    ///
+    /// A multi-interface node such as a router cannot know in advance which of its
+    /// addresses a peer will connect to, so a wildcard bind is the only correct one.
+    /// `dispatch_tcp_segment` builds each accepted connection from the segment's actual
+    /// destination address, so the resulting connections are still per-interface.
+    pub fn tcp_listen_any(&mut self, port: u16) -> Result<TcpListenerHandle, SocketError> {
+        if port == 0 {
+            return Err(SocketError::InvalidInput(
+                "wildcard listen requires an explicit port".to_string(),
+            ));
+        }
+        if self.tcp_listener_ports.contains_key(&port) {
+            return Err(SocketError::AddressInUse);
+        }
+
+        let local_addr = SocketAddrV4 {
+            ip: Ipv4Address::UNSPECIFIED,
+            port,
+        };
+        let handle = TcpListenerHandle(self.next_id());
+        let entry = TcpListenerEntry {
+            handle,
+            local_addr,
+            backlog: 128,
+            next_isn: 1000,
+            accept_queue: VecDeque::new(),
+        };
+
+        self.tcp_listener_ports.insert(port, handle);
+        self.tcp_listeners.insert(handle, entry);
+
+        Ok(handle)
+    }
+
     pub fn tcp_accept(
         &mut self,
         listener_handle: TcpListenerHandle,
@@ -603,6 +638,51 @@ impl SocketRuntime {
         self.tcp_shutdown(handle)
     }
 
+    /// Aborts a connection immediately and releases the handle.
+    ///
+    /// Anything still in the send buffer is flushed first, because a protocol that has
+    /// just written a shutdown message needs it to reach the peer, and then the
+    /// connection is removed and a RST is queued.
+    ///
+    /// This is what `tcp_close` cannot do. A graceful close is a no-op on a connection
+    /// that never finished its handshake: `initiate_close_at` only acts in ESTABLISHED
+    /// or CLOSE_WAIT, so a SYN_SENT connection would stay in the table retransmitting
+    /// forever once its handle was released. A long-lived session that reconnects on a
+    /// timer would accumulate one such connection per attempt. Aborting reclaims the
+    /// 4-tuple and the ephemeral port there and then.
+    pub fn tcp_abort(&mut self, handle: TcpStreamHandle, now_ms: u64) {
+        let Ok(key) = self.key_of(handle) else {
+            self.tcp_release(handle);
+            return;
+        };
+
+        if let Some((_, mut conn)) = self.tcp_connections.remove(&key) {
+            for payload in conn.poll_output(now_ms) {
+                self.tcp_tx.push_back((key.local, key.remote, payload));
+            }
+            // Tell a peer that may still hold state for this 4-tuple to drop it. There is
+            // nothing to reset if the connection never left CLOSED.
+            if !conn.aborted && conn.state != TcpState::Closed {
+                let mut flags = crate::tcp::TcpFlags::rst();
+                flags.ack = true;
+                let rst = TcpSegment::serialize(
+                    key.local.ip,
+                    key.remote.ip,
+                    key.local.port,
+                    key.remote.port,
+                    conn.snd_nxt,
+                    conn.rcv_nxt,
+                    flags,
+                    0,
+                    &[],
+                );
+                self.tcp_tx.push_back((key.local, key.remote, rst));
+            }
+        }
+
+        self.tcp_release(handle);
+    }
+
     /// Resolves a stream handle to its 4-tuple.
     fn key_of(&self, handle: TcpStreamHandle) -> Result<TcpConnectionKey, SocketError> {
         self.tcp_streams
@@ -620,6 +700,22 @@ impl SocketRuntime {
             .get(&handle)
             .map(|(st, _, _)| *st)
             .ok_or(SocketError::InvalidSocket)
+    }
+
+    /// True while the stream still owns a usable connection.
+    ///
+    /// Goes false as soon as the connection is aborted (retransmission limit reached, so
+    /// the peer is unreachable), reaches CLOSED, or has been reaped altogether. Long-lived
+    /// protocol sessions poll this to notice a dead transport without inspecting
+    /// `TcpConnection` directly.
+    pub fn tcp_is_live(&self, handle: TcpStreamHandle) -> bool {
+        let Ok(key) = self.key_of(handle) else {
+            return false;
+        };
+        match self.tcp_connections.get(&key) {
+            Some((_, conn)) => !conn.aborted && conn.state != TcpState::Closed,
+            None => false,
+        }
     }
 
     pub fn tcp_stats(&self, handle: TcpStreamHandle) -> Result<TcpStats, SocketError> {
@@ -961,6 +1057,143 @@ mod tests {
             runtime.udp_bind(local_addr).unwrap_err(),
             SocketError::AddressInUse
         );
+    }
+
+    #[test]
+    fn test_tcp_abort_reclaims_a_connection_a_graceful_close_cannot() {
+        let client_ip = Ipv4Address::new(10, 0, 0, 1);
+        let server_ip = Ipv4Address::new(10, 0, 0, 2);
+        let mut rt = SocketRuntime::new(client_ip);
+
+        let stream = rt
+            .tcp_connect_from(
+                SocketAddrV4 {
+                    ip: client_ip,
+                    port: 40_000,
+                },
+                SocketAddrV4 {
+                    ip: server_ip,
+                    port: 179,
+                },
+                100,
+            )
+            .unwrap();
+        let _ = rt.step_timers(0);
+        assert_eq!(rt.connection_count(), 1);
+
+        // The peer never answers, so the connection is stuck in SYN_SENT. A graceful
+        // close does nothing there and releasing the handle would orphan it.
+        assert_eq!(rt.tcp_state(stream), Ok(TcpState::SynSent));
+        rt.tcp_close(stream).unwrap();
+        assert_eq!(
+            rt.connection_count(),
+            1,
+            "a graceful close should be a no-op in SYN_SENT"
+        );
+
+        rt.tcp_abort(stream, 10);
+        assert_eq!(rt.connection_count(), 0, "abort left the connection behind");
+        assert!(!rt.tcp_is_live(stream));
+        // The port is free again, so a reconnect loop cannot exhaust the range.
+        assert!(
+            rt.tcp_connect_from(
+                SocketAddrV4 {
+                    ip: client_ip,
+                    port: 40_000,
+                },
+                SocketAddrV4 {
+                    ip: server_ip,
+                    port: 179,
+                },
+                200,
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn test_tcp_abort_flushes_buffered_data_before_resetting() {
+        let client_ip = Ipv4Address::new(10, 0, 0, 1);
+        let server_ip = Ipv4Address::new(10, 0, 0, 2);
+        let mut client = SocketRuntime::new(client_ip);
+        let mut server = SocketRuntime::new(server_ip);
+
+        let srv_addr = SocketAddrV4 {
+            ip: server_ip,
+            port: 179,
+        };
+        let listener = server.tcp_listen_any(179).unwrap();
+        let cs = client
+            .tcp_connect_from(
+                SocketAddrV4 {
+                    ip: client_ip,
+                    port: 40_000,
+                },
+                srv_addr,
+                100,
+            )
+            .unwrap();
+
+        // Three-way handshake.
+        let syn = client.step_timers(0).remove(0).payload;
+        let seg = TcpSegment::parse(client_ip, server_ip, &syn, true).unwrap();
+        let syn_ack = server
+            .dispatch_tcp_segment(client_ip, server_ip, &seg, 1)
+            .remove(0);
+        let seg = TcpSegment::parse(server_ip, client_ip, &syn_ack, true).unwrap();
+        let ack = client
+            .dispatch_tcp_segment(server_ip, client_ip, &seg, 2)
+            .remove(0);
+        let seg = TcpSegment::parse(client_ip, server_ip, &ack, true).unwrap();
+        let _ = server.dispatch_tcp_segment(client_ip, server_ip, &seg, 3);
+        let (ss, _) = server.tcp_accept(listener).unwrap();
+        assert_eq!(client.tcp_state(cs), Ok(TcpState::Established));
+
+        // A last message, then an immediate abort. The message must still go out, ahead
+        // of the RST, because that is how a NOTIFICATION reaches its peer.
+        client.tcp_write(cs, b"FINAL-WORD").unwrap();
+        client.tcp_abort(cs, 4);
+
+        let out = client.step_timers(5);
+        assert!(out.len() >= 2, "expected the data and then a reset");
+        let data = TcpSegment::parse(client_ip, server_ip, &out[0].payload, true).unwrap();
+        assert_eq!(data.payload, b"FINAL-WORD");
+        assert!(!data.flags.rst);
+        let rst = TcpSegment::parse(client_ip, server_ip, &out[1].payload, true).unwrap();
+        assert!(rst.flags.rst, "no RST followed the flushed data");
+
+        // The server sees the data, then the reset.
+        let _ = server.dispatch_tcp_segment(client_ip, server_ip, &data, 6);
+        let mut buf = [0u8; 32];
+        assert_eq!(server.tcp_read(ss, &mut buf), Ok(10));
+        assert_eq!(&buf[..10], b"FINAL-WORD");
+        let _ = server.dispatch_tcp_segment(client_ip, server_ip, &rst, 7);
+        assert_eq!(client.connection_count(), 0);
+    }
+
+    #[test]
+    fn test_wildcard_listener_accepts_on_any_local_address() {
+        let mut rt = SocketRuntime::new(Ipv4Address::new(10, 0, 0, 1));
+        rt.tcp_listen_any(179).unwrap();
+
+        // A multi-interface node must answer on an address that is not its default one.
+        assert!(rt.has_endpoint(
+            Ipv4Address::new(192, 168, 5, 1),
+            179,
+            Ipv4Address::new(192, 168, 5, 2),
+            50_000
+        ));
+        assert!(!rt.has_endpoint(
+            Ipv4Address::new(192, 168, 5, 1),
+            180,
+            Ipv4Address::new(192, 168, 5, 2),
+            50_000
+        ));
+        assert_eq!(
+            rt.tcp_listen_any(179).unwrap_err(),
+            SocketError::AddressInUse
+        );
+        assert!(rt.tcp_listen_any(0).is_err());
     }
 
     #[test]
