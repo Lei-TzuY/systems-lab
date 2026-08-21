@@ -7,6 +7,9 @@
 
 #![allow(dead_code)]
 
+/// Multi-AS BGP topologies used by the control-plane integration suites.
+pub mod bgp_lab;
+
 use toy_tcpip::ethernet::MacAddress;
 use toy_tcpip::ipv4::Ipv4Address;
 use toy_tcpip::lab::VirtualLab;
