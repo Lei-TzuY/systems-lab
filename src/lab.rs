@@ -11,10 +11,13 @@
 use crate::arp::{ArpOpcode, ArpPacket, ArpTable};
 use crate::ethernet::{ETHERTYPE_ARP, ETHERTYPE_IPV4, EtherType, EthernetFrame, MacAddress};
 use crate::icmp::{IcmpPacket, IcmpType};
-use crate::ipv4::{IP_PROTO_ICMP, Ipv4Address, Ipv4Packet};
+use crate::ipv4::{IP_PROTO_ICMP, IP_PROTO_UDP, Ipv4Address, Ipv4Packet};
+use crate::nat::NatTable;
 use crate::pcap::{LINKTYPE_ETHERNET, PcapWriter};
+use crate::rip::{RIP_PORT, RipEngine, RipPacket};
 use crate::router::RoutingTable;
 use crate::stack::{NetStack, NetStackConfig};
+use crate::udp::UdpDatagram;
 use std::collections::HashMap;
 
 /// Fault injection configuration and frame accounting for a virtual point-to-point or broadcast link.
@@ -28,7 +31,8 @@ pub struct VirtualLink {
     pub frames_forwarded: usize,
     pub frames_dropped: usize,
     pub frames_corrupted: usize,
-    pcap_writer: Option<PcapWriter<Vec<u8>>>,
+    pub in_flight_frames: Vec<Vec<u8>>,
+    pub pcap_writer: Option<PcapWriter<Vec<u8>>>,
 }
 
 impl VirtualLink {
@@ -42,6 +46,7 @@ impl VirtualLink {
             frames_forwarded: 0,
             frames_dropped: 0,
             frames_corrupted: 0,
+            in_flight_frames: Vec::new(),
             pcap_writer: None,
         }
     }
@@ -51,6 +56,17 @@ impl VirtualLink {
         self
     }
 
+    pub fn with_drop_indices(mut self, indices: &[usize]) -> Self {
+        self.drop_packet_indices.extend_from_slice(indices);
+        self
+    }
+
+    pub fn with_corrupt_indices(mut self, indices: &[usize]) -> Self {
+        self.corrupt_packet_indices.extend_from_slice(indices);
+        self
+    }
+
+    /// Enables continuous PCAP capture tap on this link.
     pub fn enable_pcap(&mut self) {
         let buffer = Vec::new();
         let writer = PcapWriter::new(buffer, 65535, LINKTYPE_ETHERNET).expect("PcapWriter init");
@@ -59,6 +75,21 @@ impl VirtualLink {
 
     pub fn take_pcap_bytes(&mut self) -> Option<Vec<u8>> {
         self.pcap_writer.as_ref().map(|w| w.get_ref().clone())
+    }
+
+    /// Configures deterministic link MTU limit in bytes.
+    pub fn set_mtu(&mut self, mtu: usize) {
+        self.mtu = mtu;
+    }
+
+    /// Adds zero-indexed packet numbers that must be dropped.
+    pub fn drop_packet_indices(&mut self, indices: &[usize]) {
+        self.drop_packet_indices.extend_from_slice(indices);
+    }
+
+    /// Adds zero-indexed packet numbers whose payloads must be corrupted with bit inversion.
+    pub fn corrupt_packet_indices(&mut self, indices: &[usize]) {
+        self.corrupt_packet_indices.extend_from_slice(indices);
     }
 
     /// Processes a frame attempting to cross this link.
@@ -82,7 +113,6 @@ impl VirtualLink {
 
         // 3. Check deterministic corruption rule
         if self.corrupt_packet_indices.contains(&pkt_index) && raw_frame.len() > 20 {
-            // Flip bits in the middle of payload to invalidate checksums
             let corrupt_pos = raw_frame.len() - 1;
             raw_frame[corrupt_pos] ^= 0xFF;
             self.frames_corrupted += 1;
@@ -98,9 +128,21 @@ impl VirtualLink {
         self.frames_forwarded += 1;
         Some(raw_frame)
     }
+
+    /// Enqueues a raw frame onto the virtual link for propagation.
+    pub fn push_frame(&mut self, frame: Vec<u8>) {
+        if let Some(delivered) = self.process_frame_transit(frame) {
+            self.in_flight_frames.push(delivered);
+        }
+    }
+
+    /// Drains all currently queued frames on the link.
+    pub fn drain_frames(&mut self) -> Vec<Vec<u8>> {
+        std::mem::take(&mut self.in_flight_frames)
+    }
 }
 
-/// A simulated Host node in the virtual network lab.
+/// Simulated Host endpoint running a NetStack attached to a virtual link.
 pub struct LabHost {
     pub name: String,
     pub link_name: String,
@@ -117,7 +159,7 @@ impl LabHost {
     }
 }
 
-/// An interface on a multi-homed Router node.
+/// Single network interface on a virtual router.
 #[derive(Debug, Clone)]
 pub struct RouterInterface {
     pub name: String,
@@ -128,13 +170,17 @@ pub struct RouterInterface {
 }
 
 /// A multi-interface Router node with hardware-like packet forwarding, TTL decrementing,
-/// and ICMP error generation.
+/// NAT translation (SNAT & DNAT), dynamic routing (RIPv2), and ICMP error generation.
 pub struct LabRouter {
     pub name: String,
     pub interfaces: Vec<RouterInterface>,
     pub routing_table: RoutingTable,
     pub arp_tables: HashMap<String, ArpTable>,
     pub pending_transit_packets: HashMap<(String, Ipv4Address), Vec<Vec<u8>>>,
+    pub nat_table: Option<NatTable>,
+    pub nat_lan_iface: Option<String>,
+    pub nat_wan_iface: Option<String>,
+    pub rip_engine: Option<RipEngine>,
     pub ip_id_counter: u16,
 }
 
@@ -146,8 +192,73 @@ impl LabRouter {
             routing_table: RoutingTable::new(),
             arp_tables: HashMap::new(),
             pending_transit_packets: HashMap::new(),
+            nat_table: None,
+            nat_lan_iface: None,
+            nat_wan_iface: None,
+            rip_engine: None,
             ip_id_counter: 100,
         }
+    }
+
+    pub fn enable_nat(&mut self, lan_iface: &str, wan_iface: &str, public_ip: Ipv4Address) {
+        self.nat_table = Some(NatTable::new(public_ip));
+        self.nat_lan_iface = Some(lan_iface.to_string());
+        self.nat_wan_iface = Some(wan_iface.to_string());
+    }
+
+    pub fn add_port_forward(
+        &mut self,
+        ext_port: u16,
+        int_ip: Ipv4Address,
+        int_port: u16,
+        proto: u8,
+    ) {
+        if let Some(ref mut nat) = self.nat_table {
+            nat.add_port_forward(ext_port, int_ip, int_port, proto);
+        }
+    }
+
+    pub fn enable_rip(&mut self) {
+        let mut rip = RipEngine::new();
+        for iface in &self.interfaces {
+            let subnet_net = iface.ip.mask(iface.subnet_mask);
+            rip.add_local_network(subnet_net, iface.subnet_mask, &iface.name);
+        }
+        self.routing_table = rip.routes.clone();
+        self.rip_engine = Some(rip);
+    }
+
+    pub fn generate_rip_advertisements(&self) -> Vec<(String, Vec<u8>)> {
+        let mut out = Vec::new();
+        if let Some(ref rip) = self.rip_engine {
+            let rip_pkt = rip.build_advertisement();
+            let rip_bytes = rip_pkt.serialize();
+            for iface in &self.interfaces {
+                let udp_bytes = UdpDatagram::serialize(
+                    iface.ip,
+                    Ipv4Address([224, 0, 0, 9]),
+                    RIP_PORT,
+                    RIP_PORT,
+                    &rip_bytes,
+                );
+                let ip_bytes = Ipv4Packet::serialize(
+                    iface.ip,
+                    Ipv4Address([224, 0, 0, 9]),
+                    IP_PROTO_UDP,
+                    100,
+                    1,
+                    &udp_bytes,
+                );
+                let eth_bytes = EthernetFrame::serialize(
+                    MacAddress([0x01, 0x00, 0x5E, 0x00, 0x00, 0x09]),
+                    iface.mac,
+                    ETHERTYPE_IPV4,
+                    &ip_bytes,
+                );
+                out.push((iface.link_name.clone(), eth_bytes));
+            }
+        }
+        out
     }
 
     pub fn add_interface(
@@ -259,10 +370,83 @@ impl LabRouter {
                         .or_default();
                     arp_table.insert(ip_pkt.header.src_ip.0, eth.src_mac);
 
+                    // Check for RIPv2 multicast or direct UDP packets
+                    if ip_pkt.header.protocol == crate::ipv4::IpProtocol::Udp
+                        && let Ok(udp) = UdpDatagram::parse(
+                            ip_pkt.header.src_ip,
+                            ip_pkt.header.dst_ip,
+                            ip_pkt.payload,
+                            false,
+                        )
+                        && udp.dst_port == RIP_PORT
+                    {
+                        if let Some(ref mut rip) = self.rip_engine
+                            && let Ok(rip_pkt) = RipPacket::parse(udp.payload)
+                        {
+                            rip.process_advertisement(
+                                ip_pkt.header.src_ip,
+                                &rip_pkt,
+                                &ingress_iface.name,
+                            );
+                            self.routing_table = rip.routes.clone();
+                        }
+                        return out_transmissions;
+                    }
+
                     let is_for_router =
                         self.interfaces.iter().any(|i| i.ip == ip_pkt.header.dst_ip);
 
                     if is_for_router {
+                        // Check if Inbound NAT (DNAT) translates this WAN packet for a LAN host
+                        if let Some(ref mut nat) = self.nat_table
+                            && self.nat_wan_iface.as_deref() == Some(&ingress_iface.name)
+                        {
+                            let mut ip_buf = eth.payload.to_vec();
+                            if nat.translate_inbound(&mut ip_buf)
+                                && let Ok(trans_ip) = Ipv4Packet::parse(&ip_buf, true)
+                                && let Some(route) =
+                                    self.routing_table.lookup(trans_ip.header.dst_ip)
+                                && let Some(egress_iface) =
+                                    self.interfaces.iter().find(|i| i.name == route.interface)
+                            {
+                                let egress_link = egress_iface.link_name.clone();
+                                let next_hop = route.next_hop(trans_ip.header.dst_ip);
+                                let egress_arp = self
+                                    .arp_tables
+                                    .entry(egress_iface.name.clone())
+                                    .or_default();
+                                if let Some(dst_mac) = egress_arp.lookup(&next_hop.0) {
+                                    let eth_out = EthernetFrame::serialize(
+                                        dst_mac,
+                                        egress_iface.mac,
+                                        ETHERTYPE_IPV4,
+                                        &ip_buf,
+                                    );
+                                    out_transmissions.push((egress_link, eth_out));
+                                    return out_transmissions;
+                                } else {
+                                    let pending_key = (egress_iface.name.clone(), next_hop);
+                                    self.pending_transit_packets
+                                        .entry(pending_key)
+                                        .or_default()
+                                        .push(ip_buf);
+                                    let arp_req = ArpPacket::build_request(
+                                        egress_iface.mac,
+                                        egress_iface.ip.0,
+                                        next_hop.0,
+                                    );
+                                    let eth_arp = EthernetFrame::serialize(
+                                        MacAddress::BROADCAST,
+                                        egress_iface.mac,
+                                        ETHERTYPE_ARP,
+                                        &arp_req.serialize(),
+                                    );
+                                    out_transmissions.push((egress_link, eth_arp));
+                                    return out_transmissions;
+                                }
+                            }
+                        }
+
                         // Direct packet to router's own IP (e.g. pinging the router)
                         if ip_pkt.header.protocol == crate::ipv4::IpProtocol::Icmp
                             && let Ok(icmp) = IcmpPacket::parse(ip_pkt.payload, true)
@@ -325,7 +509,7 @@ impl LabRouter {
                             {
                                 let egress_link = egress_iface.link_name.clone();
                                 let ip_id = ip_pkt.header.identification;
-                                let forwarded_ip_bytes = Ipv4Packet::serialize(
+                                let mut forwarded_ip_bytes = Ipv4Packet::serialize(
                                     ip_pkt.header.src_ip,
                                     ip_pkt.header.dst_ip,
                                     ip_pkt.header.protocol.to_u8(),
@@ -333,6 +517,14 @@ impl LabRouter {
                                     new_ttl,
                                     ip_pkt.payload,
                                 );
+
+                                // Check if Outbound NAT (SNAT) applies for LAN -> WAN
+                                if let Some(ref mut nat) = self.nat_table
+                                    && self.nat_lan_iface.as_deref() == Some(&ingress_iface.name)
+                                    && self.nat_wan_iface.as_deref() == Some(&egress_iface.name)
+                                {
+                                    nat.translate_outbound(&mut forwarded_ip_bytes);
+                                }
 
                                 let egress_arp = self
                                     .arp_tables
@@ -543,5 +735,18 @@ impl VirtualLab {
             steps += 1;
         }
         steps
+    }
+
+    /// Triggers all RIPv2-enabled routers in the lab to generate and transmit periodic routing updates.
+    pub fn broadcast_rip_advertisements(&mut self) {
+        let router_names: Vec<String> = self.routers.keys().cloned().collect();
+        for r_name in router_names {
+            let router = self.routers.get(&r_name).unwrap();
+            let updates = router.generate_rip_advertisements();
+            for (link_name, frame) in updates {
+                self.in_flight_frames
+                    .push((r_name.clone(), link_name, frame));
+            }
+        }
     }
 }

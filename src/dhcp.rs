@@ -313,6 +313,143 @@ impl DhcpPacket {
             lease_time: Some(lease_secs),
         }
     }
+    pub fn build_request(
+        chaddr: MacAddress,
+        xid: u32,
+        requested_ip: Ipv4Address,
+        server_id: Ipv4Address,
+    ) -> Self {
+        DhcpPacket {
+            op: DHCP_OP_BOOTREQUEST,
+            xid,
+            ciaddr: Ipv4Address::UNSPECIFIED,
+            yiaddr: requested_ip,
+            siaddr: server_id,
+            chaddr,
+            msg_type: DhcpMessageType::Request,
+            subnet_mask: None,
+            router: None,
+            dns: None,
+            server_id: Some(server_id),
+            lease_time: None,
+        }
+    }
+
+    pub fn build_ack(
+        chaddr: MacAddress,
+        xid: u32,
+        assigned_ip: Ipv4Address,
+        server_ip: Ipv4Address,
+        subnet_mask: Ipv4Address,
+        router: Ipv4Address,
+        dns: Ipv4Address,
+        lease_secs: u32,
+    ) -> Self {
+        DhcpPacket {
+            op: DHCP_OP_BOOTREPLY,
+            xid,
+            ciaddr: Ipv4Address::UNSPECIFIED,
+            yiaddr: assigned_ip,
+            siaddr: server_ip,
+            chaddr,
+            msg_type: DhcpMessageType::Ack,
+            subnet_mask: Some(subnet_mask),
+            router: Some(router),
+            dns: Some(dns),
+            server_id: Some(server_ip),
+            lease_time: Some(lease_secs),
+        }
+    }
+}
+
+/// Dynamic Host Configuration Protocol (DHCP) Server
+#[derive(Debug, Clone)]
+pub struct DhcpServer {
+    pub server_ip: Ipv4Address,
+    pub subnet_mask: Ipv4Address,
+    pub router: Ipv4Address,
+    pub dns: Ipv4Address,
+    pub start_ip: Ipv4Address,
+    pub end_ip: Ipv4Address,
+    pub next_alloc_u32: u32,
+    pub lease_time_secs: u32,
+    pub leases: std::collections::HashMap<MacAddress, Ipv4Address>,
+}
+
+impl DhcpServer {
+    pub fn new(
+        server_ip: Ipv4Address,
+        subnet_mask: Ipv4Address,
+        router: Ipv4Address,
+        dns: Ipv4Address,
+        start_ip: Ipv4Address,
+        end_ip: Ipv4Address,
+        lease_time_secs: u32,
+    ) -> Self {
+        let next_alloc_u32 = start_ip.to_u32();
+        DhcpServer {
+            server_ip,
+            subnet_mask,
+            router,
+            dns,
+            start_ip,
+            end_ip,
+            next_alloc_u32,
+            lease_time_secs,
+            leases: std::collections::HashMap::new(),
+        }
+    }
+
+    fn allocate_ip(&mut self, mac: MacAddress) -> Ipv4Address {
+        if let Some(&existing) = self.leases.get(&mac) {
+            return existing;
+        }
+
+        let allocated = Ipv4Address::from_u32(self.next_alloc_u32);
+        if self.next_alloc_u32 < self.end_ip.to_u32() {
+            self.next_alloc_u32 += 1;
+        }
+        self.leases.insert(mac, allocated);
+        allocated
+    }
+
+    pub fn handle_packet(&mut self, pkt: &DhcpPacket) -> Option<DhcpPacket> {
+        match pkt.msg_type {
+            DhcpMessageType::Discover => {
+                let offered_ip = self.allocate_ip(pkt.chaddr);
+                Some(DhcpPacket::build_offer(
+                    pkt.chaddr,
+                    pkt.xid,
+                    offered_ip,
+                    self.server_ip,
+                    self.subnet_mask,
+                    self.router,
+                    self.dns,
+                    self.lease_time_secs,
+                ))
+            }
+            DhcpMessageType::Request => {
+                let assigned_ip = if pkt.yiaddr != Ipv4Address::UNSPECIFIED {
+                    pkt.yiaddr
+                } else {
+                    self.allocate_ip(pkt.chaddr)
+                };
+                self.leases.insert(pkt.chaddr, assigned_ip);
+
+                Some(DhcpPacket::build_ack(
+                    pkt.chaddr,
+                    pkt.xid,
+                    assigned_ip,
+                    self.server_ip,
+                    self.subnet_mask,
+                    self.router,
+                    self.dns,
+                    self.lease_time_secs,
+                ))
+            }
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -320,35 +457,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_dhcp_discover_and_offer() {
-        let mac = MacAddress([0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc]);
+    fn test_dhcp_full_dora_negotiation() {
+        let client_mac = MacAddress([0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc]);
         let xid = 0xdeadbeef;
-
-        let discover = DhcpPacket::build_discover(mac, xid);
-        let raw_disc = discover.serialize();
-        let parsed_disc = DhcpPacket::parse(&raw_disc).unwrap();
-        assert_eq!(parsed_disc.msg_type, DhcpMessageType::Discover);
-        assert_eq!(parsed_disc.xid, xid);
-        assert_eq!(parsed_disc.chaddr, mac);
-
-        let offer = DhcpPacket::build_offer(
-            mac,
-            xid,
-            Ipv4Address::new(192, 168, 1, 100),
+        let mut server = DhcpServer::new(
             Ipv4Address::new(192, 168, 1, 1),
             Ipv4Address::new(255, 255, 255, 0),
             Ipv4Address::new(192, 168, 1, 1),
             Ipv4Address::new(8, 8, 8, 8),
+            Ipv4Address::new(192, 168, 1, 100),
+            Ipv4Address::new(192, 168, 1, 200),
             86400,
         );
-        let raw_offer = offer.serialize();
-        let parsed_offer = DhcpPacket::parse(&raw_offer).unwrap();
-        assert_eq!(parsed_offer.msg_type, DhcpMessageType::Offer);
-        assert_eq!(parsed_offer.yiaddr, Ipv4Address::new(192, 168, 1, 100));
-        assert_eq!(
-            parsed_offer.server_id,
-            Some(Ipv4Address::new(192, 168, 1, 1))
-        );
-        assert_eq!(parsed_offer.lease_time, Some(86400));
+
+        // 1. Discover -> Offer
+        let disc = DhcpPacket::build_discover(client_mac, xid);
+        let offer = server.handle_packet(&disc).expect("DHCP Offer");
+        assert_eq!(offer.msg_type, DhcpMessageType::Offer);
+        assert_eq!(offer.yiaddr, Ipv4Address::new(192, 168, 1, 100));
+
+        // 2. Request -> ACK
+        let req = DhcpPacket::build_request(client_mac, xid, offer.yiaddr, server.server_ip);
+        let ack = server.handle_packet(&req).expect("DHCP ACK");
+        assert_eq!(ack.msg_type, DhcpMessageType::Ack);
+        assert_eq!(ack.yiaddr, Ipv4Address::new(192, 168, 1, 100));
+        assert_eq!(ack.router, Some(Ipv4Address::new(192, 168, 1, 1)));
+        assert_eq!(ack.subnet_mask, Some(Ipv4Address::new(255, 255, 255, 0)));
     }
 }

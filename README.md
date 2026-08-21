@@ -443,7 +443,8 @@ TCP-IP Stack/
 │   ├── test_dhcp.rs       # DHCP DORA handshake tests
 │   ├── test_bus.rs        # Virtual network bus multi-node tests
 │   ├── test_stack.rs      # End-to-end PCAP pipeline integration tests
-│   └── test_lab_e2e.rs    # Integrated Virtual Network Lab end-to-end data plane tests
+│   ├── test_lab_e2e.rs    # Integrated Virtual Network Lab end-to-end data plane tests
+│   └── test_lab_advanced.rs # Advanced Virtual Lab: DHCP DORA, NAT, RIPv2 & TCP OOO reassembly
 ```
 
 ---
@@ -453,8 +454,11 @@ TCP-IP Stack/
 The project includes an in-process **Deterministic Virtual Network Lab** (`src/lab.rs`) allowing realistic multi-node, multi-subnet networking topologies without external kernel privileges, root access, or physical hardware:
 
 * **Topologies**: Arbitrary point-to-point and switched multi-access broadcast links (`VirtualLink`), multi-homed routers (`LabRouter`), and dual-stack end hosts (`LabHost`).
+* **Dynamic Network Auto-Configuration**: Full DHCPv4 DORA (Discover $\rightarrow$ Offer $\rightarrow$ Request $\rightarrow$ ACK) engine with dynamic IP pool allocation, lease management, and client stack auto-reconfiguration (`dhcp_discover`, `apply_dhcp_ack`).
+* **Network Address Translation (NAPT)**: Multi-interface gateway router SNAT masquerading for outbound LAN traffic and bidirectional DNAT connection tracking (`NatTable`).
+* **Dynamic Routing Convergence**: Multi-router distance-vector routing (`RIPv2`) over multicast `224.0.0.9:520` with split horizon, poison reverse, and automatic forwarding information base (FIB) synchronization.
+* **TCP Sliding Window & Out-of-Order Reassembly**: TCP segment buffering queue (`ooo_queue`), contiguous stream reassembly, and RFC 793 connection lifecycle (`SYN` $\rightarrow$ `ESTABLISHED` $\rightarrow$ `FIN-ACK` $\rightarrow$ `CLOSED`).
 * **Hardware-like Forwarding Plane**: LPM route table lookup, TTL decrementing & header checksum recalculation, cold ARP resolution queuing, and ICMP Time Exceeded (Type 11 Code 0) generation.
-* **Full TCP Connection Lifecycle**: RFC 793 active 3-way handshake (`SYN` $\rightarrow$ `SYN-ACK` $\rightarrow$ `ACK`), sliding window data transfer, and 4-way teardown (`FIN-ACK` $\rightarrow$ `LAST-ACK` $\rightarrow$ `TIME-WAIT` $\rightarrow$ `CLOSED`).
 * **Fault Injection Engine**: Configurable link MTU limits, deterministic drop sequences, and bit-level payload corruption to verify strict checksum rejection.
 * **Integrated PCAP Tap**: Continuous packet capture on every virtual link, exportable directly to Wireshark-compatible `.pcap` trace files.
 
@@ -462,14 +466,15 @@ The project includes an in-process **Deterministic Virtual Network Lab** (`src/l
 
 ## 🚀 Quickstart & Commands
 
-### 1. Run All Tests (225 Unit Tests & 70+ Integration Test Suites)
+### 1. Run All Tests (225 Unit Tests & 75+ Integration Test Suites)
 ```bash
 cargo test
 ```
 
-### 2. Run End-to-End Virtual Lab Test Suite
+### 2. Run Virtual Lab Integration Suites
 ```bash
 cargo test --test test_lab_e2e
+cargo test --test test_lab_advanced
 ```
 
 ### 3. Launch the Dual-Stack Interactive Shell (REPL)
@@ -479,6 +484,9 @@ cargo run -- shell
 Inside the interactive shell:
 ```text
 netstack > lab topology
+netstack > lab dhcp
+netstack > lab nat
+netstack > lab rip
 netstack > lab ping4 192.168.1.20
 netstack > lab ping6 2001:db8:1::20
 netstack > lab route4 10.0.2.2 64

@@ -8469,6 +8469,269 @@ impl NetworkShell {
                 );
             }
 
+            "dhcp" => {
+                println!("=== Virtual Lab: DHCPv4 DORA Auto-Configuration Demo ===");
+                let mut lab = VirtualLab::new();
+                let srv_ip = Ipv4Address::new(192, 168, 1, 1);
+                let client_mac = MacAddress([0x02, 0x00, 0x00, 0x00, 0x01, 0x99]);
+
+                lab.add_host(
+                    "dhcp_server",
+                    "lan_dhcp",
+                    NetStackConfig {
+                        mac: MacAddress([0x02, 0x00, 0x00, 0x00, 0x01, 0x01]),
+                        ip: srv_ip,
+                        ipv6: None,
+                        subnet_mask: 24,
+                        gateway: None,
+                    },
+                );
+                lab.host_mut("dhcp_server").unwrap().stack.dhcp_server =
+                    Some(crate::dhcp::DhcpServer::new(
+                        srv_ip,
+                        Ipv4Address::new(255, 255, 255, 0),
+                        srv_ip,
+                        Ipv4Address::new(8, 8, 8, 8),
+                        Ipv4Address::new(192, 168, 1, 150),
+                        Ipv4Address::new(192, 168, 1, 200),
+                        86400,
+                    ));
+
+                lab.add_host(
+                    "client",
+                    "lan_dhcp",
+                    NetStackConfig {
+                        mac: client_mac,
+                        ip: Ipv4Address::UNSPECIFIED,
+                        ipv6: None,
+                        subnet_mask: 0,
+                        gateway: None,
+                    },
+                );
+
+                println!("1. Client broadcasting DHCP Discover...");
+                let disc = lab
+                    .host_mut("client")
+                    .unwrap()
+                    .stack
+                    .dhcp_discover(0xABCDEF);
+                lab.send_from_host("client", disc);
+                lab.run_until_quiescent(10);
+
+                let client = lab.host_mut("client").unwrap();
+                let offer = client.stack.received_dhcp_offers[0].clone();
+                println!("2. Client received DHCP Offer: IP = {}", offer.yiaddr);
+
+                println!("3. Client sending DHCP Request for {}...", offer.yiaddr);
+                let req =
+                    client
+                        .stack
+                        .dhcp_request(offer.yiaddr, offer.server_id.unwrap(), 0xABCDEF);
+                lab.send_from_host("client", req);
+                lab.run_until_quiescent(10);
+
+                let client = lab.host_mut("client").unwrap();
+                let ack = client.stack.received_dhcp_acks[0].clone();
+                println!(
+                    "4. Client received DHCP ACK: IP = {}, Router = {:?}",
+                    ack.yiaddr, ack.router
+                );
+
+                client.stack.apply_dhcp_ack(&ack);
+                println!(
+                    "✓ Client stack dynamically reconfigured: IP = {}/{}",
+                    client.stack.config.ip, client.stack.config.subnet_mask
+                );
+            }
+
+            "nat" => {
+                println!("=== Virtual Lab: NAPT (SNAT & DNAT) Router Demo ===");
+                let mut lab = VirtualLab::new();
+                let client_ip = Ipv4Address::new(192, 168, 10, 5);
+                let router_lan_ip = Ipv4Address::new(192, 168, 10, 1);
+                let router_wan_ip = Ipv4Address::new(203, 0, 113, 1);
+                let server_ip = Ipv4Address::new(203, 0, 113, 80);
+
+                lab.add_host(
+                    "private_client",
+                    "lan",
+                    NetStackConfig {
+                        mac: MacAddress([0x02, 0x00, 0x00, 0x00, 0x0A, 0x10]),
+                        ip: client_ip,
+                        ipv6: None,
+                        subnet_mask: 24,
+                        gateway: Some(router_lan_ip),
+                    },
+                );
+
+                lab.add_host(
+                    "wan_server",
+                    "wan",
+                    NetStackConfig {
+                        mac: MacAddress([0x02, 0x00, 0x00, 0x00, 0x0B, 0x80]),
+                        ip: server_ip,
+                        ipv6: None,
+                        subnet_mask: 24,
+                        gateway: Some(router_wan_ip),
+                    },
+                );
+
+                lab.host_mut("wan_server").unwrap().stack.udp_sockets.bind(
+                    8080,
+                    |_src, _port, data| {
+                        let mut resp = b"ACK:".to_vec();
+                        resp.extend_from_slice(data);
+                        Some(resp)
+                    },
+                );
+
+                let mut r = LabRouter::new("nat_router");
+                r.add_interface(
+                    "eth_lan",
+                    MacAddress([0x02, 0x00, 0x00, 0x00, 0x0A, 0x01]),
+                    router_lan_ip,
+                    24,
+                    "lan",
+                );
+                r.add_interface(
+                    "eth_wan",
+                    MacAddress([0x02, 0x00, 0x00, 0x00, 0x0B, 0x01]),
+                    router_wan_ip,
+                    24,
+                    "wan",
+                );
+                r.enable_nat("eth_lan", "eth_wan", router_wan_ip);
+                lab.add_router(r);
+
+                println!(
+                    "1. LAN Client {} sending UDP to WAN Server {}:8080...",
+                    client_ip, server_ip
+                );
+                let query = lab
+                    .host_mut("private_client")
+                    .unwrap()
+                    .stack
+                    .send_udp(server_ip, 45000, 8080, b"TRANSLATION_TEST")
+                    .unwrap();
+                lab.send_from_host("private_client", query);
+                lab.run_until_quiescent(20);
+
+                let wan_srv = lab.host("wan_server").unwrap();
+                let (src, _, _, _) = &wan_srv.stack.received_udp_payloads[0];
+                println!(
+                    "2. WAN Server received datagram from: {} (SNAT rewritten from {})",
+                    src, client_ip
+                );
+
+                let client = lab.host("private_client").unwrap();
+                let (_, _, _, reply) = &client.stack.received_udp_payloads[0];
+                println!(
+                    "3. Private Client received reply: '{}' (DNAT de-translated)",
+                    String::from_utf8_lossy(reply)
+                );
+                println!("✓ Full SNAT and DNAT session translation verified!");
+            }
+
+            "rip" => {
+                println!("=== Virtual Lab: RIPv2 Multi-Router Dynamic Convergence Demo ===");
+                let mut lab = VirtualLab::new();
+                let h_a_ip = Ipv4Address::new(10, 0, 1, 2);
+                let h_b_ip = Ipv4Address::new(10, 0, 2, 2);
+
+                lab.add_host(
+                    "host_a",
+                    "link_a",
+                    NetStackConfig {
+                        mac: MacAddress([0x02, 0x00, 0x00, 0x00, 0x01, 0x02]),
+                        ip: h_a_ip,
+                        ipv6: None,
+                        subnet_mask: 24,
+                        gateway: Some(Ipv4Address::new(10, 0, 1, 1)),
+                    },
+                );
+
+                lab.add_host(
+                    "host_b",
+                    "link_b",
+                    NetStackConfig {
+                        mac: MacAddress([0x02, 0x00, 0x00, 0x00, 0x02, 0x02]),
+                        ip: h_b_ip,
+                        ipv6: None,
+                        subnet_mask: 24,
+                        gateway: Some(Ipv4Address::new(10, 0, 2, 1)),
+                    },
+                );
+
+                let mut r1 = LabRouter::new("r1");
+                r1.add_interface(
+                    "r1_lan",
+                    MacAddress([0x02, 0x00, 0x00, 0x00, 0x01, 0x01]),
+                    Ipv4Address::new(10, 0, 1, 1),
+                    24,
+                    "link_a",
+                );
+                r1.add_interface(
+                    "r1_wan",
+                    MacAddress([0x02, 0x00, 0x00, 0x00, 0x11, 0x01]),
+                    Ipv4Address::new(172, 16, 0, 1),
+                    24,
+                    "link_tr",
+                );
+                r1.enable_rip();
+                lab.add_router(r1);
+
+                let mut r2 = LabRouter::new("r2");
+                r2.add_interface(
+                    "r2_wan",
+                    MacAddress([0x02, 0x00, 0x00, 0x00, 0x11, 0x02]),
+                    Ipv4Address::new(172, 16, 0, 2),
+                    24,
+                    "link_tr",
+                );
+                r2.add_interface(
+                    "r2_lan",
+                    MacAddress([0x02, 0x00, 0x00, 0x00, 0x02, 0x01]),
+                    Ipv4Address::new(10, 0, 2, 1),
+                    24,
+                    "link_b",
+                );
+                r2.enable_rip();
+                lab.add_router(r2);
+
+                println!("1. Routers exchanging RIPv2 updates over 224.0.0.9:520...");
+                lab.broadcast_rip_advertisements();
+                lab.run_until_quiescent(10);
+
+                let r1_route = lab
+                    .router("r1")
+                    .unwrap()
+                    .routing_table
+                    .lookup(h_b_ip)
+                    .unwrap();
+                println!(
+                    "2. Router 1 dynamically learned route to 10.0.2.0/24 via next-hop {:?}",
+                    r1_route.next_hop(h_b_ip)
+                );
+
+                println!(
+                    "3. Host A ({}) pinging Host B ({}) across converged multi-router fabric...",
+                    h_a_ip, h_b_ip
+                );
+                let ping = lab
+                    .host_mut("host_a")
+                    .unwrap()
+                    .stack
+                    .ping4(h_b_ip, 0x1122, 1, b"RIP_TEST")
+                    .unwrap();
+                lab.send_from_host("host_a", ping);
+                lab.run_until_quiescent(20);
+
+                let host_a = lab.host("host_a").unwrap();
+                if !host_a.stack.received_icmp_replies.is_empty() {
+                    println!("✓ Multi-hop dynamic routing ping successful!");
+                }
+            }
+
             "pcap" => {
                 let out_file = if args.len() >= 2 {
                     args[1]

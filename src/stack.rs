@@ -39,6 +39,9 @@ pub struct NetStack {
     pub ip_id_counter: u16,
     pub pending_arp_packets: HashMap<Ipv4Address, Vec<Vec<u8>>>,
     pub pending_ndp_packets: HashMap<Ipv6Address, Vec<Vec<u8>>>,
+    pub dhcp_server: Option<crate::dhcp::DhcpServer>,
+    pub received_dhcp_offers: Vec<crate::dhcp::DhcpPacket>,
+    pub received_dhcp_acks: Vec<crate::dhcp::DhcpPacket>,
     pub received_icmp_replies: Vec<(Ipv4Address, u16, u16)>,
     pub received_icmp_time_exceeded: Vec<(Ipv4Address, u8)>,
     pub received_icmp_unreachable: Vec<(Ipv4Address, u8)>,
@@ -71,6 +74,9 @@ impl NetStack {
             ip_id_counter: 1,
             pending_arp_packets: HashMap::new(),
             pending_ndp_packets: HashMap::new(),
+            dhcp_server: None,
+            received_dhcp_offers: Vec::new(),
+            received_dhcp_acks: Vec::new(),
             received_icmp_replies: Vec::new(),
             received_icmp_time_exceeded: Vec::new(),
             received_icmp_unreachable: Vec::new(),
@@ -270,6 +276,86 @@ impl NetStack {
         self.send_ip_packet(dst_ip, ip_bytes)
     }
 
+    pub fn dhcp_discover(&mut self, xid: u32) -> Vec<u8> {
+        let disc = crate::dhcp::DhcpPacket::build_discover(self.config.mac, xid);
+        let dhcp_bytes = disc.serialize();
+        let udp_bytes = crate::udp::UdpDatagram::serialize(
+            Ipv4Address::UNSPECIFIED,
+            Ipv4Address::BROADCAST,
+            68,
+            67,
+            &dhcp_bytes,
+        );
+        let ip_id = self.next_ip_id();
+        let ip_bytes = Ipv4Packet::serialize(
+            Ipv4Address::UNSPECIFIED,
+            Ipv4Address::BROADCAST,
+            IP_PROTO_UDP,
+            ip_id,
+            64,
+            &udp_bytes,
+        );
+        EthernetFrame::serialize(
+            MacAddress::BROADCAST,
+            self.config.mac,
+            ETHERTYPE_IPV4,
+            &ip_bytes,
+        )
+    }
+
+    pub fn dhcp_request(
+        &mut self,
+        requested_ip: Ipv4Address,
+        server_id: Ipv4Address,
+        xid: u32,
+    ) -> Vec<u8> {
+        let req =
+            crate::dhcp::DhcpPacket::build_request(self.config.mac, xid, requested_ip, server_id);
+        let dhcp_bytes = req.serialize();
+        let udp_bytes = crate::udp::UdpDatagram::serialize(
+            Ipv4Address::UNSPECIFIED,
+            Ipv4Address::BROADCAST,
+            68,
+            67,
+            &dhcp_bytes,
+        );
+        let ip_id = self.next_ip_id();
+        let ip_bytes = Ipv4Packet::serialize(
+            Ipv4Address::UNSPECIFIED,
+            Ipv4Address::BROADCAST,
+            IP_PROTO_UDP,
+            ip_id,
+            64,
+            &udp_bytes,
+        );
+        EthernetFrame::serialize(
+            MacAddress::BROADCAST,
+            self.config.mac,
+            ETHERTYPE_IPV4,
+            &ip_bytes,
+        )
+    }
+
+    pub fn apply_dhcp_ack(&mut self, ack: &crate::dhcp::DhcpPacket) {
+        self.config.ip = ack.yiaddr;
+        if let Some(mask) = ack.subnet_mask {
+            let mask_u32 = mask.to_u32();
+            self.config.subnet_mask = mask_u32.count_ones() as u8;
+        }
+        if let Some(gw) = ack.router {
+            self.config.gateway = Some(gw);
+        }
+
+        // Rebuild routing table
+        let mut rt = RoutingTable::new();
+        let subnet_net = self.config.ip.mask(self.config.subnet_mask);
+        rt.add_route(subnet_net, self.config.subnet_mask, None, "eth0");
+        if let Some(gw) = self.config.gateway {
+            rt.add_route(Ipv4Address::UNSPECIFIED, 0, Some(gw), "eth0");
+        }
+        self.routing_table = rt;
+    }
+
     /// Primary entry point: process incoming raw Ethernet frame bytes,
     /// demultiplex through all protocol layers, and return any outgoing reply frames.
     pub fn process_frame(&mut self, raw_frame: &[u8]) -> Vec<Vec<u8>> {
@@ -402,6 +488,65 @@ impl NetStack {
                                     udp.dst_port,
                                     udp.payload.to_vec(),
                                 ));
+
+                                // DHCP Server processing (port 67)
+                                if udp.dst_port == 67 {
+                                    let dhcp_reply_data =
+                                        if let Some(ref mut srv) = self.dhcp_server {
+                                            if let Ok(dhcp_in) =
+                                                crate::dhcp::DhcpPacket::parse(udp.payload)
+                                            {
+                                                srv.handle_packet(&dhcp_in)
+                                                    .map(|reply| (reply, srv.server_ip))
+                                            } else {
+                                                None
+                                            }
+                                        } else {
+                                            None
+                                        };
+
+                                    if let Some((dhcp_reply, server_ip)) = dhcp_reply_data {
+                                        let dhcp_raw = dhcp_reply.serialize();
+                                        let udp_out = UdpDatagram::serialize(
+                                            server_ip,
+                                            Ipv4Address::BROADCAST,
+                                            67,
+                                            68,
+                                            &dhcp_raw,
+                                        );
+                                        let ip_id = self.next_ip_id();
+                                        let ip_out = Ipv4Packet::serialize(
+                                            server_ip,
+                                            Ipv4Address::BROADCAST,
+                                            IP_PROTO_UDP,
+                                            ip_id,
+                                            64,
+                                            &udp_out,
+                                        );
+                                        let eth_out = EthernetFrame::serialize(
+                                            dhcp_reply.chaddr,
+                                            self.config.mac,
+                                            ETHERTYPE_IPV4,
+                                            &ip_out,
+                                        );
+                                        out_frames.push(eth_out);
+                                    }
+                                }
+
+                                // DHCP Client processing (port 68)
+                                if udp.dst_port == 68
+                                    && let Ok(dhcp_in) = crate::dhcp::DhcpPacket::parse(udp.payload)
+                                {
+                                    match dhcp_in.msg_type {
+                                        crate::dhcp::DhcpMessageType::Offer => {
+                                            self.received_dhcp_offers.push(dhcp_in);
+                                        }
+                                        crate::dhcp::DhcpMessageType::Ack => {
+                                            self.received_dhcp_acks.push(dhcp_in);
+                                        }
+                                        _ => {}
+                                    }
+                                }
 
                                 if let Some(resp_payload) = self.udp_sockets.dispatch(
                                     ip_pkt.header.src_ip,
