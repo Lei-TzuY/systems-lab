@@ -9,19 +9,23 @@
 //! - Discrete event stepping, simulated logical clock advancement, and run-to-quiescence simulation
 
 use crate::arp::{ArpOpcode, ArpPacket, ArpTable};
+use crate::bgp::Ipv4Prefix;
+use crate::bgp_router::{BgpPeerMode, BgpRouter};
 use crate::ethernet::{
     ETHERTYPE_ARP, ETHERTYPE_IPV4, ETHERTYPE_MPLS, EtherType, EthernetFrame, MacAddress,
 };
 use crate::firewall::{Firewall, FirewallAction, FirewallChain};
 use crate::icmp::{IcmpPacket, IcmpType};
-use crate::ipv4::{IP_PROTO_ICMP, IP_PROTO_UDP, Ipv4Address, Ipv4Packet};
+use crate::ipv4::{IP_PROTO_ICMP, IP_PROTO_TCP, IP_PROTO_UDP, Ipv4Address, Ipv4Packet};
 use crate::mpls::{LfibAction, LfibTable, MplsHeader, MplsPacket};
 use crate::nat::NatTable;
 use crate::ospf::OspfLsdb;
 use crate::pcap::{LINKTYPE_ETHERNET, PcapWriter};
 use crate::rip::{RIP_PORT, RipEngine, RipPacket};
-use crate::router::RoutingTable;
+use crate::router::{RouteSource, RoutingTable};
+use crate::socket::SocketRuntime;
 use crate::stack::{NetStack, NetStackConfig};
+use crate::tcp::TcpSegment;
 use crate::udp::UdpDatagram;
 use crate::vxlan::{VXLAN_UDP_PORT, VxlanPacket};
 use std::collections::HashMap;
@@ -41,6 +45,10 @@ pub struct VirtualLink {
     pub frames_corrupted: usize,
     pub in_flight_frames: Vec<Vec<u8>>,
     pub pcap_writer: Option<PcapWriter<Vec<u8>>>,
+    /// When set, every frame entering the link is discarded. Models a cable cut or a
+    /// far-side outage, which is how a live protocol session is made to fail without
+    /// anyone reaching into the protocol state.
+    pub blackhole: bool,
 }
 
 impl VirtualLink {
@@ -58,7 +66,14 @@ impl VirtualLink {
             frames_corrupted: 0,
             in_flight_frames: Vec::new(),
             pcap_writer: None,
+            blackhole: false,
         }
+    }
+
+    /// Cuts (or restores) the link. A blackholed link silently drops everything, so
+    /// peers on it stop hearing each other and their hold timers eventually expire.
+    pub fn set_blackhole(&mut self, down: bool) {
+        self.blackhole = down;
     }
 
     pub fn with_mtu(mut self, mtu: usize) -> Self {
@@ -114,6 +129,12 @@ impl VirtualLink {
                 self.held_frames.push((release_after, raw_frame));
                 return delivered; // Held for reordering
             }
+        }
+
+        // 0. A cut link swallows everything.
+        if self.blackhole {
+            self.frames_dropped += 1;
+            return delivered;
         }
 
         // 1. Check MTU
@@ -231,6 +252,13 @@ pub struct LabRouter {
     pub lfib: Option<LfibTable>,
     pub mpls_push_routes: HashMap<Ipv4Address, (u32, String)>,
     pub ip_id_counter: u16,
+    /// Transport endpoint table for traffic the router itself terminates. Present only
+    /// once a control-plane protocol that needs sockets (currently BGP) is enabled.
+    pub sockets: Option<SocketRuntime>,
+    /// The BGP-4 speaker running on this router, if configured.
+    pub bgp: Option<BgpRouter>,
+    /// Simulated clock, advanced by the lab.
+    pub current_time_ms: u64,
 }
 
 impl LabRouter {
@@ -252,7 +280,173 @@ impl LabRouter {
             lfib: None,
             mpls_push_routes: HashMap::new(),
             ip_id_counter: 100,
+            sockets: None,
+            bgp: None,
+            current_time_ms: 0,
         }
+    }
+
+    /// Gives this router a transport endpoint table so it can terminate TCP and UDP
+    /// addressed to its own interfaces, not merely forward through them.
+    pub fn enable_sockets(&mut self) -> &mut SocketRuntime {
+        if self.sockets.is_none() {
+            let default_ip = self
+                .interfaces
+                .first()
+                .map(|i| i.ip)
+                .unwrap_or(Ipv4Address::UNSPECIFIED);
+            self.sockets = Some(SocketRuntime::new(default_ip));
+        }
+        self.sockets.as_mut().unwrap()
+    }
+
+    /// Starts a BGP-4 speaker on this router. It listens on TCP port 179 across every
+    /// interface and installs its selected routes into this router's real routing table.
+    pub fn enable_bgp(&mut self, local_as: u16, router_id: Ipv4Address) -> &mut BgpRouter {
+        self.enable_sockets();
+        self.bgp = Some(BgpRouter::new(local_as, router_id));
+        self.bgp.as_mut().unwrap()
+    }
+
+    /// Configures a BGP neighbour reachable through `local_addr`, one of this router's
+    /// own interface addresses.
+    pub fn add_bgp_peer(
+        &mut self,
+        peer_ip: Ipv4Address,
+        peer_as: u16,
+        local_addr: Ipv4Address,
+        mode: BgpPeerMode,
+    ) {
+        if let Some(ref mut bgp) = self.bgp {
+            bgp.add_peer(peer_ip, peer_as, local_addr, mode);
+        }
+    }
+
+    /// Originates a prefix into BGP from this router. The advertised next hop defaults
+    /// to the interface address inside the prefix, falling back to the first interface.
+    pub fn originate_bgp_prefix(&mut self, prefix: Ipv4Prefix) {
+        let next_hop = self
+            .interfaces
+            .iter()
+            .find(|i| prefix.contains(i.ip))
+            .map(|i| i.ip)
+            .or_else(|| self.interfaces.first().map(|i| i.ip))
+            .unwrap_or(Ipv4Address::UNSPECIFIED);
+        if let Some(ref mut bgp) = self.bgp {
+            bgp.originate(prefix, next_hop);
+        }
+    }
+
+    /// Administratively shuts a BGP neighbour down: NOTIFICATION, TCP teardown, and
+    /// removal of every route learned from it.
+    pub fn bgp_shutdown_peer(&mut self, peer_ip: Ipv4Address) {
+        let now = self.current_time_ms;
+        if let (Some(bgp), Some(sockets)) = (self.bgp.as_mut(), self.sockets.as_mut()) {
+            bgp.shutdown_peer(peer_ip, now, sockets);
+        }
+    }
+
+    /// Re-enables a neighbour that was administratively shut down.
+    pub fn bgp_enable_peer(&mut self, peer_ip: Ipv4Address) {
+        if let Some(ref mut bgp) = self.bgp {
+            bgp.enable_peer(peer_ip);
+        }
+    }
+
+    /// Stops originating a prefix, which propagates as a withdrawal.
+    pub fn withdraw_bgp_prefix(&mut self, prefix: Ipv4Prefix) -> bool {
+        self.bgp
+            .as_mut()
+            .map(|b| b.withdraw_originated(prefix))
+            .unwrap_or(false)
+    }
+
+    pub fn bgp(&self) -> Option<&BgpRouter> {
+        self.bgp.as_ref()
+    }
+
+    pub fn bgp_mut(&mut self) -> Option<&mut BgpRouter> {
+        self.bgp.as_mut()
+    }
+
+    /// Runs this router's control plane and transport timers at simulated time `now_ms`
+    /// and returns `(egress_link, frame)` pairs for everything it wants to transmit.
+    ///
+    /// Order matters: the BGP speaker runs first so anything it decides to send is
+    /// queued before the socket runtime drains its transmit path in the same step.
+    pub fn step_timers(&mut self, now_ms: u64) -> Vec<(String, Vec<u8>)> {
+        self.current_time_ms = now_ms;
+        let mut out = Vec::new();
+        if self.sockets.is_none() {
+            return out;
+        }
+
+        if let (Some(bgp), Some(sockets)) = (self.bgp.as_mut(), self.sockets.as_mut()) {
+            bgp.poll(now_ms, sockets, &mut self.routing_table);
+        }
+
+        let pending = match self.sockets.as_mut() {
+            Some(s) => s.step_timers(now_ms),
+            None => Vec::new(),
+        };
+        for tx in pending {
+            let frames =
+                self.emit_from_local_stack(tx.local.ip, tx.remote.ip, tx.protocol, &tx.payload);
+            out.extend(frames);
+        }
+        out
+    }
+
+    /// Encapsulates a transport PDU this router originated in IPv4 and Ethernet,
+    /// resolving the egress interface through its own routing table and ARP cache.
+    /// Unresolved next hops queue the packet and emit an ARP request, exactly as the
+    /// transit forwarding path does.
+    fn emit_from_local_stack(
+        &mut self,
+        src_ip: Ipv4Address,
+        dst_ip: Ipv4Address,
+        protocol: u8,
+        payload: &[u8],
+    ) -> Vec<(String, Vec<u8>)> {
+        let mut out = Vec::new();
+        let Some(route) = self.routing_table.lookup(dst_ip).cloned() else {
+            return out;
+        };
+        let Some(egress) = self
+            .interfaces
+            .iter()
+            .find(|i| i.name == route.interface)
+            .cloned()
+        else {
+            return out;
+        };
+        let next_hop = route.next_hop(dst_ip);
+        let ip_id = self.next_ip_id();
+        let ip_bytes = Ipv4Packet::serialize(src_ip, dst_ip, protocol, ip_id, 64, payload);
+
+        let arp = self.arp_tables.entry(egress.name.clone()).or_default();
+        if let Some(dst_mac) = arp.lookup(&next_hop.0) {
+            out.push((
+                egress.link_name.clone(),
+                EthernetFrame::serialize(dst_mac, egress.mac, ETHERTYPE_IPV4, &ip_bytes),
+            ));
+        } else {
+            self.pending_transit_packets
+                .entry((egress.name.clone(), next_hop))
+                .or_default()
+                .push(ip_bytes);
+            let arp_req = ArpPacket::build_request(egress.mac, egress.ip.0, next_hop.0);
+            out.push((
+                egress.link_name.clone(),
+                EthernetFrame::serialize(
+                    MacAddress::BROADCAST,
+                    egress.mac,
+                    ETHERTYPE_ARP,
+                    &arp_req.serialize(),
+                ),
+            ));
+        }
+        out
     }
 
     pub fn set_firewall(&mut self, fw: Firewall) {
@@ -412,8 +606,13 @@ impl LabRouter {
 
         // Add local connected subnet route
         let subnet_net = ip.mask(subnet_mask);
-        self.routing_table
-            .add_route(subnet_net, subnet_mask, None, name);
+        self.routing_table.add_route_from(
+            subnet_net,
+            subnet_mask,
+            None,
+            name,
+            RouteSource::Connected,
+        );
         self.interfaces.push(iface);
     }
 
@@ -744,6 +943,32 @@ impl LabRouter {
                             }
                         }
 
+                        // TCP addressed to one of our own interfaces: hand it to the
+                        // socket runtime, which owns port 179 when BGP is enabled and
+                        // answers anything else with a RST.
+                        if ip_pkt.header.protocol == crate::ipv4::IpProtocol::Tcp
+                            && self.sockets.is_some()
+                        {
+                            let src_ip = ip_pkt.header.src_ip;
+                            let dst_ip = ip_pkt.header.dst_ip;
+                            let now = self.current_time_ms;
+                            let responses =
+                                match TcpSegment::parse(src_ip, dst_ip, ip_pkt.payload, true) {
+                                    Ok(seg) => self
+                                        .sockets
+                                        .as_mut()
+                                        .map(|s| s.dispatch_tcp_segment(src_ip, dst_ip, &seg, now))
+                                        .unwrap_or_default(),
+                                    Err(_) => Vec::new(),
+                                };
+                            for resp in responses {
+                                let frames =
+                                    self.emit_from_local_stack(dst_ip, src_ip, IP_PROTO_TCP, &resp);
+                                out_transmissions.extend(frames);
+                            }
+                            return out_transmissions;
+                        }
+
                         // Direct packet to router's own IP (e.g. pinging the router)
                         if ip_pkt.header.protocol == crate::ipv4::IpProtocol::Icmp
                             && let Ok(icmp) = IcmpPacket::parse(ip_pkt.payload, true)
@@ -888,6 +1113,113 @@ impl LabRouter {
     }
 }
 
+/// Builds the canned three-autonomous-system BGP fabric the shell diagnostics run on:
+///
+/// ```text
+/// host_a 10.1.0.2 - r1 (AS65001) - r2 (AS65002) - r3 (AS65003) - host_c 10.3.0.2
+/// ```
+///
+/// R1 originates 10.1.0.0/24 and R3 originates 10.3.0.0/24. Nothing else is configured,
+/// so every route the routers end up with was learned over a real BGP session on TCP
+/// port 179 and installed by the decision process.
+pub fn build_bgp_demo_fabric() -> VirtualLab {
+    fn mac(a: u8, b: u8) -> MacAddress {
+        MacAddress([0x02, 0x00, 0x00, 0x00, a, b])
+    }
+    let addr = Ipv4Address::new;
+
+    let mut lab = VirtualLab::new();
+    for link in ["lan1", "r1r2", "r2r3", "lan3"] {
+        lab.add_link(link);
+    }
+
+    lab.add_host(
+        "host_a",
+        "lan1",
+        NetStackConfig {
+            mac: mac(0x0A, 0x02),
+            ip: addr(10, 1, 0, 2),
+            ipv6: None,
+            subnet_mask: 24,
+            gateway: Some(addr(10, 1, 0, 1)),
+        },
+    );
+    lab.add_host(
+        "host_c",
+        "lan3",
+        NetStackConfig {
+            mac: mac(0x0C, 0x02),
+            ip: addr(10, 3, 0, 2),
+            ipv6: None,
+            subnet_mask: 24,
+            gateway: Some(addr(10, 3, 0, 1)),
+        },
+    );
+
+    let mut r1 = LabRouter::new("r1");
+    r1.add_interface("eth0", mac(0x01, 0x00), addr(10, 1, 0, 1), 24, "lan1");
+    r1.add_interface("eth1", mac(0x01, 0x01), addr(10, 12, 0, 1), 30, "r1r2");
+    r1.enable_bgp(65001, addr(1, 1, 1, 1)).set_hold_time(9);
+    r1.add_bgp_peer(
+        addr(10, 12, 0, 2),
+        65002,
+        addr(10, 12, 0, 1),
+        BgpPeerMode::Active,
+    );
+    r1.originate_bgp_prefix(Ipv4Prefix::new(addr(10, 1, 0, 0), 24));
+
+    let mut r2 = LabRouter::new("r2");
+    r2.add_interface("eth0", mac(0x02, 0x00), addr(10, 12, 0, 2), 30, "r1r2");
+    r2.add_interface("eth1", mac(0x02, 0x01), addr(10, 23, 0, 2), 30, "r2r3");
+    r2.enable_bgp(65002, addr(2, 2, 2, 2)).set_hold_time(9);
+    r2.add_bgp_peer(
+        addr(10, 12, 0, 1),
+        65001,
+        addr(10, 12, 0, 2),
+        BgpPeerMode::Passive,
+    );
+    r2.add_bgp_peer(
+        addr(10, 23, 0, 3),
+        65003,
+        addr(10, 23, 0, 2),
+        BgpPeerMode::Active,
+    );
+
+    let mut r3 = LabRouter::new("r3");
+    r3.add_interface("eth0", mac(0x03, 0x00), addr(10, 23, 0, 3), 30, "r2r3");
+    r3.add_interface("eth1", mac(0x03, 0x01), addr(10, 3, 0, 1), 24, "lan3");
+    r3.enable_bgp(65003, addr(3, 3, 3, 3)).set_hold_time(9);
+    r3.add_bgp_peer(
+        addr(10, 23, 0, 2),
+        65002,
+        addr(10, 23, 0, 3),
+        BgpPeerMode::Passive,
+    );
+    r3.originate_bgp_prefix(Ipv4Prefix::new(addr(10, 3, 0, 0), 24));
+
+    lab.add_router(r1);
+    lab.add_router(r2);
+    lab.add_router(r3);
+    lab
+}
+
+/// Drives `lab` until every configured BGP session is ESTABLISHED and every speaker has
+/// installed at least one learned route, or the simulated deadline passes. Purely
+/// simulated time: no thread sleeps.
+pub fn converge_bgp(lab: &mut VirtualLab, max_sim_ms: u64) -> bool {
+    lab.run_until(250, max_sim_ms, |l| {
+        l.routers.values().all(|r| match r.bgp() {
+            Some(b) => {
+                b.peers()
+                    .iter()
+                    .all(|p| p.state == crate::bgp_router::BgpState::Established)
+                    && !b.loc_rib.is_empty()
+            }
+            None => true,
+        })
+    })
+}
+
 /// Deterministic Virtual Network Lab orchestrator.
 #[derive(Default)]
 pub struct VirtualLab {
@@ -1001,6 +1333,29 @@ impl VirtualLab {
                 queued += 1;
             }
         }
+        queued += self.pump_routers();
+        queued
+    }
+
+    /// Runs every router's control plane and socket runtime at the current simulated
+    /// time and queues whatever they emit. Routers with no socket runtime produce
+    /// nothing, so a topology without a routing process is unaffected.
+    fn pump_routers(&mut self) -> usize {
+        let mut queued = 0;
+        let now = self.current_time_ms;
+        let mut router_names: Vec<String> = self.routers.keys().cloned().collect();
+        router_names.sort();
+        for r_name in router_names {
+            let router = self.routers.get_mut(&r_name).unwrap();
+            if router.sockets.is_none() {
+                continue;
+            }
+            for (link_name, frame) in router.step_timers(now) {
+                self.in_flight_frames
+                    .push((r_name.clone(), link_name, frame));
+                queued += 1;
+            }
+        }
         queued
     }
 
@@ -1021,6 +1376,9 @@ impl VirtualLab {
                 queued += 1;
             }
         }
+        // Routers run their BGP timers off the same logical clock, so a hold timer
+        // expires because simulated time passed, never because a thread slept.
+        queued += self.pump_routers();
         queued
     }
 
