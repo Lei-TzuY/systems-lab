@@ -1,4 +1,6 @@
-use toy_tcpip::cfm::{CfmEngine, CfmPacket, CFM_MULTICAST_CLASS1, CFM_OPCODE_CCM, CFM_OPCODE_LBR, ETHERTYPE_CFM};
+use toy_tcpip::cfm::{
+    CFM_MULTICAST_CLASS1, CFM_OPCODE_CCM, CFM_OPCODE_LBR, CfmEngine, CfmPacket, ETHERTYPE_CFM,
+};
 
 #[test]
 fn test_cfm_ccm_heartbeat_and_mep_tracking() {
@@ -16,7 +18,7 @@ fn test_cfm_ccm_heartbeat_and_mep_tracking() {
     let peer = engine.remote_meps.get(&50).unwrap();
     assert_eq!(peer.last_seq, 42);
     assert_eq!(peer.ccm_count, 1);
-    assert_eq!(peer.rdi, false);
+    assert!(!peer.rdi);
 }
 
 #[test]

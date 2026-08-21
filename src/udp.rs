@@ -28,12 +28,25 @@ pub enum UdpError {
 impl fmt::Display for UdpError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            UdpError::DatagramTooShort(len) => write!(f, "UDP datagram too short ({} bytes, min 8)", len),
-            UdpError::LengthMismatch { declared, available } => {
-                write!(f, "UDP declared length {} exceeds data length {}", declared, available)
+            UdpError::DatagramTooShort(len) => {
+                write!(f, "UDP datagram too short ({} bytes, min 8)", len)
+            }
+            UdpError::LengthMismatch {
+                declared,
+                available,
+            } => {
+                write!(
+                    f,
+                    "UDP declared length {} exceeds data length {}",
+                    declared, available
+                )
             }
             UdpError::InvalidChecksum { found } => {
-                write!(f, "UDP checksum mismatch with checksum field 0x{:04x}", found)
+                write!(
+                    f,
+                    "UDP checksum mismatch with checksum field 0x{:04x}",
+                    found
+                )
             }
         }
     }
@@ -67,10 +80,11 @@ impl<'a> UdpDatagram<'a> {
         let segment = &data[0..length as usize];
 
         // If checksum is 0, checksum computation was omitted by sender (RFC 768)
-        if check_checksum && checksum != 0 {
-            if !verify_ipv4_transport_checksum(src_ip.0, dst_ip.0, 17, segment) {
-                return Err(UdpError::InvalidChecksum { found: checksum });
-            }
+        if check_checksum
+            && checksum != 0
+            && !verify_ipv4_transport_checksum(src_ip.0, dst_ip.0, 17, segment)
+        {
+            return Err(UdpError::InvalidChecksum { found: checksum });
         }
 
         let payload = &data[UDP_HEADER_LEN..length as usize];

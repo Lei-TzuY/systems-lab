@@ -1,5 +1,8 @@
 use toy_tcpip::ipv4::Ipv4Address;
-use toy_tcpip::lisp::{LispDataPacket, LispMapReply, LispMapRequest, LispMapResolver, LISP_CONTROL_PORT, LISP_DATA_PORT, LISP_MSG_MAP_REPLY, LISP_MSG_MAP_REQUEST};
+use toy_tcpip::lisp::{
+    LISP_CONTROL_PORT, LISP_DATA_PORT, LISP_MSG_MAP_REPLY, LISP_MSG_MAP_REQUEST, LispDataPacket,
+    LispMapReply, LispMapRequest, LispMapResolver,
+};
 
 #[test]
 fn test_lisp_eid_rloc_resolution_and_data_plane() {
@@ -12,7 +15,12 @@ fn test_lisp_eid_rloc_resolution_and_data_plane() {
     resolver.register_eid(eid, rloc2, 2, 50);
 
     // Control Plane: Map-Request -> Map-Reply
-    let req = LispMapRequest::build(0xAABBCCDDEEFF0011, Ipv4Address::new(10, 0, 0, 1), Ipv4Address::new(192, 0, 2, 1), eid);
+    let req = LispMapRequest::build(
+        0xAABBCCDDEEFF0011,
+        Ipv4Address::new(10, 0, 0, 1),
+        Ipv4Address::new(192, 0, 2, 1),
+        eid,
+    );
     let raw_req = req.serialize();
 
     let parsed_req = LispMapRequest::parse(&raw_req).unwrap();

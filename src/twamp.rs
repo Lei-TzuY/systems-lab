@@ -245,13 +245,7 @@ mod tests {
         assert_eq!(parsed_req.timestamp_sec, 1700000000);
 
         let resp = TwampTestPacket::build_reflector_response(
-            &req,
-            101,
-            1700000000,
-            100500,
-            1700000000,
-            100600,
-            64,
+            &req, 101, 1700000000, 100500, 1700000000, 100600, 64,
         );
         let raw_resp = resp.serialize();
         let parsed_resp = TwampTestPacket::parse(&raw_resp).unwrap();

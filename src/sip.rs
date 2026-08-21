@@ -61,12 +61,18 @@ impl std::error::Error for SipError {}
 impl SipMessage {
     pub fn build_invite(from: &str, to: &str, call_id: &str, sdp: &str) -> Self {
         let mut headers = HashMap::new();
-        headers.insert("Via".to_string(), "SIP/2.0/UDP 192.168.1.100:5060;branch=z9hG4bK776asdhds".to_string());
+        headers.insert(
+            "Via".to_string(),
+            "SIP/2.0/UDP 192.168.1.100:5060;branch=z9hG4bK776asdhds".to_string(),
+        );
         headers.insert("From".to_string(), format!("<sip:{}>;tag=1928301774", from));
         headers.insert("To".to_string(), format!("<sip:{}>", to));
         headers.insert("Call-ID".to_string(), call_id.to_string());
         headers.insert("CSeq".to_string(), "1 INVITE".to_string());
-        headers.insert("Contact".to_string(), format!("<sip:{}@192.168.1.100:5060>", from));
+        headers.insert(
+            "Contact".to_string(),
+            format!("<sip:{}@192.168.1.100:5060>", from),
+        );
         headers.insert("Content-Type".to_string(), "application/sdp".to_string());
         headers.insert("Content-Length".to_string(), sdp.len().to_string());
 
@@ -83,11 +89,21 @@ impl SipMessage {
 
     pub fn build_200_ok(invite_req: &SipMessage, local_sdp: &str) -> Self {
         let mut headers = HashMap::new();
-        if let Some(via) = invite_req.headers.get("Via") { headers.insert("Via".to_string(), via.clone()); }
-        if let Some(from) = invite_req.headers.get("From") { headers.insert("From".to_string(), from.clone()); }
-        if let Some(to) = invite_req.headers.get("To") { headers.insert("To".to_string(), format!("{};tag=a6c85cf", to)); }
-        if let Some(cid) = invite_req.headers.get("Call-ID") { headers.insert("Call-ID".to_string(), cid.clone()); }
-        if let Some(cseq) = invite_req.headers.get("CSeq") { headers.insert("CSeq".to_string(), cseq.clone()); }
+        if let Some(via) = invite_req.headers.get("Via") {
+            headers.insert("Via".to_string(), via.clone());
+        }
+        if let Some(from) = invite_req.headers.get("From") {
+            headers.insert("From".to_string(), from.clone());
+        }
+        if let Some(to) = invite_req.headers.get("To") {
+            headers.insert("To".to_string(), format!("{};tag=a6c85cf", to));
+        }
+        if let Some(cid) = invite_req.headers.get("Call-ID") {
+            headers.insert("Call-ID".to_string(), cid.clone());
+        }
+        if let Some(cseq) = invite_req.headers.get("CSeq") {
+            headers.insert("CSeq".to_string(), cseq.clone());
+        }
         headers.insert("Content-Type".to_string(), "application/sdp".to_string());
         headers.insert("Content-Length".to_string(), local_sdp.len().to_string());
 
@@ -105,9 +121,16 @@ impl SipMessage {
     pub fn serialize(&self) -> String {
         let mut out = String::new();
         if self.is_response {
-            out.push_str(&format!("SIP/2.0 {} {}\r\n", self.status_code, self.reason_phrase));
+            out.push_str(&format!(
+                "SIP/2.0 {} {}\r\n",
+                self.status_code, self.reason_phrase
+            ));
         } else {
-            let m_str = self.method.as_ref().map(|m| m.to_string()).unwrap_or_else(|| "INVITE".to_string());
+            let m_str = self
+                .method
+                .as_ref()
+                .map(|m| m.to_string())
+                .unwrap_or_else(|| "INVITE".to_string());
             out.push_str(&format!("{} {} SIP/2.0\r\n", m_str, self.request_uri));
         }
 
@@ -195,11 +218,12 @@ mod tests {
     #[test]
     fn test_sip_invite_and_200_ok_flow() {
         let sdp = build_simple_sdp("alice", "192.168.1.100", 4000);
-        let invite = SipMessage::build_invite("alice@example.com", "bob@example.com", "call-12345", &sdp);
+        let invite =
+            SipMessage::build_invite("alice@example.com", "bob@example.com", "call-12345", &sdp);
         let raw = invite.serialize();
 
         let parsed = SipMessage::parse(&raw).unwrap();
-        assert_eq!(parsed.is_response, false);
+        assert!(!parsed.is_response);
         assert_eq!(parsed.method, Some(SipMethod::Invite));
         assert_eq!(parsed.headers.get("Call-ID").unwrap(), "call-12345");
         assert!(parsed.body.contains("m=audio 4000 RTP/AVP 0"));

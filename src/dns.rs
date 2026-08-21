@@ -46,7 +46,9 @@ pub enum DnsError {
 impl fmt::Display for DnsError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            DnsError::PacketTooShort(len) => write!(f, "DNS packet too short ({} bytes, min 12)", len),
+            DnsError::PacketTooShort(len) => {
+                write!(f, "DNS packet too short ({} bytes, min 12)", len)
+            }
             DnsError::InvalidLabel(l) => write!(f, "Invalid DNS label format: {}", l),
             DnsError::UnsupportedFormat => write!(f, "Unsupported DNS record format"),
         }
@@ -131,7 +133,11 @@ impl DnsMessage {
             let qtype = u16::from_be_bytes([data[offset], data[offset + 1]]);
             let qclass = u16::from_be_bytes([data[offset + 2], data[offset + 3]]);
             offset += 4;
-            questions.push(DnsQuestion { name, qtype, qclass });
+            questions.push(DnsQuestion {
+                name,
+                qtype,
+                qclass,
+            });
         }
 
         let mut answers = Vec::new();
@@ -143,7 +149,12 @@ impl DnsMessage {
             }
             let rtype = u16::from_be_bytes([data[offset], data[offset + 1]]);
             let rclass = u16::from_be_bytes([data[offset + 2], data[offset + 3]]);
-            let ttl = u32::from_be_bytes([data[offset + 4], data[offset + 5], data[offset + 6], data[offset + 7]]);
+            let ttl = u32::from_be_bytes([
+                data[offset + 4],
+                data[offset + 5],
+                data[offset + 6],
+                data[offset + 7],
+            ]);
             let rdlength = u16::from_be_bytes([data[offset + 8], data[offset + 9]]) as usize;
             offset += 10;
 

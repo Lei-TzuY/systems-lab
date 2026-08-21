@@ -112,7 +112,9 @@ impl fmt::Display for StpError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             StpError::PacketTooShort(l) => write!(f, "STP BPDU too short ({} bytes, min 35)", l),
-            StpError::InvalidProtocol(p) => write!(f, "Invalid STP protocol identifier: 0x{:04x}", p),
+            StpError::InvalidProtocol(p) => {
+                write!(f, "Invalid STP protocol identifier: 0x{:04x}", p)
+            }
         }
     }
 }
@@ -176,7 +178,12 @@ impl StpBpdu {
         buf
     }
 
-    pub fn build_config_bpdu(bridge_id: BridgeId, root_id: BridgeId, cost: u32, port_id: u16) -> Self {
+    pub fn build_config_bpdu(
+        bridge_id: BridgeId,
+        root_id: BridgeId,
+        cost: u32,
+        port_id: u16,
+    ) -> Self {
         StpBpdu {
             protocol_id: STP_PROTOCOL_ID,
             version: STP_VERSION_ID,
@@ -227,11 +234,16 @@ impl StpBridgeEngine {
             self.root_port = Some(port);
 
             // Update port roles
-            self.port_states.insert(port, (StpPortRole::RootPort, StpPortState::Forwarding));
+            self.port_states
+                .insert(port, (StpPortRole::RootPort, StpPortState::Forwarding));
             true
-        } else if bpdu.root_id == self.root_id && bpdu.bridge_id < self.bridge_id && self.root_port != Some(port) {
+        } else if bpdu.root_id == self.root_id
+            && bpdu.bridge_id < self.bridge_id
+            && self.root_port != Some(port)
+        {
             // Alternate link with higher bridge -> Block to prevent loop!
-            self.port_states.insert(port, (StpPortRole::BlockedPort, StpPortState::Blocking));
+            self.port_states
+                .insert(port, (StpPortRole::BlockedPort, StpPortState::Blocking));
             true
         } else {
             false
@@ -261,7 +273,8 @@ mod tests {
 
     #[test]
     fn test_stp_root_election_and_port_blocking() {
-        let mut bridge = StpBridgeEngine::new(32768, MacAddress([0x00, 0x00, 0x00, 0x00, 0x00, 0x02]));
+        let mut bridge =
+            StpBridgeEngine::new(32768, MacAddress([0x00, 0x00, 0x00, 0x00, 0x00, 0x02]));
         let root_candidate = BridgeId::new(4096, MacAddress([0x00, 0x00, 0x00, 0x00, 0x00, 0x01]));
 
         let bpdu = StpBpdu::build_config_bpdu(root_candidate, root_candidate, 0, 0x8001);
@@ -269,6 +282,9 @@ mod tests {
 
         assert_eq!(bridge.root_id, root_candidate);
         assert_eq!(bridge.root_path_cost, 19);
-        assert_eq!(bridge.port_states.get(&1), Some(&(StpPortRole::RootPort, StpPortState::Forwarding)));
+        assert_eq!(
+            bridge.port_states.get(&1),
+            Some(&(StpPortRole::RootPort, StpPortState::Forwarding))
+        );
     }
 }

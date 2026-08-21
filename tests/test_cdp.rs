@@ -1,9 +1,17 @@
-use toy_tcpip::cdp::{CdpNeighborTable, CdpPacket, CDP_MULTICAST_MAC, CDP_SNAP_HEADER, CDP_TLV_DEVICE_ID, CDP_TLV_PORT_ID};
+use toy_tcpip::cdp::{
+    CDP_MULTICAST_MAC, CDP_SNAP_HEADER, CDP_TLV_DEVICE_ID, CDP_TLV_PORT_ID, CdpNeighborTable,
+    CdpPacket,
+};
 use toy_tcpip::ipv4::Ipv4Address;
 
 #[test]
 fn test_cdp_packet_encoding_and_tlvs() {
-    let pkt = CdpPacket::build("Core-RTR-01", "TenGigabitEthernet0/1", "Cisco ASR-1001", Ipv4Address::new(172, 16, 0, 1));
+    let pkt = CdpPacket::build(
+        "Core-RTR-01",
+        "TenGigabitEthernet0/1",
+        "Cisco ASR-1001",
+        Ipv4Address::new(172, 16, 0, 1),
+    );
     let raw = pkt.serialize();
 
     let parsed = CdpPacket::parse(&raw).unwrap();
@@ -28,7 +36,12 @@ fn test_cdp_packet_encoding_and_tlvs() {
 
 #[test]
 fn test_cdp_neighbor_table_ingest() {
-    let pkt = CdpPacket::build("Switch-Edge-24", "FastEthernet0/24", "Cisco Catalyst 2960", Ipv4Address::new(192, 168, 10, 2));
+    let pkt = CdpPacket::build(
+        "Switch-Edge-24",
+        "FastEthernet0/24",
+        "Cisco Catalyst 2960",
+        Ipv4Address::new(192, 168, 10, 2),
+    );
     let mut table = CdpNeighborTable::new();
     table.ingest_packet(&pkt);
 

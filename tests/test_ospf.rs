@@ -1,5 +1,5 @@
 use toy_tcpip::ipv4::Ipv4Address;
-use toy_tcpip::ospf::{OspfHelloPacket, OspfLsdb, OSPF_TYPE_HELLO, OSPF_VERSION_2};
+use toy_tcpip::ospf::{OSPF_TYPE_HELLO, OSPF_VERSION_2, OspfHelloPacket, OspfLsdb};
 
 #[test]
 fn test_ospf_hello_packet_codec() {

@@ -3,7 +3,7 @@
 //! Handles 4-byte 802.1Q Tag Control Information (TCI) encapsulation, 12-bit VLAN IDs (1..4094),
 //! 3-bit Priority Code Point (PCP), and frame tagging / stripping.
 
-use crate::ethernet::{EtherType, MacAddress, ETHER_HEADER_LEN};
+use crate::ethernet::{ETHER_HEADER_LEN, EtherType, MacAddress};
 use std::fmt;
 
 pub const TPID_8021Q: u16 = 0x8100;
@@ -60,8 +60,14 @@ pub enum VlanError {
 impl fmt::Display for VlanError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            VlanError::FrameTooShort(len) => write!(f, "VLAN frame too short ({} bytes, min 18)", len),
-            VlanError::InvalidTpid(tpid) => write!(f, "Invalid VLAN TPID: expected 0x8100, found 0x{:04x}", tpid),
+            VlanError::FrameTooShort(len) => {
+                write!(f, "VLAN frame too short ({} bytes, min 18)", len)
+            }
+            VlanError::InvalidTpid(tpid) => write!(
+                f,
+                "Invalid VLAN TPID: expected 0x8100, found 0x{:04x}",
+                tpid
+            ),
         }
     }
 }

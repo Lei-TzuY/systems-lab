@@ -1,9 +1,9 @@
 use std::io::Cursor;
 use toy_tcpip::arp::ArpPacket;
-use toy_tcpip::ethernet::{EthernetFrame, MacAddress, ETHERTYPE_ARP, ETHERTYPE_IPV4};
+use toy_tcpip::ethernet::{ETHERTYPE_ARP, ETHERTYPE_IPV4, EthernetFrame, MacAddress};
 use toy_tcpip::icmp::{IcmpPacket, IcmpType};
-use toy_tcpip::ipv4::{Ipv4Address, Ipv4Packet, IP_PROTO_ICMP, IP_PROTO_UDP};
-use toy_tcpip::pcap::{PcapReader, PcapWriter, LINKTYPE_ETHERNET};
+use toy_tcpip::ipv4::{IP_PROTO_ICMP, IP_PROTO_UDP, Ipv4Address, Ipv4Packet};
+use toy_tcpip::pcap::{LINKTYPE_ETHERNET, PcapReader, PcapWriter};
 use toy_tcpip::stack::{NetStack, NetStackConfig};
 use toy_tcpip::udp::UdpDatagram;
 
@@ -21,7 +21,12 @@ fn test_end_to_end_pcap_pipeline() {
 
         // Frame 1: ARP Request
         let arp = ArpPacket::build_request(client_mac, client_ip.0, stack_ip.0);
-        let f1 = EthernetFrame::serialize(MacAddress::BROADCAST, client_mac, ETHERTYPE_ARP, &arp.serialize());
+        let f1 = EthernetFrame::serialize(
+            MacAddress::BROADCAST,
+            client_mac,
+            ETHERTYPE_ARP,
+            &arp.serialize(),
+        );
         writer.write_packet(1, 0, &f1).unwrap();
 
         // Frame 2: ICMP Ping
@@ -45,7 +50,9 @@ fn test_end_to_end_pcap_pipeline() {
         subnet_mask: 24,
         gateway: Some(Ipv4Address::new(192, 168, 1, 1)),
     });
-    stack.udp_sockets.bind(7, |_src_ip, _src_port, data| Some(data.to_vec()));
+    stack
+        .udp_sockets
+        .bind(7, |_src_ip, _src_port, data| Some(data.to_vec()));
 
     let mut out_pcap_buf = Vec::new();
     let mut out_writer = PcapWriter::new(&mut out_pcap_buf, 65535, LINKTYPE_ETHERNET).unwrap();
@@ -57,7 +64,9 @@ fn test_end_to_end_pcap_pipeline() {
         let responses = stack.process_frame(&pkt.data);
         for resp in responses {
             total_responses += 1;
-            out_writer.write_packet(pkt.ts_sec, pkt.ts_usec + 1, &resp).unwrap();
+            out_writer
+                .write_packet(pkt.ts_sec, pkt.ts_usec + 1, &resp)
+                .unwrap();
         }
     }
 
@@ -78,6 +87,12 @@ fn test_end_to_end_pcap_pipeline() {
     let r3 = out_reader.next_packet().unwrap().unwrap();
     let r3_eth = EthernetFrame::parse(&r3.data).unwrap();
     let r3_ip = Ipv4Packet::parse(r3_eth.payload, true).unwrap();
-    let r3_udp = UdpDatagram::parse(r3_ip.header.src_ip, r3_ip.header.dst_ip, r3_ip.payload, true).unwrap();
+    let r3_udp = UdpDatagram::parse(
+        r3_ip.header.src_ip,
+        r3_ip.header.dst_ip,
+        r3_ip.payload,
+        true,
+    )
+    .unwrap();
     assert_eq!(r3_udp.payload, b"UDP test");
 }

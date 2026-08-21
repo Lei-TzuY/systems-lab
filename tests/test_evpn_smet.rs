@@ -1,6 +1,6 @@
 use toy_tcpip::evpn::RouteDistinguisher;
 use toy_tcpip::evpn_smet::{
-    EvpnSmetEngine, EvpnSmetRoute, EVPN_ROUTE_TYPE_JOIN_SYNCH, EVPN_ROUTE_TYPE_SMET,
+    EVPN_ROUTE_TYPE_JOIN_SYNCH, EVPN_ROUTE_TYPE_SMET, EvpnSmetEngine, EvpnSmetRoute,
 };
 use toy_tcpip::ipv4::Ipv4Address;
 

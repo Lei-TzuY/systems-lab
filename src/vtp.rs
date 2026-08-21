@@ -184,7 +184,7 @@ impl VtpPacket {
                 let mut vlans = Vec::new();
                 let mut offset = 40;
 
-                while offset + 1 <= data.len() {
+                while offset < data.len() {
                     let v_len = data[offset] as usize;
                     if offset + 1 + v_len > data.len() || v_len < 7 {
                         break;
@@ -195,7 +195,8 @@ impl VtpPacket {
                     let name_len = (data[offset + 7] as usize).min(32);
 
                     let name_str = if offset + 8 + name_len <= offset + 1 + v_len {
-                        String::from_utf8_lossy(&data[offset + 8..offset + 8 + name_len]).to_string()
+                        String::from_utf8_lossy(&data[offset + 8..offset + 8 + name_len])
+                            .to_string()
                     } else {
                         format!("VLAN{:04}", vlan_id)
                     };
@@ -289,8 +290,16 @@ mod tests {
         }
 
         let vlans = vec![
-            VtpVlanInfo { vlan_id: 10, vlan_name: "Sales".to_string(), status: 0 },
-            VtpVlanInfo { vlan_id: 20, vlan_name: "Dev".to_string(), status: 0 },
+            VtpVlanInfo {
+                vlan_id: 10,
+                vlan_name: "Sales".to_string(),
+                status: 0,
+            },
+            VtpVlanInfo {
+                vlan_id: 20,
+                vlan_name: "Dev".to_string(),
+                status: 0,
+            },
         ];
         let subset = VtpPacket::build_subset("EnterpriseCorp", 12, &vlans);
         let raw_sub = subset.serialize();

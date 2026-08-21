@@ -7,15 +7,15 @@ use std::fmt;
 pub const RTP_FIXED_HEADER_LEN: usize = 12;
 
 // Standard RTP Payload Types
-pub const RTP_PT_PCMU: u8 = 0;   // G.711 mu-law audio, 8000 Hz
-pub const RTP_PT_PCMA: u8 = 8;   // G.711 A-law audio, 8000 Hz
+pub const RTP_PT_PCMU: u8 = 0; // G.711 mu-law audio, 8000 Hz
+pub const RTP_PT_PCMA: u8 = 8; // G.711 A-law audio, 8000 Hz
 pub const RTP_PT_DYNAMIC: u8 = 96; // Dynamic payload type (e.g., Opus / H.264)
 
 // RTCP Packet Types
-pub const RTCP_PT_SR: u8 = 200;   // Sender Report
-pub const RTCP_PT_RR: u8 = 201;   // Receiver Report
+pub const RTCP_PT_SR: u8 = 200; // Sender Report
+pub const RTCP_PT_RR: u8 = 201; // Receiver Report
 pub const RTCP_PT_SDES: u8 = 202; // Source Description
-pub const RTCP_PT_BYE: u8 = 203;  // Goodbye
+pub const RTCP_PT_BYE: u8 = 203; // Goodbye
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RtpPacket {
@@ -51,7 +51,9 @@ impl fmt::Display for RtpError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             RtpError::PacketTooShort(l) => write!(f, "RTP packet too short ({} bytes)", l),
-            RtpError::InvalidVersion(v) => write!(f, "Invalid RTP version: expected 2, found {}", v),
+            RtpError::InvalidVersion(v) => {
+                write!(f, "Invalid RTP version: expected 2, found {}", v)
+            }
         }
     }
 }
@@ -59,7 +61,14 @@ impl fmt::Display for RtpError {
 impl std::error::Error for RtpError {}
 
 impl RtpPacket {
-    pub fn build_audio(pt: u8, seq: u16, timestamp: u32, ssrc: u32, marker: bool, audio_data: &[u8]) -> Self {
+    pub fn build_audio(
+        pt: u8,
+        seq: u16,
+        timestamp: u32,
+        ssrc: u32,
+        marker: bool,
+        audio_data: &[u8],
+    ) -> Self {
         RtpPacket {
             version: 2,
             padding: false,
@@ -79,12 +88,18 @@ impl RtpPacket {
         let mut buf = Vec::new();
         let cc = (self.csrc_list.len() as u8) & 0x0F;
         let mut b0 = (self.version << 6) | cc;
-        if self.padding { b0 |= 0x20; }
-        if self.extension { b0 |= 0x10; }
+        if self.padding {
+            b0 |= 0x20;
+        }
+        if self.extension {
+            b0 |= 0x10;
+        }
         buf.push(b0);
 
         let mut b1 = self.payload_type & 0x7F;
-        if self.marker { b1 |= 0x80; }
+        if self.marker {
+            b1 |= 0x80;
+        }
         buf.push(b1);
 
         buf.extend_from_slice(&self.sequence_number.to_be_bytes());
@@ -128,7 +143,12 @@ impl RtpPacket {
 
         let mut csrc_list = Vec::new();
         for _ in 0..csrc_count {
-            let csrc = u32::from_be_bytes([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]]);
+            let csrc = u32::from_be_bytes([
+                data[offset],
+                data[offset + 1],
+                data[offset + 2],
+                data[offset + 3],
+            ]);
             csrc_list.push(csrc);
             offset += 4;
         }
@@ -183,7 +203,9 @@ impl RtcpSenderReport {
         }
 
         let ssrc = u32::from_be_bytes([data[4], data[5], data[6], data[7]]);
-        let ntp_timestamp = u64::from_be_bytes([data[8], data[9], data[10], data[11], data[12], data[13], data[14], data[15]]);
+        let ntp_timestamp = u64::from_be_bytes([
+            data[8], data[9], data[10], data[11], data[12], data[13], data[14], data[15],
+        ]);
         let rtp_timestamp = u32::from_be_bytes([data[16], data[17], data[18], data[19]]);
         let packet_count = u32::from_be_bytes([data[20], data[21], data[22], data[23]]);
         let octet_count = u32::from_be_bytes([data[24], data[25], data[26], data[27]]);
@@ -205,7 +227,8 @@ mod tests {
     #[test]
     fn test_rtp_audio_packet_roundtrip() {
         let audio_samples = [0xD5u8; 160]; // 20ms of G.711 audio (160 bytes @ 8kHz)
-        let rtp = RtpPacket::build_audio(RTP_PT_PCMU, 1001, 160000, 0x11223344, false, &audio_samples);
+        let rtp =
+            RtpPacket::build_audio(RTP_PT_PCMU, 1001, 160000, 0x11223344, false, &audio_samples);
         let raw = rtp.serialize();
 
         assert_eq!(raw.len(), RTP_FIXED_HEADER_LEN + 160);

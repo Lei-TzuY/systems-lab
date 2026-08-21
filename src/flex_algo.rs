@@ -16,7 +16,7 @@ pub enum FlexAlgoMetricType {
 pub struct FlexAlgoDefinition {
     pub algo_id: u8, // User-defined range: 128..255
     pub metric_type: FlexAlgoMetricType,
-    pub calculation_type: u8, // 0 = Shortest Path First
+    pub calculation_type: u8,  // 0 = Shortest Path First
     pub exclude_affinity: u32, // Bitmask of colors/affinities to prune
     pub include_any_affinity: u32,
 }
@@ -129,7 +129,9 @@ impl FlexAlgoEngine {
                     }
 
                     // Check Include-Any Affinity
-                    if fad.include_any_affinity != 0 && (link.admin_group & fad.include_any_affinity) == 0 {
+                    if fad.include_any_affinity != 0
+                        && (link.admin_group & fad.include_any_affinity) == 0
+                    {
                         continue;
                     }
 
@@ -207,7 +209,8 @@ mod tests {
         engine.add_link("NodeB_Via_B", "NodeB", 100, 10, 100, 0x02);
 
         // Algo 128 (Min Delay) picks Path B (total delay 20us vs 200us)
-        let (delay_metric, path_delay) = engine.compute_flex_algo_spf(128, "NodeA", "NodeB").unwrap();
+        let (delay_metric, path_delay) =
+            engine.compute_flex_algo_spf(128, "NodeA", "NodeB").unwrap();
         assert_eq!(delay_metric, 20);
         assert_eq!(path_delay, vec!["NodeA", "NodeB_Via_B", "NodeB"]);
 

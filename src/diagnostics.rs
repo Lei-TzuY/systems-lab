@@ -73,7 +73,10 @@ pub fn build_icmp_frag_needed(next_hop_mtu: u16, original_ip_packet: &[u8]) -> V
 
 /// Parses the suggested Next-Hop MTU from an ICMP Frag-Needed packet (RFC 1191)
 pub fn parse_pmtud_next_hop_mtu(icmp_data: &[u8]) -> Option<u16> {
-    if icmp_data.len() >= 8 && icmp_data[0] == ICMP_TYPE_DEST_UNREACHABLE && icmp_data[1] == ICMP_CODE_FRAG_NEEDED {
+    if icmp_data.len() >= 8
+        && icmp_data[0] == ICMP_TYPE_DEST_UNREACHABLE
+        && icmp_data[1] == ICMP_CODE_FRAG_NEEDED
+    {
         Some(u16::from_be_bytes([icmp_data[6], icmp_data[7]]))
     } else {
         None

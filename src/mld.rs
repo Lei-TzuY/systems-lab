@@ -112,7 +112,10 @@ impl MldTable {
 
     pub fn process_report(&mut self, report: &Mldv2ReportPacket) {
         for rec in &report.records {
-            let entry = self.group_listeners.entry(rec.multicast_address).or_default();
+            let entry = self
+                .group_listeners
+                .entry(rec.multicast_address)
+                .or_default();
             match rec.record_type {
                 MLD_MODE_IS_INCLUDE | MLD_CHANGE_TO_INCLUDE | MLD_ALLOW_NEW_SOURCES => {
                     for src in &rec.source_addresses {

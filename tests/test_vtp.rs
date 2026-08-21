@@ -1,5 +1,5 @@
 use toy_tcpip::ipv4::Ipv4Address;
-use toy_tcpip::vtp::{VtpEngine, VtpMode, VtpPacket, VtpVlanInfo, VTP_MULTICAST_MAC};
+use toy_tcpip::vtp::{VTP_MULTICAST_MAC, VtpEngine, VtpMode, VtpPacket, VtpVlanInfo};
 
 #[test]
 fn test_vtp_packet_framing_and_constants() {
@@ -43,7 +43,7 @@ fn test_vtp_engine_vlan_database_sync() {
 
     if let VtpPacket::Subset(sub) = parsed {
         let updated = client.sync_subset(&sub);
-        assert_eq!(updated, true);
+        assert!(updated);
         assert_eq!(client.revision, 6);
         assert_eq!(client.vlans.get(&50).unwrap(), "WirelessUsers");
     } else {

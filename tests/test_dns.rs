@@ -1,4 +1,4 @@
-use toy_tcpip::dns::{DnsMessage, DNS_CLASS_IN, DNS_TYPE_A};
+use toy_tcpip::dns::{DNS_CLASS_IN, DNS_TYPE_A, DnsMessage};
 use toy_tcpip::ipv4::Ipv4Address;
 
 #[test]

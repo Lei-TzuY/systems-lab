@@ -174,12 +174,16 @@ impl SnmpMessage {
         if req_tag != BER_TAG_INTEGER {
             return Err(SnmpError::InvalidBerEncoding);
         }
-        let request_id = req_body.iter().fold(0i32, |acc, &b| (acc << 8) | (b as i32));
+        let request_id = req_body
+            .iter()
+            .fold(0i32, |acc, &b| (acc << 8) | (b as i32));
 
         let rem_pdu1 = &pdu_body[req_len..];
         let (err_tag, err_body, err_len) = decode_ber_tlv(rem_pdu1)?;
         let error_status = if err_tag == BER_TAG_INTEGER {
-            err_body.iter().fold(0i32, |acc, &b| (acc << 8) | (b as i32))
+            err_body
+                .iter()
+                .fold(0i32, |acc, &b| (acc << 8) | (b as i32))
         } else {
             0
         };
@@ -187,7 +191,9 @@ impl SnmpMessage {
         let rem_pdu2 = &rem_pdu1[err_len..];
         let (idx_tag, idx_body, idx_len) = decode_ber_tlv(rem_pdu2)?;
         let error_index = if idx_tag == BER_TAG_INTEGER {
-            idx_body.iter().fold(0i32, |acc, &b| (acc << 8) | (b as i32))
+            idx_body
+                .iter()
+                .fold(0i32, |acc, &b| (acc << 8) | (b as i32))
         } else {
             0
         };
@@ -195,33 +201,37 @@ impl SnmpMessage {
         let rem_pdu3 = &rem_pdu2[idx_len..];
         let mut varbinds = Vec::new();
 
-        if let Ok((vb_list_tag, mut vb_list_body, _)) = decode_ber_tlv(rem_pdu3) {
-            if vb_list_tag == BER_TAG_SEQUENCE {
-                while !vb_list_body.is_empty() {
-                    if let Ok((vb_tag, vb_body, vb_len)) = decode_ber_tlv(vb_list_body) {
-                        if vb_tag == BER_TAG_SEQUENCE {
-                            if let Ok((oid_tag, oid_body, o_len)) = decode_ber_tlv(vb_body) {
-                                if oid_tag == BER_TAG_OID || oid_tag == BER_TAG_OCTET_STRING {
-                                    let oid_str = String::from_utf8_lossy(oid_body).to_string();
-                                    let val_rem = &vb_body[o_len..];
-                                    let value = if let Ok((v_t, v_b, _)) = decode_ber_tlv(val_rem) {
-                                        match v_t {
-                                            BER_TAG_INTEGER => SnmpValue::Integer(v_b.iter().fold(0i32, |acc, &b| (acc << 8) | (b as i32))),
-                                            BER_TAG_OCTET_STRING => SnmpValue::OctetString(v_b.to_vec()),
-                                            BER_TAG_NULL => SnmpValue::Null,
-                                            _ => SnmpValue::Null,
-                                        }
-                                    } else {
-                                        SnmpValue::Null
-                                    };
-                                    varbinds.push(SnmpVarbind { oid: oid_str, value });
-                                }
+        if let Ok((vb_list_tag, mut vb_list_body, _)) = decode_ber_tlv(rem_pdu3)
+            && vb_list_tag == BER_TAG_SEQUENCE
+        {
+            while !vb_list_body.is_empty() {
+                if let Ok((vb_tag, vb_body, vb_len)) = decode_ber_tlv(vb_list_body) {
+                    if vb_tag == BER_TAG_SEQUENCE
+                        && let Ok((oid_tag, oid_body, o_len)) = decode_ber_tlv(vb_body)
+                        && (oid_tag == BER_TAG_OID || oid_tag == BER_TAG_OCTET_STRING)
+                    {
+                        let oid_str = String::from_utf8_lossy(oid_body).to_string();
+                        let val_rem = &vb_body[o_len..];
+                        let value = if let Ok((v_t, v_b, _)) = decode_ber_tlv(val_rem) {
+                            match v_t {
+                                BER_TAG_INTEGER => SnmpValue::Integer(
+                                    v_b.iter().fold(0i32, |acc, &b| (acc << 8) | (b as i32)),
+                                ),
+                                BER_TAG_OCTET_STRING => SnmpValue::OctetString(v_b.to_vec()),
+                                BER_TAG_NULL => SnmpValue::Null,
+                                _ => SnmpValue::Null,
                             }
-                        }
-                        vb_list_body = &vb_list_body[vb_len..];
-                    } else {
-                        break;
+                        } else {
+                            SnmpValue::Null
+                        };
+                        varbinds.push(SnmpVarbind {
+                            oid: oid_str,
+                            value,
+                        });
                     }
+                    vb_list_body = &vb_list_body[vb_len..];
+                } else {
+                    break;
                 }
             }
         }
@@ -355,9 +365,15 @@ impl SnmpMib {
         let mut mib = SnmpMib {
             objects: HashMap::new(),
         };
-        mib.set("1.3.6.1.2.1.1.1.0", SnmpValue::OctetString(b"Toy TCP/IP Stack on Safe Rust".to_vec()));
+        mib.set(
+            "1.3.6.1.2.1.1.1.0",
+            SnmpValue::OctetString(b"Toy TCP/IP Stack on Safe Rust".to_vec()),
+        );
         mib.set("1.3.6.1.2.1.1.3.0", SnmpValue::Integer(360000)); // sysUpTime (1 hr)
-        mib.set("1.3.6.1.2.1.1.5.0", SnmpValue::OctetString(b"toy-router.local".to_vec()));
+        mib.set(
+            "1.3.6.1.2.1.1.5.0",
+            SnmpValue::OctetString(b"toy-router.local".to_vec()),
+        );
         mib.set("1.3.6.1.2.1.2.2.1.10.1", SnmpValue::Integer(1048576)); // ifInOctets (1MB)
         mib
     }

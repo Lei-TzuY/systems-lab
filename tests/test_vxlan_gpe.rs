@@ -1,4 +1,7 @@
-use toy_tcpip::vxlan_gpe::{VxlanGpePacket, VXLAN_GPE_NP_ETHERNET, VXLAN_GPE_NP_IPV4, VXLAN_GPE_NP_IPV6, VXLAN_GPE_NP_MPLS, VXLAN_GPE_UDP_PORT};
+use toy_tcpip::vxlan_gpe::{
+    VXLAN_GPE_NP_ETHERNET, VXLAN_GPE_NP_IPV4, VXLAN_GPE_NP_IPV6, VXLAN_GPE_NP_MPLS,
+    VXLAN_GPE_UDP_PORT, VxlanGpePacket,
+};
 
 #[test]
 fn test_vxlan_gpe_multiprotocol_encapsulation() {

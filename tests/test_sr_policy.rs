@@ -1,7 +1,7 @@
 use toy_tcpip::ipv6::Ipv6Address;
 use toy_tcpip::sr_policy::{
-    SrCandidatePath, SrPolicy, SrPolicyDatabase, SrProtocolOrigin, SrSegmentList,
-    BGP_EXT_COMMUNITY_COLOR, SR_POLICY_TUNNEL_TYPE,
+    BGP_EXT_COMMUNITY_COLOR, SR_POLICY_TUNNEL_TYPE, SrCandidatePath, SrPolicy, SrPolicyDatabase,
+    SrProtocolOrigin, SrSegmentList,
 };
 
 #[test]
@@ -36,7 +36,10 @@ fn test_sr_policy_traffic_steering_and_preference() {
 
     let steered = db.steer_traffic(200, endpoint).unwrap();
     assert_eq!(steered.segments.len(), 2);
-    assert_eq!(steered.segments[0], Ipv6Address::new([0xfc00, 0, 0, 2, 0, 0, 0, 1]));
+    assert_eq!(
+        steered.segments[0],
+        Ipv6Address::new([0xfc00, 0, 0, 2, 0, 0, 0, 1])
+    );
 }
 
 #[test]

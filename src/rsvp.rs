@@ -94,7 +94,11 @@ impl RsvpObject {
     pub fn serialize(&self) -> Vec<u8> {
         let mut body = Vec::new();
         let (class_num, c_type) = match self {
-            RsvpObject::Session { dest_ip, tunnel_id, ext_tunnel_id } => {
+            RsvpObject::Session {
+                dest_ip,
+                tunnel_id,
+                ext_tunnel_id,
+            } => {
                 body.extend_from_slice(&dest_ip.0);
                 body.extend_from_slice(&tunnel_id.to_be_bytes());
                 body.extend_from_slice(&[0, 0]); // Must be zero
@@ -130,12 +134,19 @@ impl RsvpObject {
                 body.extend_from_slice(&[0, 0]);
                 (RSVP_CLASS_SENDER_TEMPLATE, 7)
             }
-            RsvpObject::SenderTspec { bandwidth_bps, peak_rate_bps } => {
+            RsvpObject::SenderTspec {
+                bandwidth_bps,
+                peak_rate_bps,
+            } => {
                 body.extend_from_slice(&bandwidth_bps.to_be_bytes());
                 body.extend_from_slice(&peak_rate_bps.to_be_bytes());
                 (RSVP_CLASS_SENDER_TSPEC, 2)
             }
-            RsvpObject::Raw { class_num, c_type, body: b } => {
+            RsvpObject::Raw {
+                class_num,
+                c_type,
+                body: b,
+            } => {
                 body.extend_from_slice(b);
                 (*class_num, *c_type)
             }
@@ -171,14 +182,23 @@ impl RsvpObject {
                 let dest_ip = Ipv4Address([body[0], body[1], body[2], body[3]]);
                 let tunnel_id = u16::from_be_bytes([body[4], body[5]]);
                 let ext_tunnel_id = Ipv4Address([body[8], body[9], body[10], body[11]]);
-                RsvpObject::Session { dest_ip, tunnel_id, ext_tunnel_id }
+                RsvpObject::Session {
+                    dest_ip,
+                    tunnel_id,
+                    ext_tunnel_id,
+                }
             }
             (RSVP_CLASS_EXPLICIT_ROUTE, 1) => {
                 let mut hops = Vec::new();
                 let mut offset = 0;
                 while offset + 8 <= body.len() {
                     let loose = (body[offset] & 0x80) != 0;
-                    let hop_ip = Ipv4Address([body[offset + 2], body[offset + 3], body[offset + 4], body[offset + 5]]);
+                    let hop_ip = Ipv4Address([
+                        body[offset + 2],
+                        body[offset + 3],
+                        body[offset + 4],
+                        body[offset + 5],
+                    ]);
                     hops.push((loose, hop_ip));
                     let sub_len = body[offset + 1] as usize;
                     offset += if sub_len >= 8 { sub_len } else { 8 };
@@ -201,7 +221,10 @@ impl RsvpObject {
             (RSVP_CLASS_SENDER_TSPEC, 2) if body.len() >= 8 => {
                 let bandwidth_bps = u32::from_be_bytes([body[0], body[1], body[2], body[3]]);
                 let peak_rate_bps = u32::from_be_bytes([body[4], body[5], body[6], body[7]]);
-                RsvpObject::SenderTspec { bandwidth_bps, peak_rate_bps }
+                RsvpObject::SenderTspec {
+                    bandwidth_bps,
+                    peak_rate_bps,
+                }
             }
             _ => RsvpObject::Raw {
                 class_num,

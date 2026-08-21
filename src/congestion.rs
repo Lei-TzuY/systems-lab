@@ -24,12 +24,12 @@ impl fmt::Display for CongestionState {
 
 #[derive(Debug, Clone)]
 pub struct CongestionControl {
-    pub cwnd: u32,       // Congestion window in bytes
-    pub ssthresh: u32,   // Slow start threshold in bytes
-    pub mss: u32,        // Maximum segment size in bytes
+    pub cwnd: u32,     // Congestion window in bytes
+    pub ssthresh: u32, // Slow start threshold in bytes
+    pub mss: u32,      // Maximum segment size in bytes
     pub dup_ack_count: u32,
     pub state: CongestionState,
-    pub in_flight: u32,  // Bytes currently in flight (unacknowledged)
+    pub in_flight: u32, // Bytes currently in flight (unacknowledged)
 }
 
 impl CongestionControl {
@@ -66,7 +66,8 @@ impl CongestionControl {
             CongestionState::CongestionAvoidance => {
                 // Linear growth: cwnd += (mss * mss) / cwnd per ACK
                 if self.cwnd > 0 {
-                    let increment = ((self.mss as u64 * self.mss as u64) / (self.cwnd as u64)) as u32;
+                    let increment =
+                        ((self.mss as u64 * self.mss as u64) / (self.cwnd as u64)) as u32;
                     self.cwnd = self.cwnd.saturating_add(increment.max(1));
                 }
                 self.dup_ack_count = 0;
@@ -125,9 +126,9 @@ impl CongestionControl {
 pub struct RttEstimator {
     pub srtt: Option<f64>,   // Smoothed Round-Trip Time in milliseconds
     pub rttvar: Option<f64>, // Round-Trip Time Variation in milliseconds
-    pub rto: f64,           // Retransmission Timeout in milliseconds
-    pub min_rto: f64,       // Lower bound (e.g. 200ms)
-    pub max_rto: f64,       // Upper bound (e.g. 60000ms)
+    pub rto: f64,            // Retransmission Timeout in milliseconds
+    pub min_rto: f64,        // Lower bound (e.g. 200ms)
+    pub max_rto: f64,        // Upper bound (e.g. 60000ms)
 }
 
 impl Default for RttEstimator {
@@ -141,7 +142,7 @@ impl RttEstimator {
         RttEstimator {
             srtt: None,
             rttvar: None,
-            rto: 1000.0,      // Initial RTO = 1.0s (RFC 6298)
+            rto: 1000.0, // Initial RTO = 1.0s (RFC 6298)
             min_rto: 200.0,
             max_rto: 60000.0,
         }
@@ -154,7 +155,8 @@ impl RttEstimator {
                 // First RTT sample
                 self.srtt = Some(rtt_sample);
                 self.rttvar = Some(rtt_sample / 2.0);
-                self.rto = (rtt_sample + 4.0 * (rtt_sample / 2.0)).clamp(self.min_rto, self.max_rto);
+                self.rto =
+                    (rtt_sample + 4.0 * (rtt_sample / 2.0)).clamp(self.min_rto, self.max_rto);
             }
             (Some(srtt), Some(rttvar)) => {
                 // Subsequent samples
@@ -208,7 +210,7 @@ mod tests {
 
         assert!(!cc.on_dup_ack()); // 1st dup ACK
         assert!(!cc.on_dup_ack()); // 2nd dup ACK
-        assert!(cc.on_dup_ack());  // 3rd dup ACK -> Fast Retransmit!
+        assert!(cc.on_dup_ack()); // 3rd dup ACK -> Fast Retransmit!
 
         assert_eq!(cc.state, CongestionState::FastRecovery);
         assert_eq!(cc.ssthresh, 5000);

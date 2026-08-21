@@ -1,6 +1,7 @@
 use std::str::FromStr;
 use toy_tcpip::gre_v6::{
-    GreIpv6Packet, ETHERTYPE_ETHERNET_IN_GRE, ETHERTYPE_IPV4_IN_GRE, ETHERTYPE_IPV6_IN_GRE, ETHERTYPE_MPLS_IN_GRE,
+    ETHERTYPE_ETHERNET_IN_GRE, ETHERTYPE_IPV4_IN_GRE, ETHERTYPE_IPV6_IN_GRE, ETHERTYPE_MPLS_IN_GRE,
+    GreIpv6Packet,
 };
 use toy_tcpip::ipv6::Ipv6Address;
 

@@ -4,7 +4,7 @@
 //! Router Solicitation (RS) / Router Advertisement (RA), and the in-memory Neighbor Cache (`NdpTable`).
 
 use crate::ethernet::MacAddress;
-use crate::ipv6::{compute_ipv6_transport_checksum, Ipv6Address, NEXT_HEADER_ICMPV6};
+use crate::ipv6::{Ipv6Address, NEXT_HEADER_ICMPV6, compute_ipv6_transport_checksum};
 use std::collections::HashMap;
 use std::fmt;
 
@@ -35,9 +35,15 @@ pub enum Icmpv6Error {
 impl fmt::Display for Icmpv6Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Icmpv6Error::PacketTooShort(len) => write!(f, "ICMPv6 packet too short ({} bytes, min 4)", len),
+            Icmpv6Error::PacketTooShort(len) => {
+                write!(f, "ICMPv6 packet too short ({} bytes, min 4)", len)
+            }
             Icmpv6Error::InvalidChecksum { found } => {
-                write!(f, "ICMPv6 checksum verification failed with 0x{:04x}", found)
+                write!(
+                    f,
+                    "ICMPv6 checksum verification failed with 0x{:04x}",
+                    found
+                )
             }
         }
     }
@@ -61,7 +67,8 @@ impl<'a> Icmpv6Packet<'a> {
         let checksum = u16::from_be_bytes([data[2], data[3]]);
 
         if check_checksum {
-            let computed = compute_ipv6_transport_checksum(src_ip, dst_ip, NEXT_HEADER_ICMPV6, data);
+            let computed =
+                compute_ipv6_transport_checksum(src_ip, dst_ip, NEXT_HEADER_ICMPV6, data);
             if computed != 0 {
                 return Err(Icmpv6Error::InvalidChecksum { found: checksum });
             }
@@ -163,9 +170,15 @@ impl<'a> Icmpv6Packet<'a> {
 
         // Flags: R (Router = 0x80), S (Solicited = 0x40), O (Override = 0x20)
         let mut flags = 0u8;
-        if is_router { flags |= 0x80; }
-        if solicited { flags |= 0x40; }
-        if override_flag { flags |= 0x20; }
+        if is_router {
+            flags |= 0x80;
+        }
+        if solicited {
+            flags |= 0x40;
+        }
+        if override_flag {
+            flags |= 0x20;
+        }
 
         buf.push(flags);
         buf.extend_from_slice(&[0, 0, 0]); // Reserved (3 bytes)
@@ -240,11 +253,14 @@ mod tests {
         let server_ip = Ipv6Address::from_str("fe80::2").unwrap();
         let server_mac = MacAddress([0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff]);
 
-        let ns = Icmpv6Packet::build_neighbor_solicitation(client_ip, server_ip, server_ip, client_mac);
+        let ns =
+            Icmpv6Packet::build_neighbor_solicitation(client_ip, server_ip, server_ip, client_mac);
         let parsed_ns = Icmpv6Packet::parse(client_ip, server_ip, &ns, true).unwrap();
         assert_eq!(parsed_ns.msg_type, ICMPV6_TYPE_NEIGHBOR_SOLICIT);
 
-        let na = Icmpv6Packet::build_neighbor_advertisement(server_ip, client_ip, server_ip, server_mac, false, true, true);
+        let na = Icmpv6Packet::build_neighbor_advertisement(
+            server_ip, client_ip, server_ip, server_mac, false, true, true,
+        );
         let parsed_na = Icmpv6Packet::parse(server_ip, client_ip, &na, true).unwrap();
         assert_eq!(parsed_na.msg_type, ICMPV6_TYPE_NEIGHBOR_ADVERT);
 

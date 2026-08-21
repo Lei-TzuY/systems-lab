@@ -41,7 +41,9 @@ impl fmt::Display for QuicError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             QuicError::PacketTooShort(len) => write!(f, "QUIC packet too short ({} bytes)", len),
-            QuicError::InvalidVint => write!(f, "Invalid QUIC Variable-Length Integer (VINT) encoding"),
+            QuicError::InvalidVint => {
+                write!(f, "Invalid QUIC Variable-Length Integer (VINT) encoding")
+            }
             QuicError::BufferOverflow => write!(f, "QUIC payload length exceeds available buffer"),
         }
     }
@@ -237,12 +239,7 @@ mod tests {
 
     #[test]
     fn test_quic_vint_encoding_and_decoding() {
-        let test_cases: &[(u64, usize)] = &[
-            (25, 1),
-            (15293, 2),
-            (494878333, 4),
-            (15128880994, 8),
-        ];
+        let test_cases: &[(u64, usize)] = &[(25, 1), (15293, 2), (494878333, 4), (15128880994, 8)];
 
         for &(val, expected_len) in test_cases {
             let encoded = encode_vint(val);
@@ -262,7 +259,14 @@ mod tests {
 
         let raw_initial = initial.serialize();
         let parsed_initial = QuicPacket::parse(&raw_initial).unwrap();
-        if let QuicPacket::Long { packet_type, dcid: d, scid: s, payload, .. } = parsed_initial {
+        if let QuicPacket::Long {
+            packet_type,
+            dcid: d,
+            scid: s,
+            payload,
+            ..
+        } = parsed_initial
+        {
             assert_eq!(packet_type, QUIC_PKT_INITIAL);
             assert_eq!(d, dcid);
             assert_eq!(s, scid);
@@ -275,7 +279,12 @@ mod tests {
         let short = QuicPacket::build_1rtt(vec![0x01; 8], 105, b"HTTP/3 Stream Data");
         let raw_short = short.serialize();
         let parsed_short = QuicPacket::parse(&raw_short).unwrap();
-        if let QuicPacket::Short { packet_number, payload, .. } = parsed_short {
+        if let QuicPacket::Short {
+            packet_number,
+            payload,
+            ..
+        } = parsed_short
+        {
             assert_eq!(packet_number, 105);
             assert_eq!(payload, b"HTTP/3 Stream Data");
         } else {

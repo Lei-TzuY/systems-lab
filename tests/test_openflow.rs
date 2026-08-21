@@ -1,5 +1,8 @@
 use toy_tcpip::ipv4::Ipv4Address;
-use toy_tcpip::openflow::{OfpAction, OfpFlowTable, OfpMatch, OfpMessage, OFP_TCP_PORT, OFP_VERSION_1_3, OFPT_FEATURES_REPLY, OFPT_HELLO};
+use toy_tcpip::openflow::{
+    OFP_TCP_PORT, OFP_VERSION_1_3, OFPT_FEATURES_REPLY, OFPT_HELLO, OfpAction, OfpFlowTable,
+    OfpMatch, OfpMessage,
+};
 
 #[test]
 fn test_openflow_flow_table_lookup_and_pipeline() {
@@ -36,7 +39,10 @@ fn test_openflow_flow_table_lookup_and_pipeline() {
 
     // Test wildcard match
     let act2 = table.lookup_and_execute(2, 0x0800, Some(Ipv4Address::new(192, 168, 1, 99)), 64);
-    assert_eq!(act2, Some(vec![OfpAction::SetVlan(100), OfpAction::Output(4)]));
+    assert_eq!(
+        act2,
+        Some(vec![OfpAction::SetVlan(100), OfpAction::Output(4)])
+    );
 
     // Test default drop
     let act3 = table.lookup_and_execute(1, 0x86DD, None, 100);
@@ -53,7 +59,12 @@ fn test_openflow_features_and_hello_framing() {
     assert_eq!(p_hdr.msg_type, OFPT_FEATURES_REPLY);
     assert_eq!(p_hdr.xid, 0x55AA1122);
 
-    if let OfpMessage::FeaturesReply { datapath_id, n_buffers, n_tables } = p_msg {
+    if let OfpMessage::FeaturesReply {
+        datapath_id,
+        n_buffers,
+        n_tables,
+    } = p_msg
+    {
         assert_eq!(datapath_id, 1);
         assert_eq!(n_buffers, 256);
         assert_eq!(n_tables, 64);

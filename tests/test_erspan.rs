@@ -1,11 +1,17 @@
-use toy_tcpip::erspan::{ErspanPacket, NvgrePacket, ERSPAN_TYPE2_HEADER_LEN, ETHERTYPE_ERSPAN_TYPE2, ETHERTYPE_NVGRE_ETHERNET};
+use toy_tcpip::erspan::{
+    ERSPAN_TYPE2_HEADER_LEN, ETHERTYPE_ERSPAN_TYPE2, ETHERTYPE_NVGRE_ETHERNET, ErspanPacket,
+    NvgrePacket,
+};
 
 #[test]
 fn test_erspan_type2_port_mirroring() {
     let original_payload = b"Payload mirrored from Switch Port 1 to Monitoring Server";
     let encap = ErspanPacket::encapsulate(202, 100, 1, original_payload);
 
-    assert_eq!(encap.len(), ERSPAN_TYPE2_HEADER_LEN + original_payload.len());
+    assert_eq!(
+        encap.len(),
+        ERSPAN_TYPE2_HEADER_LEN + original_payload.len()
+    );
     let parsed = ErspanPacket::parse(&encap).unwrap();
 
     assert_eq!(parsed.header.session_id, 202);

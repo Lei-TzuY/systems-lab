@@ -1,4 +1,7 @@
-use toy_tcpip::coap::{CoapPacket, COAP_CODE_205_CONTENT, COAP_CODE_GET, COAP_OPT_URI_PATH, COAP_TYPE_ACK, COAP_TYPE_CON, COAP_UDP_PORT};
+use toy_tcpip::coap::{
+    COAP_CODE_205_CONTENT, COAP_CODE_GET, COAP_OPT_URI_PATH, COAP_TYPE_ACK, COAP_TYPE_CON,
+    COAP_UDP_PORT, CoapPacket,
+};
 
 #[test]
 fn test_coap_get_and_content_roundtrip() {

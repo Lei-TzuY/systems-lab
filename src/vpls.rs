@@ -59,8 +59,8 @@ pub struct VplsPseudowire {
 #[derive(Debug, Clone, Default)]
 pub struct VplsInstance {
     pub vpls_id: u32,
-    pub pseudowires: HashMap<u32, VplsPseudowire>,      // VC Label Rx -> Pseudowire
-    pub mac_table: HashMap<MacAddress, Option<u32>>,    // MAC -> Some(VC Label Rx) or None (Local)
+    pub pseudowires: HashMap<u32, VplsPseudowire>, // VC Label Rx -> Pseudowire
+    pub mac_table: HashMap<MacAddress, Option<u32>>, // MAC -> Some(VC Label Rx) or None (Local)
 }
 
 impl VplsInstance {
@@ -81,7 +81,12 @@ impl VplsInstance {
     }
 
     /// Encapsulates local Ethernet frame into MPLS VPLS packet (Tunnel Label + VC Label + CW + Frame)
-    pub fn encapsulate_frame(&self, target_mac: MacAddress, eth_frame: &[u8], seq: u16) -> Option<Vec<u8>> {
+    pub fn encapsulate_frame(
+        &self,
+        target_mac: MacAddress,
+        eth_frame: &[u8],
+        seq: u16,
+    ) -> Option<Vec<u8>> {
         let egress_pw_id = self.mac_table.get(&target_mac)?.as_ref()?;
         let pw = self.pseudowires.get(egress_pw_id)?;
 
@@ -160,10 +165,8 @@ mod tests {
         incoming_payload.extend_from_slice(&cw.serialize());
         incoming_payload.extend_from_slice(&inner_eth);
 
-        let incoming_mpls = MplsPacket::new(
-            vec![MplsHeader::new(6001, 0, true, 64)],
-            incoming_payload,
-        ).serialize();
+        let incoming_mpls =
+            MplsPacket::new(vec![MplsHeader::new(6001, 0, true, 64)], incoming_payload).serialize();
 
         let (dst_mac, decapped_eth) = vpls.process_ingress_vpls(&incoming_mpls).unwrap();
         assert_eq!(dst_mac, remote_mac);

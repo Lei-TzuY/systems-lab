@@ -46,9 +46,13 @@ impl GptpTimestamp {
         if data.len() < 10 {
             return None;
         }
-        let seconds = u64::from_be_bytes([0, 0, data[0], data[1], data[2], data[3], data[4], data[5]]);
+        let seconds =
+            u64::from_be_bytes([0, 0, data[0], data[1], data[2], data[3], data[4], data[5]]);
         let nanoseconds = u32::from_be_bytes([data[6], data[7], data[8], data[9]]);
-        Some(GptpTimestamp { seconds, nanoseconds })
+        Some(GptpTimestamp {
+            seconds,
+            nanoseconds,
+        })
     }
 }
 
@@ -94,7 +98,12 @@ impl fmt::Display for GptpError {
 impl std::error::Error for GptpError {}
 
 impl GptpPacket {
-    pub fn build_pdelay_req(clock_id: [u8; 8], port_id: u16, seq_id: u16, t1: GptpTimestamp) -> Self {
+    pub fn build_pdelay_req(
+        clock_id: [u8; 8],
+        port_id: u16,
+        seq_id: u16,
+        t1: GptpTimestamp,
+    ) -> Self {
         let header = GptpHeader {
             transport_specific: 1, // IEEE 802.1AS
             message_type: GPTP_MSG_PDELAY_REQ,
@@ -242,7 +251,12 @@ impl GptpPacket {
 /// Calculate IEEE 802.1AS Peer Propagation Delay (nanoseconds)
 ///
 /// T_pdelay = ((t4 - t1) - (t3 - t2)) / 2
-pub fn calculate_gptp_peer_delay(t1: GptpTimestamp, t2: GptpTimestamp, t3: GptpTimestamp, t4: GptpTimestamp) -> i64 {
+pub fn calculate_gptp_peer_delay(
+    t1: GptpTimestamp,
+    t2: GptpTimestamp,
+    t3: GptpTimestamp,
+    t4: GptpTimestamp,
+) -> i64 {
     let d_41 = t4.to_nanos() as i64 - t1.to_nanos() as i64;
     let d_32 = t3.to_nanos() as i64 - t2.to_nanos() as i64;
     (d_41 - d_32) / 2

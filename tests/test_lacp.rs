@@ -1,9 +1,8 @@
 use toy_tcpip::ethernet::MacAddress;
 use toy_tcpip::ipv4::Ipv4Address;
 use toy_tcpip::lacp::{
-    LacpPacket, LacpPortInfo, LinkAggregationGroup, LACP_STATE_ACTIVITY,
-    LACP_STATE_AGGREGATION, LACP_STATE_COLLECTING, LACP_STATE_DISTRIBUTING,
-    LACP_STATE_SYNCHRONIZATION,
+    LACP_STATE_ACTIVITY, LACP_STATE_AGGREGATION, LACP_STATE_COLLECTING, LACP_STATE_DISTRIBUTING,
+    LACP_STATE_SYNCHRONIZATION, LacpPacket, LacpPortInfo, LinkAggregationGroup,
 };
 
 #[test]
@@ -14,7 +13,11 @@ fn test_lacp_actor_partner_tlv_codec() {
         key: 10,
         port_priority: 128,
         port_number: 1,
-        state: LACP_STATE_ACTIVITY | LACP_STATE_AGGREGATION | LACP_STATE_SYNCHRONIZATION | LACP_STATE_COLLECTING | LACP_STATE_DISTRIBUTING,
+        state: LACP_STATE_ACTIVITY
+            | LACP_STATE_AGGREGATION
+            | LACP_STATE_SYNCHRONIZATION
+            | LACP_STATE_COLLECTING
+            | LACP_STATE_DISTRIBUTING,
     };
 
     let partner = LacpPortInfo {
@@ -23,7 +26,11 @@ fn test_lacp_actor_partner_tlv_codec() {
         key: 10,
         port_priority: 128,
         port_number: 2,
-        state: LACP_STATE_ACTIVITY | LACP_STATE_AGGREGATION | LACP_STATE_SYNCHRONIZATION | LACP_STATE_COLLECTING | LACP_STATE_DISTRIBUTING,
+        state: LACP_STATE_ACTIVITY
+            | LACP_STATE_AGGREGATION
+            | LACP_STATE_SYNCHRONIZATION
+            | LACP_STATE_COLLECTING
+            | LACP_STATE_DISTRIBUTING,
     };
 
     let pkt = LacpPacket::build(actor.clone(), partner.clone());
@@ -39,7 +46,12 @@ fn test_lacp_actor_partner_tlv_codec() {
 fn test_lacp_5tuple_load_balancing() {
     let lag = LinkAggregationGroup::new(
         "bond0",
-        vec!["eth0".to_string(), "eth1".to_string(), "eth2".to_string(), "eth3".to_string()],
+        vec![
+            "eth0".to_string(),
+            "eth1".to_string(),
+            "eth2".to_string(),
+            "eth3".to_string(),
+        ],
         10,
     );
 

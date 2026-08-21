@@ -3,7 +3,7 @@ use toy_tcpip::ats::{AtsFrame, AtsStreamShaper, UrgencyBasedScheduler};
 #[test]
 fn test_ats_stream_shaper_eligibility_time() {
     let mut shaper = AtsStreamShaper::new(1, 16_000_000, 2000); // 16 Mbps = 2 bytes/µs
-    
+
     // Frame 1: 500 bytes -> 250µs tx time
     let et1 = shaper.compute_eligibility_time(500, 1000);
     assert_eq!(et1, 1250);

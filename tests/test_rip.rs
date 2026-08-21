@@ -1,5 +1,7 @@
 use toy_tcpip::ipv4::Ipv4Address;
-use toy_tcpip::rip::{RipEngine, RipEntry, RipPacket, RIP_AFI_IPV4, RIP_CMD_RESPONSE, RIP_VERSION_2};
+use toy_tcpip::rip::{
+    RIP_AFI_IPV4, RIP_CMD_RESPONSE, RIP_VERSION_2, RipEngine, RipEntry, RipPacket,
+};
 
 #[test]
 fn test_rip_packet_parse_and_serialize() {
@@ -43,6 +45,9 @@ fn test_rip_distance_vector_convergence() {
     assert_eq!(updated, 1);
 
     // Verify Router B learned route to 192.168.10.0/24
-    let route = router_b.routes.lookup(Ipv4Address::new(192, 168, 10, 55)).unwrap();
+    let route = router_b
+        .routes
+        .lookup(Ipv4Address::new(192, 168, 10, 55))
+        .unwrap();
     assert_eq!(route.gateway, Some(Ipv4Address::new(192, 168, 10, 1)));
 }

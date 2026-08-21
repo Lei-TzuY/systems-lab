@@ -1,5 +1,8 @@
 use toy_tcpip::ipv4::Ipv4Address;
-use toy_tcpip::turn::{TurnAllocationTable, TurnPacket, TURN_ALLOCATE_REQUEST, TURN_ALLOCATE_RESPONSE, TURN_DATA_INDICATION, TURN_SEND_INDICATION};
+use toy_tcpip::turn::{
+    TURN_ALLOCATE_REQUEST, TURN_ALLOCATE_RESPONSE, TURN_DATA_INDICATION, TURN_SEND_INDICATION,
+    TurnAllocationTable, TurnPacket,
+};
 
 #[test]
 fn test_turn_allocation_lifecycle() {
@@ -25,7 +28,10 @@ fn test_turn_allocation_lifecycle() {
 
     let parsed_resp = TurnPacket::parse(&raw_resp).unwrap();
     assert_eq!(parsed_resp.msg_type, TURN_ALLOCATE_RESPONSE);
-    assert_eq!(parsed_resp.get_xor_relayed_address(), Some((rel_ip, rel_port)));
+    assert_eq!(
+        parsed_resp.get_xor_relayed_address(),
+        Some((rel_ip, rel_port))
+    );
 }
 
 #[test]
@@ -38,12 +44,18 @@ fn test_turn_send_and_data_relaying() {
     let raw_send = send.serialize();
     let parsed_send = TurnPacket::parse(&raw_send).unwrap();
     assert_eq!(parsed_send.msg_type, TURN_SEND_INDICATION);
-    assert_eq!(parsed_send.get_xor_peer_address(), Some((peer_ip, peer_port)));
+    assert_eq!(
+        parsed_send.get_xor_peer_address(),
+        Some((peer_ip, peer_port))
+    );
     assert_eq!(parsed_send.get_data_payload(), Some(msg.as_ref()));
 
     let data = TurnPacket::build_data_indication(peer_ip, peer_port, msg);
     let raw_data = data.serialize();
     let parsed_data = TurnPacket::parse(&raw_data).unwrap();
     assert_eq!(parsed_data.msg_type, TURN_DATA_INDICATION);
-    assert_eq!(parsed_data.get_xor_peer_address(), Some((peer_ip, peer_port)));
+    assert_eq!(
+        parsed_data.get_xor_peer_address(),
+        Some((peer_ip, peer_port))
+    );
 }

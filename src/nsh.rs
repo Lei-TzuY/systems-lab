@@ -60,13 +60,7 @@ impl fmt::Display for NshError {
 impl std::error::Error for NshError {}
 
 impl NshHeader {
-    pub fn new_type1(
-        spi: u32,
-        si: u8,
-        next_proto: u8,
-        tenant_id: u32,
-        flow_hash: u32,
-    ) -> Self {
+    pub fn new_type1(spi: u32, si: u8, next_proto: u8, tenant_id: u32, flow_hash: u32) -> Self {
         NshHeader {
             oam: false,
             critical: false,
@@ -77,7 +71,7 @@ impl NshHeader {
             context_c1: 0x00000001, // Ingress Port #1
             context_c2: tenant_id,  // Tenant / VRF
             context_c3: 0,
-            context_c4: flow_hash,  // 5-tuple flow hash
+            context_c4: flow_hash, // 5-tuple flow hash
         }
     }
 
@@ -154,7 +148,13 @@ impl NshPacket {
         }
     }
 
-    pub fn build_ethernet(spi: u32, si: u8, tenant_id: u32, flow_hash: u32, eth_frame: &[u8]) -> Self {
+    pub fn build_ethernet(
+        spi: u32,
+        si: u8,
+        tenant_id: u32,
+        flow_hash: u32,
+        eth_frame: &[u8],
+    ) -> Self {
         let header = NshHeader::new_type1(spi, si, NSH_NP_ETHERNET, tenant_id, flow_hash);
         NshPacket {
             header,
@@ -214,12 +214,12 @@ mod tests {
 
         // Hop 1: Firewall
         let hop1 = ServiceFunctionForwarder::forward_next_service_hop(&mut parsed);
-        assert_eq!(hop1, true);
+        assert!(hop1);
         assert_eq!(parsed.header.service_index, 254);
 
         // Hop 2: DPI
         let hop2 = ServiceFunctionForwarder::forward_next_service_hop(&mut parsed);
-        assert_eq!(hop2, true);
+        assert!(hop2);
         assert_eq!(parsed.header.service_index, 253);
     }
 }

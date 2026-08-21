@@ -24,8 +24,13 @@ pub enum L2tpError {
 impl fmt::Display for L2tpError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            L2tpError::PacketTooShort(l) => write!(f, "L2TPv3 packet too short ({} bytes, min 4)", l),
-            L2tpError::InvalidSessionId => write!(f, "Invalid L2TPv3 session ID 0 (control connection reserved)"),
+            L2tpError::PacketTooShort(l) => {
+                write!(f, "L2TPv3 packet too short ({} bytes, min 4)", l)
+            }
+            L2tpError::InvalidSessionId => write!(
+                f,
+                "Invalid L2TPv3 session ID 0 (control connection reserved)"
+            ),
         }
     }
 }

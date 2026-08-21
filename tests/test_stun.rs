@@ -1,5 +1,8 @@
 use toy_tcpip::ipv4::Ipv4Address;
-use toy_tcpip::stun::{StunPacket, STUN_ATTR_XOR_MAPPED_ADDRESS, STUN_BINDING_REQUEST, STUN_BINDING_RESPONSE, STUN_MAGIC_COOKIE, STUN_PORT};
+use toy_tcpip::stun::{
+    STUN_ATTR_XOR_MAPPED_ADDRESS, STUN_BINDING_REQUEST, STUN_BINDING_RESPONSE, STUN_MAGIC_COOKIE,
+    STUN_PORT, StunPacket,
+};
 
 #[test]
 fn test_stun_packet_structure_and_constants() {
@@ -26,7 +29,12 @@ fn test_stun_xor_mapped_address_translation() {
 
     let parsed_resp = StunPacket::parse(&raw_resp).unwrap();
     assert_eq!(parsed_resp.msg_type, STUN_BINDING_RESPONSE);
-    assert!(parsed_resp.attributes.iter().any(|a| a.attr_type == STUN_ATTR_XOR_MAPPED_ADDRESS));
+    assert!(
+        parsed_resp
+            .attributes
+            .iter()
+            .any(|a| a.attr_type == STUN_ATTR_XOR_MAPPED_ADDRESS)
+    );
 
     let (ip, port) = parsed_resp.get_xor_mapped_address().unwrap();
     assert_eq!(ip, public_ip);

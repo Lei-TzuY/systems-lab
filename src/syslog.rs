@@ -106,7 +106,13 @@ impl fmt::Display for SyslogError {
 impl std::error::Error for SyslogError {}
 
 impl SyslogMessage {
-    pub fn new(facility: SyslogFacility, severity: SyslogSeverity, hostname: &str, app: &str, msg: &str) -> Self {
+    pub fn new(
+        facility: SyslogFacility,
+        severity: SyslogSeverity,
+        hostname: &str,
+        app: &str,
+        msg: &str,
+    ) -> Self {
         SyslogMessage {
             facility,
             severity,
@@ -121,7 +127,13 @@ impl SyslogMessage {
     }
 
     pub fn format_rfc5424(&self) -> String {
-        format!("<{}>1 - {} {} - - - {}", self.pri_val(), self.hostname, self.app_name, self.message)
+        format!(
+            "<{}>1 - {} {} - - - {}",
+            self.pri_val(),
+            self.hostname,
+            self.app_name,
+            self.message
+        )
     }
 
     pub fn parse_rfc5424(s: &str) -> Result<Self, SyslogError> {
@@ -131,7 +143,9 @@ impl SyslogMessage {
 
         let end_pri = s.find('>').ok_or(SyslogError::InvalidFormat)?;
         let pri_str = &s[1..end_pri];
-        let pri = pri_str.parse::<u8>().map_err(|_| SyslogError::InvalidFormat)?;
+        let pri = pri_str
+            .parse::<u8>()
+            .map_err(|_| SyslogError::InvalidFormat)?;
 
         let fac_u8 = pri / 8;
         let sev_u8 = pri % 8;
@@ -239,9 +253,27 @@ mod tests {
     #[test]
     fn test_syslog_collector_ring_buffer() {
         let mut collector = SyslogCollector::new(2);
-        let m1 = SyslogMessage::new(SyslogFacility::Local0, SyslogSeverity::Informational, "h", "app", "1");
-        let m2 = SyslogMessage::new(SyslogFacility::Local0, SyslogSeverity::Informational, "h", "app", "2");
-        let m3 = SyslogMessage::new(SyslogFacility::Local0, SyslogSeverity::Informational, "h", "app", "3");
+        let m1 = SyslogMessage::new(
+            SyslogFacility::Local0,
+            SyslogSeverity::Informational,
+            "h",
+            "app",
+            "1",
+        );
+        let m2 = SyslogMessage::new(
+            SyslogFacility::Local0,
+            SyslogSeverity::Informational,
+            "h",
+            "app",
+            "2",
+        );
+        let m3 = SyslogMessage::new(
+            SyslogFacility::Local0,
+            SyslogSeverity::Informational,
+            "h",
+            "app",
+            "3",
+        );
 
         collector.record(m1);
         collector.record(m2);

@@ -71,10 +71,18 @@ impl SbfdPacket {
         buf[0] = ((self.version & 0x07) << 5) | (self.diag & 0x1F);
 
         let mut flags = (state_val & 0x03) << 6;
-        if self.poll { flags |= 0x20; }
-        if self.final_bit { flags |= 0x10; }
-        if self.c_bit { flags |= 0x08; }
-        if self.a_bit { flags |= 0x04; }
+        if self.poll {
+            flags |= 0x20;
+        }
+        if self.final_bit {
+            flags |= 0x10;
+        }
+        if self.c_bit {
+            flags |= 0x08;
+        }
+        if self.a_bit {
+            flags |= 0x04;
+        }
         buf[1] = flags;
 
         buf[2] = self.detect_mult;
@@ -160,7 +168,10 @@ impl SbfdReflector {
 
     /// Processes an incoming S-BFD probe statelessly and generates reflection
     pub fn process_probe(&self, probe: &SbfdPacket) -> Option<SbfdPacket> {
-        if !self.local_discriminators.contains(&probe.your_discriminator) {
+        if !self
+            .local_discriminators
+            .contains(&probe.your_discriminator)
+        {
             return None; // Mismatched target discriminator
         }
 
@@ -200,7 +211,7 @@ mod tests {
         let reply = reflector.process_probe(&parsed_probe).unwrap();
 
         assert_eq!(reply.state, SbfdState::Up);
-        assert_eq!(reply.final_bit, true);
+        assert!(reply.final_bit);
         assert_eq!(reply.my_discriminator, 0x90001);
         assert_eq!(reply.your_discriminator, 0x10001);
     }

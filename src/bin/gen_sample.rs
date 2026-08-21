@@ -1,10 +1,10 @@
 use std::fs::{self, File};
 use std::path::Path;
 use toy_tcpip::arp::ArpPacket;
-use toy_tcpip::ethernet::{EthernetFrame, MacAddress, ETHERTYPE_ARP, ETHERTYPE_IPV4};
+use toy_tcpip::ethernet::{ETHERTYPE_ARP, ETHERTYPE_IPV4, EthernetFrame, MacAddress};
 use toy_tcpip::icmp::IcmpPacket;
-use toy_tcpip::ipv4::{Ipv4Address, Ipv4Packet, IP_PROTO_ICMP, IP_PROTO_TCP, IP_PROTO_UDP};
-use toy_tcpip::pcap::{PcapWriter, LINKTYPE_ETHERNET};
+use toy_tcpip::ipv4::{IP_PROTO_ICMP, IP_PROTO_TCP, IP_PROTO_UDP, Ipv4Address, Ipv4Packet};
+use toy_tcpip::pcap::{LINKTYPE_ETHERNET, PcapWriter};
 use toy_tcpip::tcp::{TcpFlags, TcpSegment};
 use toy_tcpip::udp::UdpDatagram;
 
@@ -28,7 +28,12 @@ fn main() {
 
     // 1. ARP Request
     let arp_req = ArpPacket::build_request(client_mac, client_ip.0, server_ip.0);
-    let f1 = EthernetFrame::serialize(MacAddress::BROADCAST, client_mac, ETHERTYPE_ARP, &arp_req.serialize());
+    let f1 = EthernetFrame::serialize(
+        MacAddress::BROADCAST,
+        client_mac,
+        ETHERTYPE_ARP,
+        &arp_req.serialize(),
+    );
     writer.write_packet(ts_sec, ts_usec, &f1).unwrap();
     ts_usec += 1000;
 
@@ -89,7 +94,11 @@ fn main() {
         80,
         1001,
         1001,
-        TcpFlags { psh: true, ack: true, ..Default::default() },
+        TcpFlags {
+            psh: true,
+            ack: true,
+            ..Default::default()
+        },
         65535,
         http_payload,
     );
@@ -97,5 +106,8 @@ fn main() {
     let f6 = EthernetFrame::serialize(server_mac, client_mac, ETHERTYPE_IPV4, &ip_data);
     writer.write_packet(ts_sec, ts_usec, &f6).unwrap();
 
-    println!("✅ Generated '{}' with 6 sample multi-protocol frames.", pcap_path.display());
+    println!(
+        "✅ Generated '{}' with 6 sample multi-protocol frames.",
+        pcap_path.display()
+    );
 }

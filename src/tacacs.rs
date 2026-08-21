@@ -234,7 +234,7 @@ mod tests {
         let pkt = TacacsPacket::build_authen_start(0x12345678, "admin", "tty0", "cisco123");
         let raw = pkt.serialize();
 
-        assert_eq!(raw.len() >= TACACS_HEADER_LEN, true);
+        assert!(raw.len() >= TACACS_HEADER_LEN);
         let parsed = TacacsPacket::parse(&raw).unwrap();
         assert_eq!(parsed.header.session_id, 0x12345678);
         assert_eq!(parsed.header.seq_no, 1);

@@ -1,4 +1,7 @@
-use toy_tcpip::gptp::{calculate_gptp_peer_delay, GptpPacket, GptpTimestamp, ETHERTYPE_GPTP, GPTP_MSG_PDELAY_REQ, GPTP_MSG_PDELAY_RESP, GPTP_MULTICAST_MAC};
+use toy_tcpip::gptp::{
+    ETHERTYPE_GPTP, GPTP_MSG_PDELAY_REQ, GPTP_MSG_PDELAY_RESP, GPTP_MULTICAST_MAC, GptpPacket,
+    GptpTimestamp, calculate_gptp_peer_delay,
+};
 
 #[test]
 fn test_gptp_pdelay_req_resp_and_peer_delay_calculation() {

@@ -1,5 +1,8 @@
 use toy_tcpip::ipv4::Ipv4Address;
-use toy_tcpip::pim::{PimMulticastRouter, PimPacket, ALL_PIM_ROUTERS_MULTICAST, IP_PROTO_PIM, PIM_TYPE_HELLO, PIM_TYPE_JOIN_PRUNE};
+use toy_tcpip::pim::{
+    ALL_PIM_ROUTERS_MULTICAST, IP_PROTO_PIM, PIM_TYPE_HELLO, PIM_TYPE_JOIN_PRUNE,
+    PimMulticastRouter, PimPacket,
+};
 
 #[test]
 fn test_pim_hello_packet_codec() {

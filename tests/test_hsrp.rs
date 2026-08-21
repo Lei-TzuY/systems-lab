@@ -1,4 +1,4 @@
-use toy_tcpip::hsrp::{HsrpEngine, HsrpPacket, HsrpState, HSRP_MULTICAST_IP, HSRP_UDP_PORT};
+use toy_tcpip::hsrp::{HSRP_MULTICAST_IP, HSRP_UDP_PORT, HsrpEngine, HsrpPacket, HsrpState};
 use toy_tcpip::ipv4::Ipv4Address;
 
 #[test]

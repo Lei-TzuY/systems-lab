@@ -207,7 +207,7 @@ mod tests {
         let pkt = GlbpPacket::build_hello(10, 120, 1, 100, vip);
         let raw = pkt.serialize();
 
-        assert_eq!(raw.len() >= GLBP_HEADER_LEN, true);
+        assert!(raw.len() >= GLBP_HEADER_LEN);
         let parsed = GlbpPacket::parse(&raw).unwrap();
         assert_eq!(parsed.version, 1);
         assert_eq!(parsed.group, 10);

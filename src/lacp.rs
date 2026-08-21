@@ -17,11 +17,11 @@ pub const LACP_TLV_COLLECTOR: u8 = 0x03;
 pub const LACP_TLV_TERMINATOR: u8 = 0x00;
 
 // LACP State Bitmask
-pub const LACP_STATE_ACTIVITY: u8 = 1 << 0;     // 1 = Active, 0 = Passive
-pub const LACP_STATE_TIMEOUT: u8 = 1 << 1;      // 1 = Short Timeout, 0 = Long
-pub const LACP_STATE_AGGREGATION: u8 = 1 << 2;  // 1 = Aggregatable, 0 = Individual
+pub const LACP_STATE_ACTIVITY: u8 = 1 << 0; // 1 = Active, 0 = Passive
+pub const LACP_STATE_TIMEOUT: u8 = 1 << 1; // 1 = Short Timeout, 0 = Long
+pub const LACP_STATE_AGGREGATION: u8 = 1 << 2; // 1 = Aggregatable, 0 = Individual
 pub const LACP_STATE_SYNCHRONIZATION: u8 = 1 << 3;
-pub const LACP_STATE_COLLECTING: u8 = 1 << 4;   // 1 = Receiving traffic
+pub const LACP_STATE_COLLECTING: u8 = 1 << 4; // 1 = Receiving traffic
 pub const LACP_STATE_DISTRIBUTING: u8 = 1 << 5; // 1 = Transmitting traffic
 pub const LACP_STATE_DEFAULTED: u8 = 1 << 6;
 pub const LACP_STATE_EXPIRED: u8 = 1 << 7;
@@ -53,8 +53,14 @@ pub enum LacpError {
 impl fmt::Display for LacpError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            LacpError::PacketTooShort(l) => write!(f, "LACPDU packet too short ({} bytes, min 110)", l),
-            LacpError::InvalidSubtype(s) => write!(f, "Invalid Slow Protocol subtype: 0x{:02x} (expected 0x01 LACP)", s),
+            LacpError::PacketTooShort(l) => {
+                write!(f, "LACPDU packet too short ({} bytes, min 110)", l)
+            }
+            LacpError::InvalidSubtype(s) => write!(
+                f,
+                "Invalid Slow Protocol subtype: 0x{:02x} (expected 0x01 LACP)",
+                s
+            ),
             LacpError::InvalidTlv(t) => write!(f, "Unexpected LACP TLV type: {}", t),
         }
     }
@@ -174,7 +180,13 @@ impl LinkAggregationGroup {
     }
 
     /// Computes egress slave port index using Layer 3 + Layer 4 hash policy
-    pub fn select_slave_port(&self, src_ip: Ipv4Address, dst_ip: Ipv4Address, src_port: u16, dst_port: u16) -> &str {
+    pub fn select_slave_port(
+        &self,
+        src_ip: Ipv4Address,
+        dst_ip: Ipv4Address,
+        src_port: u16,
+        dst_port: u16,
+    ) -> &str {
         if self.slave_ports.is_empty() {
             return "none";
         }
@@ -206,7 +218,11 @@ mod tests {
             key: 1,
             port_priority: 128,
             port_number: 1,
-            state: LACP_STATE_ACTIVITY | LACP_STATE_AGGREGATION | LACP_STATE_SYNCHRONIZATION | LACP_STATE_COLLECTING | LACP_STATE_DISTRIBUTING,
+            state: LACP_STATE_ACTIVITY
+                | LACP_STATE_AGGREGATION
+                | LACP_STATE_SYNCHRONIZATION
+                | LACP_STATE_COLLECTING
+                | LACP_STATE_DISTRIBUTING,
         };
 
         let partner = LacpPortInfo {
@@ -215,7 +231,11 @@ mod tests {
             key: 1,
             port_priority: 128,
             port_number: 2,
-            state: LACP_STATE_ACTIVITY | LACP_STATE_AGGREGATION | LACP_STATE_SYNCHRONIZATION | LACP_STATE_COLLECTING | LACP_STATE_DISTRIBUTING,
+            state: LACP_STATE_ACTIVITY
+                | LACP_STATE_AGGREGATION
+                | LACP_STATE_SYNCHRONIZATION
+                | LACP_STATE_COLLECTING
+                | LACP_STATE_DISTRIBUTING,
         };
 
         let pkt = LacpPacket::build(actor.clone(), partner.clone());
@@ -229,7 +249,8 @@ mod tests {
 
     #[test]
     fn test_lag_load_balancing_hash() {
-        let lag = LinkAggregationGroup::new("bond0", vec!["eth0".to_string(), "eth1".to_string()], 1);
+        let lag =
+            LinkAggregationGroup::new("bond0", vec!["eth0".to_string(), "eth1".to_string()], 1);
         let src = Ipv4Address::new(192, 168, 1, 100);
         let dst = Ipv4Address::new(192, 168, 1, 10);
 

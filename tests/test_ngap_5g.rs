@@ -1,8 +1,8 @@
 use toy_tcpip::ipv4::Ipv4Address;
 use toy_tcpip::ngap_5g::{
-    InitialUeMessage, NgSetupRequest, NgapNode, PduSessionResourceSetupRequest, PlmnId, Snssai,
-    NGAP_PROC_INITIAL_UE_MESSAGE, NGAP_PROC_NG_SETUP, NGAP_PROC_PDU_SESSION_RESOURCE_SETUP,
-    NGAP_SCTP_PORT,
+    InitialUeMessage, NGAP_PROC_INITIAL_UE_MESSAGE, NGAP_PROC_NG_SETUP,
+    NGAP_PROC_PDU_SESSION_RESOURCE_SETUP, NGAP_SCTP_PORT, NgSetupRequest, NgapNode,
+    PduSessionResourceSetupRequest, PlmnId, Snssai,
 };
 
 #[test]
@@ -21,11 +21,17 @@ fn test_ngap_end_to_end_signalling_flow() {
     let req = NgSetupRequest {
         global_gnb_id: 5001,
         gnb_name: "gNB-Hsinchu-01".to_string(),
-        plmn: PlmnId { mcc: [4, 6, 6], mnc: [0, 1, 0] },
+        plmn: PlmnId {
+            mcc: [4, 6, 6],
+            mnc: [0, 1, 0],
+        },
         tac: 0x1234,
         supported_slices: vec![
             Snssai { sst: 1, sd: None }, // eMBB
-            Snssai { sst: 2, sd: Some([0x00, 0x01, 0x02]) }, // URLLC
+            Snssai {
+                sst: 2,
+                sd: Some([0x00, 0x01, 0x02]),
+            }, // URLLC
         ],
     };
     let resp = ngap.handle_ng_setup(&req);
@@ -53,6 +59,9 @@ fn test_ngap_end_to_end_signalling_flow() {
     };
     let pdu_resp = ngap.handle_pdu_session_setup(&pdu_req, Ipv4Address::new(192, 168, 50, 200));
     assert_eq!(pdu_resp.pdu_session_id, 5);
-    assert_eq!(pdu_resp.gnb_transport_ip, Ipv4Address::new(192, 168, 50, 200));
+    assert_eq!(
+        pdu_resp.gnb_transport_ip,
+        Ipv4Address::new(192, 168, 50, 200)
+    );
     assert_eq!(ngap.active_pdu_sessions_count, 1);
 }

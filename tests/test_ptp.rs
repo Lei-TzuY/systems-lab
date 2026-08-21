@@ -1,4 +1,7 @@
-use toy_tcpip::ptp::{calculate_ptp_offset_and_delay, PtpPacket, PtpTimestamp, ETHERTYPE_PTP, PTP_EVENT_PORT, PTP_GENERAL_PORT, PTP_HEADER_LEN, PTP_MSG_FOLLOW_UP, PTP_MSG_SYNC};
+use toy_tcpip::ptp::{
+    ETHERTYPE_PTP, PTP_EVENT_PORT, PTP_GENERAL_PORT, PTP_HEADER_LEN, PTP_MSG_FOLLOW_UP,
+    PTP_MSG_SYNC, PtpPacket, PtpTimestamp, calculate_ptp_offset_and_delay,
+};
 
 #[test]
 fn test_ptp_sync_and_follow_up_packets() {
@@ -26,7 +29,7 @@ fn test_ptp_sync_and_follow_up_packets() {
 #[test]
 fn test_ptp_nanosecond_timing_calculation() {
     let t1 = PtpTimestamp::new(1000, 0);
-    let t2 = PtpTimestamp::new(1000, 50);  // Master to slave takes 50ns
+    let t2 = PtpTimestamp::new(1000, 50); // Master to slave takes 50ns
     let t3 = PtpTimestamp::new(1000, 100);
     let t4 = PtpTimestamp::new(1000, 150); // Slave to master takes 50ns
 

@@ -2,7 +2,7 @@
 //!
 //! Binary multiplexed application protocol framing designed to run natively over QUIC streams.
 
-use crate::quic::{decode_vint, encode_vint, QuicError};
+use crate::quic::{QuicError, decode_vint, encode_vint};
 use std::fmt;
 
 pub const HTTP3_FRAME_DATA: u64 = 0x00;
@@ -45,7 +45,8 @@ impl Http3Frame {
     pub fn parse(data: &[u8]) -> Result<(Self, usize), Http3Error> {
         let mut offset = 0;
 
-        let (frame_type, type_len) = decode_vint(&data[offset..]).map_err(Http3Error::InvalidVint)?;
+        let (frame_type, type_len) =
+            decode_vint(&data[offset..]).map_err(Http3Error::InvalidVint)?;
         offset += type_len;
 
         let (length, len_len) = decode_vint(&data[offset..]).map_err(Http3Error::InvalidVint)?;
@@ -59,7 +60,13 @@ impl Http3Frame {
         let payload = data[offset..offset + payload_len].to_vec();
         offset += payload_len;
 
-        Ok((Http3Frame { frame_type, payload }, offset))
+        Ok((
+            Http3Frame {
+                frame_type,
+                payload,
+            },
+            offset,
+        ))
     }
 
     pub fn serialize(&self) -> Vec<u8> {
@@ -146,6 +153,9 @@ mod tests {
         let data_raw = data_frame.serialize();
         let (parsed_data, _) = Http3Frame::parse(&data_raw).unwrap();
         assert_eq!(parsed_data.frame_type, HTTP3_FRAME_DATA);
-        assert_eq!(parsed_data.payload, b"{\"status\": \"ok\", \"protocol\": \"HTTP/3\"}");
+        assert_eq!(
+            parsed_data.payload,
+            b"{\"status\": \"ok\", \"protocol\": \"HTTP/3\"}"
+        );
     }
 }

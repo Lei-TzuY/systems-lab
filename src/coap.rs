@@ -16,13 +16,13 @@ pub const COAP_TYPE_ACK: u8 = 2; // Acknowledgement
 pub const COAP_TYPE_RST: u8 = 3; // Reset
 
 // CoAP Request Codes (Class 0)
-pub const COAP_CODE_GET: u8 = 1;    // 0.01 GET
-pub const COAP_CODE_POST: u8 = 2;   // 0.02 POST
-pub const COAP_CODE_PUT: u8 = 3;    // 0.03 PUT
+pub const COAP_CODE_GET: u8 = 1; // 0.01 GET
+pub const COAP_CODE_POST: u8 = 2; // 0.02 POST
+pub const COAP_CODE_PUT: u8 = 3; // 0.03 PUT
 pub const COAP_CODE_DELETE: u8 = 4; // 0.04 DELETE
 
 // CoAP Response Codes
-pub const COAP_CODE_205_CONTENT: u8 = 69;   // 2.05 Content (2*32 + 5)
+pub const COAP_CODE_205_CONTENT: u8 = 69; // 2.05 Content (2*32 + 5)
 pub const COAP_CODE_404_NOT_FOUND: u8 = 132; // 4.04 Not Found (4*32 + 4)
 
 // CoAP Option Numbers
@@ -67,12 +67,10 @@ impl std::error::Error for CoapError {}
 
 impl CoapPacket {
     pub fn build_get(message_id: u16, path: &str, token: &[u8]) -> Self {
-        let options = vec![
-            CoapOption {
-                number: COAP_OPT_URI_PATH,
-                value: path.as_bytes().to_vec(),
-            },
-        ];
+        let options = vec![CoapOption {
+            number: COAP_OPT_URI_PATH,
+            value: path.as_bytes().to_vec(),
+        }];
 
         CoapPacket {
             version: 1,
@@ -92,7 +90,10 @@ impl CoapPacket {
             code,
             message_id: req.message_id,
             token: req.token.clone(),
-            options: vec![CoapOption { number: COAP_OPT_CONTENT_FORMAT, value: vec![0] }], // 0 = text/plain
+            options: vec![CoapOption {
+                number: COAP_OPT_CONTENT_FORMAT,
+                value: vec![0],
+            }], // 0 = text/plain
             payload: payload.to_vec(),
         }
     }
@@ -116,8 +117,12 @@ impl CoapPacket {
             let (l_nibble, l_ext) = encode_nibble(len);
 
             buf.push((d_nibble << 4) | l_nibble);
-            if let Some(ext) = d_ext { buf.push(ext); }
-            if let Some(ext) = l_ext { buf.push(ext); }
+            if let Some(ext) = d_ext {
+                buf.push(ext);
+            }
+            if let Some(ext) = l_ext {
+                buf.push(ext);
+            }
             buf.extend_from_slice(&opt.value);
         }
 
@@ -215,13 +220,17 @@ fn decode_nibble(nibble: u8, data: &[u8], mut offset: usize) -> Result<(usize, u
     match nibble {
         0..=12 => Ok((nibble as usize, offset)),
         13 => {
-            if offset >= data.len() { return Err(CoapError::InvalidOptionEncoding); }
+            if offset >= data.len() {
+                return Err(CoapError::InvalidOptionEncoding);
+            }
             let val = data[offset] as usize + 13;
             offset += 1;
             Ok((val, offset))
         }
         14 => {
-            if offset + 1 >= data.len() { return Err(CoapError::InvalidOptionEncoding); }
+            if offset + 1 >= data.len() {
+                return Err(CoapError::InvalidOptionEncoding);
+            }
             let val = u16::from_be_bytes([data[offset], data[offset + 1]]) as usize + 269;
             offset += 2;
             Ok((val, offset))

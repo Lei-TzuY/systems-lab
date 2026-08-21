@@ -1,4 +1,4 @@
-use toy_tcpip::ethernet::{EtherType, MacAddress, ETHERTYPE_IPV6};
+use toy_tcpip::ethernet::{ETHERTYPE_IPV6, EtherType, MacAddress};
 use toy_tcpip::vlan::{TaggedEthernetFrame, VlanTag};
 
 #[test]

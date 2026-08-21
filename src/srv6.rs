@@ -36,7 +36,9 @@ impl fmt::Display for Srv6Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Srv6Error::HeaderTooShort(l) => write!(f, "SRv6 header too short ({} bytes)", l),
-            Srv6Error::InvalidRoutingType(t) => write!(f, "Invalid IPv6 Routing Type: expected 4, found {}", t),
+            Srv6Error::InvalidRoutingType(t) => {
+                write!(f, "Invalid IPv6 Routing Type: expected 4, found {}", t)
+            }
             Srv6Error::InvalidLength => write!(f, "Invalid SRv6 Segment List length"),
         }
     }

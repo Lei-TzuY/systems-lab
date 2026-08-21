@@ -29,14 +29,14 @@ fn test_gre_demux_multi_tenant_isolation_and_replay_protection() {
 
     // Packet 1: VRF 100 Seq 1 -> Accept
     let res1 = demux.demux_packet(remote_router, Some(0x64), Some(1), b"Data 1");
-    assert_eq!(res1.is_some(), true);
+    assert!(res1.is_some());
     let (iface, vrf, _) = res1.unwrap();
     assert_eq!(iface, "gre100");
     assert_eq!(vrf, 100);
 
     // Packet 2: VRF 100 Seq 2 -> Accept
     let res2 = demux.demux_packet(remote_router, Some(0x64), Some(2), b"Data 2");
-    assert_eq!(res2.is_some(), true);
+    assert!(res2.is_some());
 
     // Packet 3: VRF 100 Seq 1 (Replay Attack) -> Drop
     let res3 = demux.demux_packet(remote_router, Some(0x64), Some(1), b"Replayed Data");
@@ -44,7 +44,7 @@ fn test_gre_demux_multi_tenant_isolation_and_replay_protection() {
 
     // Packet 4: VRF 200 Seq 1 -> Accept
     let res4 = demux.demux_packet(remote_router, Some(0xC8), Some(1), b"Eng Data");
-    assert_eq!(res4.is_some(), true);
+    assert!(res4.is_some());
     let (iface_eng, vrf_eng, _) = res4.unwrap();
     assert_eq!(iface_eng, "gre200");
     assert_eq!(vrf_eng, 200);

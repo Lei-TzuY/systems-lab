@@ -5,16 +5,16 @@
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SmdType {
-    SmdE = 0xD5,   // Standard SFD / Express Frame
-    SmdS0 = 0xE6,  // Start of Preempted Fragment 0
-    SmdS1 = 0x4C,  // Start of Preempted Fragment 1
-    SmdS2 = 0x7F,  // Start of Preempted Fragment 2
-    SmdS3 = 0xB3,  // Start of Preempted Fragment 3
-    SmdC0 = 0x61,  // Continuation Fragment 0
-    SmdC1 = 0x52,  // Continuation Fragment 1
-    SmdC2 = 0x9E,  // Continuation Fragment 2
-    SmdC3 = 0x2A,  // Continuation Fragment 3
-    SmdVerify = 0x07, // Preemption link verification
+    SmdE = 0xD5,       // Standard SFD / Express Frame
+    SmdS0 = 0xE6,      // Start of Preempted Fragment 0
+    SmdS1 = 0x4C,      // Start of Preempted Fragment 1
+    SmdS2 = 0x7F,      // Start of Preempted Fragment 2
+    SmdS3 = 0xB3,      // Start of Preempted Fragment 3
+    SmdC0 = 0x61,      // Continuation Fragment 0
+    SmdC1 = 0x52,      // Continuation Fragment 1
+    SmdC2 = 0x9E,      // Continuation Fragment 2
+    SmdC3 = 0x2A,      // Continuation Fragment 3
+    SmdVerify = 0x07,  // Preemption link verification
     SmdRespond = 0x19, // Preemption link response
 }
 
@@ -109,12 +109,12 @@ impl PreemptionEngine {
         for (idx, frag) in fragments.iter().enumerate() {
             if idx == 0 {
                 match frag.smd {
-                    SmdType::SmdS0 | SmdType::SmdS1 | SmdType::SmdS2 | SmdType::SmdS3 => {},
+                    SmdType::SmdS0 | SmdType::SmdS1 | SmdType::SmdS2 | SmdType::SmdS3 => {}
                     _ => return Err("First fragment must have SmdS start marker"),
                 }
             } else {
                 match frag.smd {
-                    SmdType::SmdC0 | SmdType::SmdC1 | SmdType::SmdC2 | SmdType::SmdC3 => {},
+                    SmdType::SmdC0 | SmdType::SmdC1 | SmdType::SmdC2 | SmdType::SmdC3 => {}
                     _ => return Err("Subsequent fragments must have SmdC continuation marker"),
                 }
             }
@@ -131,8 +131,9 @@ impl PreemptionEngine {
         express_data: &[u8],
         split_offset: usize,
     ) -> (MPacketFragment, Vec<u8>, MPacketFragment) {
-        let (first_half, second_half) = preemptible_data.split_at(split_offset.min(preemptible_data.len()));
-        
+        let (first_half, second_half) =
+            preemptible_data.split_at(split_offset.min(preemptible_data.len()));
+
         let frag_start = MPacketFragment {
             smd: SmdType::SmdS0,
             frag_num: 0,

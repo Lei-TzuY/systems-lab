@@ -27,11 +27,9 @@ impl GreSessionTracker {
         self.packets_received += 1;
 
         if let Some(s) = seq {
-            if strict {
-                if s <= self.highest_seq && self.highest_seq != 0 {
-                    self.packets_dropped += 1;
-                    return false; // Out-of-order or duplicate replay packet dropped
-                }
+            if strict && s <= self.highest_seq && self.highest_seq != 0 {
+                self.packets_dropped += 1;
+                return false; // Out-of-order or duplicate replay packet dropped
             }
             if s > self.highest_seq {
                 self.highest_seq = s;
@@ -55,7 +53,8 @@ impl GreDemuxTable {
 
     pub fn register_tunnel(&mut self, tunnel: GreVirtualTunnel) {
         let key = (tunnel.remote_ip, tunnel.key);
-        self.tunnels.insert(key, (tunnel, GreSessionTracker::default()));
+        self.tunnels
+            .insert(key, (tunnel, GreSessionTracker::default()));
     }
 
     pub fn demux_packet(
@@ -110,7 +109,7 @@ mod tests {
 
         // Packet 1 for Tenant A (Seq 1) -> Passed to gre1
         let res1 = demux.demux_packet(peer_ip, Some(1001), Some(1), b"Tenant A Payload 1");
-        assert_eq!(res1.is_some(), true);
+        assert!(res1.is_some());
         let (iface, vrf, data) = res1.unwrap();
         assert_eq!(iface, "gre1");
         assert_eq!(vrf, 10);
@@ -122,7 +121,7 @@ mod tests {
 
         // Packet 3 for Tenant B (Key 1002) -> Passed to gre2
         let res3 = demux.demux_packet(peer_ip, Some(1002), Some(1), b"Tenant B Payload 1");
-        assert_eq!(res3.is_some(), true);
+        assert!(res3.is_some());
         let (iface_b, vrf_b, _) = res3.unwrap();
         assert_eq!(iface_b, "gre2");
         assert_eq!(vrf_b, 20);

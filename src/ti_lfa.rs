@@ -57,7 +57,11 @@ impl TiLfaEngine {
     }
 
     /// Computes Dijkstra shortest path distances from a source node
-    pub fn dijkstra(&self, src: &str, excluded_link: Option<(&str, &str)>) -> HashMap<String, (u32, Option<String>)> {
+    pub fn dijkstra(
+        &self,
+        src: &str,
+        excluded_link: Option<(&str, &str)>,
+    ) -> HashMap<String, (u32, Option<String>)> {
         let mut dist: HashMap<String, u32> = HashMap::new();
         let mut prev: HashMap<String, Option<String>> = HashMap::new();
         let mut visited: HashSet<String> = HashSet::new();
@@ -88,10 +92,11 @@ impl TiLfaEngine {
 
             for link in &self.links {
                 if link.from == u {
-                    if let Some((ex_from, ex_to)) = excluded_link {
-                        if (link.from == ex_from && link.to == ex_to) || (link.from == ex_to && link.to == ex_from) {
-                            continue; // Skip excluded failed link
-                        }
+                    if let Some((ex_from, ex_to)) = excluded_link
+                        && ((link.from == ex_from && link.to == ex_to)
+                            || (link.from == ex_to && link.to == ex_from))
+                    {
+                        continue; // Skip excluded failed link
                     }
 
                     let alt = dist[&u].saturating_add(link.cost);
@@ -140,7 +145,8 @@ impl TiLfaEngine {
 
         // 2. Compute P-Space: Nodes reachable from source without failed link
         let p_spf = self.dijkstra(src, Some((src, failed_neighbor)));
-        let p_space: HashSet<String> = p_spf.iter()
+        let p_space: HashSet<String> = p_spf
+            .iter()
             .filter(|(_, (d, _))| *d < u32::MAX)
             .map(|(n, _)| n.clone())
             .collect();
@@ -149,10 +155,10 @@ impl TiLfaEngine {
         let mut q_space = HashSet::new();
         for node in self.node_sids.keys() {
             let n_spf = self.dijkstra(node, Some((src, failed_neighbor)));
-            if let Some((d, _)) = n_spf.get(dst) {
-                if *d < u32::MAX {
-                    q_space.insert(node.clone());
-                }
+            if let Some((d, _)) = n_spf.get(dst)
+                && *d < u32::MAX
+            {
+                q_space.insert(node.clone());
             }
         }
 
@@ -211,11 +217,16 @@ mod tests {
         engine.add_link("NodeQ", "NodeD", 10, 24005);
 
         // Protect primary link (NodeS -> NodeE) towards NodeD
-        let protection = engine.compute_protection("NodeS", "NodeD", "NodeE").unwrap();
+        let protection = engine
+            .compute_protection("NodeS", "NodeD", "NodeE")
+            .unwrap();
 
         assert_eq!(protection.primary_next_hop, "NodeE");
         assert_eq!(protection.backup_next_hop, "NodeP");
-        assert_eq!(protection.failed_link, ("NodeS".to_string(), "NodeE".to_string()));
+        assert_eq!(
+            protection.failed_link,
+            ("NodeS".to_string(), "NodeE".to_string())
+        );
         assert!(protection.backup_segment_list.contains(&16003));
     }
 }

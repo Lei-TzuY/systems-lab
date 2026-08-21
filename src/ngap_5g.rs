@@ -19,7 +19,7 @@ pub struct PlmnId {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Snssai {
-    pub sst: u8, // Slice/Service Type: 1 = eMBB, 2 = URLLC, 3 = MIoT
+    pub sst: u8,             // Slice/Service Type: 1 = eMBB, 2 = URLLC, 3 = MIoT
     pub sd: Option<[u8; 3]>, // Slice Differentiator
 }
 
@@ -131,7 +131,10 @@ mod tests {
     #[test]
     fn test_ngap_setup_and_ue_registration() {
         let mut ngap = NgapNode::new();
-        let plmn = PlmnId { mcc: [2, 0, 8], mnc: [9, 5, 0] };
+        let plmn = PlmnId {
+            mcc: [2, 0, 8],
+            mnc: [9, 5, 0],
+        };
 
         // 1. NG Setup
         let setup_req = NgSetupRequest {

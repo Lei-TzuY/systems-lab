@@ -1,4 +1,4 @@
-use toy_tcpip::lldp::{LldpNeighbor, LldpNeighborTable, LldpPacket, LldpTlv, LLDP_TLV_CHASSIS_ID};
+use toy_tcpip::lldp::{LLDP_TLV_CHASSIS_ID, LldpNeighbor, LldpNeighborTable, LldpPacket, LldpTlv};
 
 #[test]
 fn test_lldp_tlv_codec() {

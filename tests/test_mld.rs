@@ -1,8 +1,8 @@
 use std::str::FromStr;
 use toy_tcpip::ipv6::Ipv6Address;
 use toy_tcpip::mld::{
-    MldGroupRecord, MldTable, Mldv2ReportPacket, MLD_ALLOW_NEW_SOURCES, MLD_BLOCK_OLD_SOURCES,
-    MLD_CHANGE_TO_EXCLUDE, MLD_CHANGE_TO_INCLUDE,
+    MLD_ALLOW_NEW_SOURCES, MLD_BLOCK_OLD_SOURCES, MLD_CHANGE_TO_EXCLUDE, MLD_CHANGE_TO_INCLUDE,
+    MldGroupRecord, MldTable, Mldv2ReportPacket,
 };
 
 #[test]

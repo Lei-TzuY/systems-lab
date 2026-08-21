@@ -1,7 +1,7 @@
-use toy_tcpip::ethernet::{EthernetFrame, MacAddress, ETHERTYPE_IPV4};
+use toy_tcpip::ethernet::{ETHERTYPE_IPV4, EthernetFrame, MacAddress};
 use toy_tcpip::ipv4::Ipv4Address;
 use toy_tcpip::mpls::{MplsHeader, MplsPacket};
-use toy_tcpip::vpls::{PwControlWord, VplsInstance, VplsPseudowire, PW_CONTROL_WORD_LEN};
+use toy_tcpip::vpls::{PW_CONTROL_WORD_LEN, PwControlWord, VplsInstance, VplsPseudowire};
 
 #[test]
 fn test_pw_control_word_codec() {
@@ -27,7 +27,8 @@ fn test_vpls_mesh_multipoint_bridging() {
     let site_a_mac = MacAddress([0x00, 0x50, 0x56, 0x01, 0x02, 0x03]);
     let site_b_mac = MacAddress([0x00, 0x50, 0x56, 0xAA, 0xBB, 0xCC]);
 
-    let frame = EthernetFrame::serialize(site_b_mac, site_a_mac, ETHERTYPE_IPV4, b"VPLS Data Traffic");
+    let frame =
+        EthernetFrame::serialize(site_b_mac, site_a_mac, ETHERTYPE_IPV4, b"VPLS Data Traffic");
 
     // Ingress packet over PW1
     let cw = PwControlWord::new(1);
@@ -35,10 +36,7 @@ fn test_vpls_mesh_multipoint_bridging() {
     payload.extend_from_slice(&cw.serialize());
     payload.extend_from_slice(&frame);
 
-    let mpls_frame = MplsPacket::new(
-        vec![MplsHeader::new(3001, 0, true, 64)],
-        payload,
-    ).serialize();
+    let mpls_frame = MplsPacket::new(vec![MplsHeader::new(3001, 0, true, 64)], payload).serialize();
 
     let (dst_mac, decapped) = vpls.process_ingress_vpls(&mpls_frame).unwrap();
     assert_eq!(dst_mac, site_b_mac);

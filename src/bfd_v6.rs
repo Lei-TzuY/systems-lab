@@ -2,7 +2,7 @@
 //!
 //! Provides sub-second path liveness monitoring for IPv6 Single-Hop (UDP 3784) and Multi-Hop (UDP 4784) sessions.
 
-pub use crate::bfd::{BfdControlPacket, BfdState, BFD_CONTROL_PORT};
+pub use crate::bfd::{BFD_CONTROL_PORT, BfdControlPacket, BfdState};
 use crate::ipv6::Ipv6Address;
 use std::collections::HashMap;
 
@@ -27,8 +27,8 @@ impl BfdV6Session {
             my_discriminator,
             your_discriminator: 0,
             state: BfdState::Down,
-            desired_min_tx_us: 50_000,   // 50ms
-            required_min_rx_us: 50_000,  // 50ms
+            desired_min_tx_us: 50_000,  // 50ms
+            required_min_rx_us: 50_000, // 50ms
             detect_mult: 3,
             is_multihop,
         }
@@ -55,7 +55,9 @@ impl BfdV6Session {
                 self.state = BfdState::Init;
                 Some(self.build_outbound_packet(false))
             }
-            (BfdState::Down, BfdState::Init) | (BfdState::Init, BfdState::Init) | (BfdState::Init, BfdState::Up) => {
+            (BfdState::Down, BfdState::Init)
+            | (BfdState::Init, BfdState::Init)
+            | (BfdState::Init, BfdState::Up) => {
                 self.state = BfdState::Up;
                 Some(self.build_outbound_packet(false))
             }
@@ -105,7 +107,8 @@ mod tests {
         assert_eq!(session.your_discriminator, 0x99887766);
 
         // Peer sends Init packet -> transitions to Up
-        let incoming_init = BfdControlPacket::build_control(BfdState::Init, 0x99887766, 0x11223344, 50_000);
+        let incoming_init =
+            BfdControlPacket::build_control(BfdState::Init, 0x99887766, 0x11223344, 50_000);
         let resp2 = session.process_inbound_packet(&incoming_init).unwrap();
         assert_eq!(session.state, BfdState::Up);
         assert_eq!(resp2.state, BfdState::Up);

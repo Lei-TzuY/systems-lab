@@ -172,7 +172,10 @@ impl Dhcpv6Message {
             }
 
             let opt_data = data[offset + 4..offset + 4 + len].to_vec();
-            options.push(Dhcpv6Option { code, data: opt_data });
+            options.push(Dhcpv6Option {
+                code,
+                data: opt_data,
+            });
             offset += 4 + len;
         }
 
@@ -205,17 +208,33 @@ pub struct Dhcpv6Server {
     pub dns_server: Ipv6Address,
 }
 
+impl Default for Dhcpv6Server {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Dhcpv6Server {
     pub fn new() -> Self {
         Dhcpv6Server {
-            server_duid: vec![0x00, 0x01, 0x00, 0x01, 0x2A, 0x55, 0x00, 0x50, 0x56, 0x00, 0x00, 0x01],
+            server_duid: vec![
+                0x00, 0x01, 0x00, 0x01, 0x2A, 0x55, 0x00, 0x50, 0x56, 0x00, 0x00, 0x01,
+            ],
             next_ip_suffix: 100,
-            dns_server: Ipv6Address([0x20, 0x01, 0x48, 0x60, 0x48, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x88, 0x88]),
+            dns_server: Ipv6Address([
+                0x20, 0x01, 0x48, 0x60, 0x48, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x88, 0x88,
+            ]),
         }
     }
 
     pub fn handle_solicit(&mut self, msg: &Dhcpv6Message) -> Option<Dhcpv6Message> {
-        let client_duid = msg.options.iter().find(|o| o.code == DHCPV6_OPT_CLIENTID)?.data.clone();
+        let client_duid = msg
+            .options
+            .iter()
+            .find(|o| o.code == DHCPV6_OPT_CLIENTID)?
+            .data
+            .clone();
 
         let mut ip_bytes = [0u8; 16];
         ip_bytes[0] = 0x20;

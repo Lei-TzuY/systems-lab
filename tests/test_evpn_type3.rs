@@ -1,7 +1,7 @@
 use toy_tcpip::evpn::RouteDistinguisher;
 use toy_tcpip::evpn_type3::{
-    EvpnBumFloodingTree, EvpnType3Route, PmsiTunnelAttribute, EVPN_ROUTE_TYPE_IMET,
-    PMSI_TUNNEL_TYPE_INGRESS_REPLICATION,
+    EVPN_ROUTE_TYPE_IMET, EvpnBumFloodingTree, EvpnType3Route,
+    PMSI_TUNNEL_TYPE_INGRESS_REPLICATION, PmsiTunnelAttribute,
 };
 use toy_tcpip::ipv4::Ipv4Address;
 
@@ -16,12 +16,7 @@ fn test_evpn_type3_constants_and_codec() {
     assert_eq!(pmsi_parsed, pmsi);
 
     let rd = RouteDistinguisher::new(Ipv4Address::new(10, 1, 1, 1), 200);
-    let route = EvpnType3Route::new_ipv4(
-        rd,
-        0,
-        Ipv4Address::new(10, 1, 1, 1),
-        30001,
-    );
+    let route = EvpnType3Route::new_ipv4(rd, 0, Ipv4Address::new(10, 1, 1, 1), 30001);
 
     let bytes = route.serialize();
     let parsed = EvpnType3Route::parse(&bytes).unwrap();

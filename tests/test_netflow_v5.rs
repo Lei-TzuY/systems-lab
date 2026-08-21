@@ -1,5 +1,8 @@
 use toy_tcpip::ipv4::Ipv4Address;
-use toy_tcpip::netflow_v5::{NetflowV5Packet, NetflowV5Table, NETFLOW_V5_HEADER_LEN, NETFLOW_V5_RECORD_LEN, NETFLOW_V5_UDP_PORT};
+use toy_tcpip::netflow_v5::{
+    NETFLOW_V5_HEADER_LEN, NETFLOW_V5_RECORD_LEN, NETFLOW_V5_UDP_PORT, NetflowV5Packet,
+    NetflowV5Table,
+};
 
 #[test]
 fn test_netflow_v5_table_aggregation_and_export() {
@@ -10,7 +13,16 @@ fn test_netflow_v5_table_aggregation_and_export() {
 
     // Stream 10 packets on flow (client:44321 -> server:443)
     for i in 0..10 {
-        table.record_flow(client, server, gateway, 44321, 443, 6, 1500, 1000 + (i * 10));
+        table.record_flow(
+            client,
+            server,
+            gateway,
+            44321,
+            443,
+            6,
+            1500,
+            1000 + (i * 10),
+        );
     }
 
     let export_pkt = table.export_packet(1100, 1700000000);

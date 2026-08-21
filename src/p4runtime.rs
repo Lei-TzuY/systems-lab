@@ -73,7 +73,10 @@ impl P4RuntimeServer {
 
     /// Writes (inserts or updates) a match-action table entry
     pub fn write_table_entry(&mut self, entry: P4TableEntry) {
-        let entries = self.table_entries.entry(entry.table_name.clone()).or_default();
+        let entries = self
+            .table_entries
+            .entry(entry.table_name.clone())
+            .or_default();
         entries.retain(|e| e.matches != entry.matches);
         entries.push(entry);
     }

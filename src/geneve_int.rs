@@ -51,7 +51,11 @@ impl GeneveIntPacket {
     }
 
     pub fn max_queue_depth_bytes(&self) -> u32 {
-        self.telemetry_hops.iter().map(|h| h.queue_depth_bytes).max().unwrap_or(0)
+        self.telemetry_hops
+            .iter()
+            .map(|h| h.queue_depth_bytes)
+            .max()
+            .unwrap_or(0)
     }
 
     pub fn serialize(&self) -> Vec<u8> {
@@ -65,12 +69,8 @@ impl GeneveIntPacket {
             data.extend_from_slice(&hop.hop_latency_ns.to_be_bytes());
             data.extend_from_slice(&hop.queue_depth_bytes.to_be_bytes());
 
-            let opt_tlv = GeneveOptionTlv::new(
-                GENEVE_OPT_CLASS_INT,
-                GENEVE_OPT_TYPE_INT_HOP,
-                false,
-                &data,
-            );
+            let opt_tlv =
+                GeneveOptionTlv::new(GENEVE_OPT_CLASS_INT, GENEVE_OPT_TYPE_INT_HOP, false, &data);
             options.push(GeneveOption {
                 class: opt_tlv.class,
                 opt_type: opt_tlv.type_code,
@@ -97,12 +97,18 @@ impl GeneveIntPacket {
         let mut telemetry_hops = Vec::new();
 
         for opt in &geneve.options {
-            if opt.class == GENEVE_OPT_CLASS_INT && opt.opt_type == GENEVE_OPT_TYPE_INT_HOP && opt.data.len() >= INT_HOP_METADATA_LEN {
-                let switch_id = u32::from_be_bytes([opt.data[0], opt.data[1], opt.data[2], opt.data[3]]);
+            if opt.class == GENEVE_OPT_CLASS_INT
+                && opt.opt_type == GENEVE_OPT_TYPE_INT_HOP
+                && opt.data.len() >= INT_HOP_METADATA_LEN
+            {
+                let switch_id =
+                    u32::from_be_bytes([opt.data[0], opt.data[1], opt.data[2], opt.data[3]]);
                 let ingress_port = u16::from_be_bytes([opt.data[4], opt.data[5]]);
                 let egress_port = u16::from_be_bytes([opt.data[6], opt.data[7]]);
-                let hop_latency_ns = u32::from_be_bytes([opt.data[8], opt.data[9], opt.data[10], opt.data[11]]);
-                let queue_depth_bytes = u32::from_be_bytes([opt.data[12], opt.data[13], opt.data[14], opt.data[15]]);
+                let hop_latency_ns =
+                    u32::from_be_bytes([opt.data[8], opt.data[9], opt.data[10], opt.data[11]]);
+                let queue_depth_bytes =
+                    u32::from_be_bytes([opt.data[12], opt.data[13], opt.data[14], opt.data[15]]);
 
                 telemetry_hops.push(IntHopTelemetry {
                     switch_id,

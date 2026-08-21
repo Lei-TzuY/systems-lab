@@ -1,8 +1,6 @@
 use toy_tcpip::ethernet::MacAddress;
 use toy_tcpip::ipv4::Ipv4Address;
-use toy_tcpip::sai::{
-    SaiFdbEntry, SaiRouteEntry, SaiSwitchAdapter, SAI_STATUS_SUCCESS,
-};
+use toy_tcpip::sai::{SAI_STATUS_SUCCESS, SaiFdbEntry, SaiRouteEntry, SaiSwitchAdapter};
 
 #[test]
 fn test_sai_adapter_l2_and_l3_forwarding() {
@@ -24,7 +22,9 @@ fn test_sai_adapter_l2_and_l3_forwarding() {
     adapter.create_route_entry(0, Ipv4Address::new(172, 16, 0, 0), 16, nh_id);
 
     // Lookup Route
-    let matched = adapter.lookup_route(0, Ipv4Address::new(172, 16, 99, 100)).unwrap();
+    let matched = adapter
+        .lookup_route(0, Ipv4Address::new(172, 16, 99, 100))
+        .unwrap();
     assert_eq!(matched.id, nh_id);
     assert_eq!(matched.port_id, 4);
     assert_eq!(matched.ip, Ipv4Address::new(172, 16, 1, 254));

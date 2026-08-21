@@ -1,7 +1,7 @@
 use toy_tcpip::ethernet::MacAddress;
 use toy_tcpip::igmp::{
-    multicast_ip_to_mac, IgmpPacket, MulticastGroupTable, ALL_HOSTS_MULTICAST_IP,
-    IGMP_TYPE_LEAVE_GROUP, IGMP_TYPE_MEMBERSHIP_QUERY, IGMP_TYPE_V2_MEMBERSHIP_REPORT,
+    ALL_HOSTS_MULTICAST_IP, IGMP_TYPE_LEAVE_GROUP, IGMP_TYPE_MEMBERSHIP_QUERY,
+    IGMP_TYPE_V2_MEMBERSHIP_REPORT, IgmpPacket, MulticastGroupTable, multicast_ip_to_mac,
 };
 use toy_tcpip::ipv4::Ipv4Address;
 

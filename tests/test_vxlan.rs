@@ -1,4 +1,4 @@
-use toy_tcpip::vxlan::{VxlanHeader, VxlanPacket, VXLAN_FLAG_VNI_VALID};
+use toy_tcpip::vxlan::{VXLAN_FLAG_VNI_VALID, VxlanHeader, VxlanPacket};
 
 #[test]
 fn test_vxlan_header_and_24bit_vni() {

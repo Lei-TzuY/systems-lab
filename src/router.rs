@@ -97,7 +97,12 @@ mod tests {
     fn test_longest_prefix_match() {
         let mut rt = RoutingTable::new();
         // Default route 0.0.0.0/0 via 192.168.1.1
-        rt.add_route(Ipv4Address::UNSPECIFIED, 0, Some(Ipv4Address::new(192, 168, 1, 1)), "eth0");
+        rt.add_route(
+            Ipv4Address::UNSPECIFIED,
+            0,
+            Some(Ipv4Address::new(192, 168, 1, 1)),
+            "eth0",
+        );
         // Subnet route 192.168.1.0/24 direct
         rt.add_route(Ipv4Address::new(192, 168, 1, 0), 24, None, "eth0");
         // Specific host route 192.168.1.50/32 direct

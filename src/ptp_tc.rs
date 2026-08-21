@@ -37,11 +37,8 @@ impl TransparentClockEngine {
 
     /// Calculates node transit residence time: T_residence = T_egress - T_ingress
     pub fn calculate_residence_time(&self, hop: &HopMeasurement) -> u64 {
-        if hop.egress_timestamp_ns >= hop.ingress_timestamp_ns {
-            hop.egress_timestamp_ns - hop.ingress_timestamp_ns
-        } else {
-            0
-        }
+        hop.egress_timestamp_ns
+            .saturating_sub(hop.ingress_timestamp_ns)
     }
 
     /// Calculates Peer Link Delay: PDelay = ((t4 - t1) - (t3 - t2)) / 2
@@ -54,7 +51,11 @@ impl TransparentClockEngine {
     }
 
     /// Updates the incoming PTP frame Correction Field in nanoseconds
-    pub fn update_correction_field(&mut self, initial_correction_ns: u64, hop: &HopMeasurement) -> u64 {
+    pub fn update_correction_field(
+        &mut self,
+        initial_correction_ns: u64,
+        hop: &HopMeasurement,
+    ) -> u64 {
         let residence = self.calculate_residence_time(hop);
         self.total_residence_time_ns += residence;
         self.corrected_packets_count += 1;

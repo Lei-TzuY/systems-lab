@@ -1,4 +1,4 @@
-use toy_tcpip::glbp::{GlbpEngine, GlbpPacket, GlbpRole, GLBP_MULTICAST_IP, GLBP_UDP_PORT};
+use toy_tcpip::glbp::{GLBP_MULTICAST_IP, GLBP_UDP_PORT, GlbpEngine, GlbpPacket, GlbpRole};
 use toy_tcpip::ipv4::Ipv4Address;
 
 #[test]

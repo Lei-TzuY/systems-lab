@@ -71,7 +71,9 @@ impl fmt::Display for BfdError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             BfdError::PacketTooShort(l) => write!(f, "BFD packet too short ({} bytes, min 24)", l),
-            BfdError::InvalidVersion(v) => write!(f, "Invalid BFD version: expected 1, found {}", v),
+            BfdError::InvalidVersion(v) => {
+                write!(f, "Invalid BFD version: expected 1, found {}", v)
+            }
             BfdError::InvalidLength(l) => write!(f, "Invalid BFD length field: {}", l),
             BfdError::ZeroMyDiscriminator => write!(f, "BFD My Discriminator must not be zero"),
         }
@@ -116,9 +118,12 @@ impl BfdControlPacket {
         }
 
         let your_discriminator = u32::from_be_bytes([data[8], data[9], data[10], data[11]]);
-        let desired_min_tx_interval_us = u32::from_be_bytes([data[12], data[13], data[14], data[15]]);
-        let required_min_rx_interval_us = u32::from_be_bytes([data[16], data[17], data[18], data[19]]);
-        let required_min_echo_rx_interval_us = u32::from_be_bytes([data[20], data[21], data[22], data[23]]);
+        let desired_min_tx_interval_us =
+            u32::from_be_bytes([data[12], data[13], data[14], data[15]]);
+        let required_min_rx_interval_us =
+            u32::from_be_bytes([data[16], data[17], data[18], data[19]]);
+        let required_min_echo_rx_interval_us =
+            u32::from_be_bytes([data[20], data[21], data[22], data[23]]);
 
         Ok(BfdControlPacket {
             version,
@@ -146,12 +151,24 @@ impl BfdControlPacket {
 
         let state_val = self.state as u8;
         let mut b1 = (state_val & 0x03) << 6;
-        if self.poll { b1 |= 0x20; }
-        if self.r#final { b1 |= 0x10; }
-        if self.cpi { b1 |= 0x08; }
-        if self.auth { b1 |= 0x04; }
-        if self.demand { b1 |= 0x02; }
-        if self.multipoint { b1 |= 0x01; }
+        if self.poll {
+            b1 |= 0x20;
+        }
+        if self.r#final {
+            b1 |= 0x10;
+        }
+        if self.cpi {
+            b1 |= 0x08;
+        }
+        if self.auth {
+            b1 |= 0x04;
+        }
+        if self.demand {
+            b1 |= 0x02;
+        }
+        if self.multipoint {
+            b1 |= 0x01;
+        }
         buf[1] = b1;
 
         buf[2] = self.detect_mult;
@@ -217,11 +234,23 @@ impl BfdSession {
         match (self.state, pkt.state) {
             (BfdState::Down, BfdState::Down) => {
                 self.state = BfdState::Init;
-                Some(BfdControlPacket::build_control(self.state, self.local_discriminator, self.remote_discriminator, self.tx_interval_us))
+                Some(BfdControlPacket::build_control(
+                    self.state,
+                    self.local_discriminator,
+                    self.remote_discriminator,
+                    self.tx_interval_us,
+                ))
             }
-            (BfdState::Down, BfdState::Init) | (BfdState::Init, BfdState::Init) | (BfdState::Init, BfdState::Up) => {
+            (BfdState::Down, BfdState::Init)
+            | (BfdState::Init, BfdState::Init)
+            | (BfdState::Init, BfdState::Up) => {
                 self.state = BfdState::Up;
-                Some(BfdControlPacket::build_control(self.state, self.local_discriminator, self.remote_discriminator, self.tx_interval_us))
+                Some(BfdControlPacket::build_control(
+                    self.state,
+                    self.local_discriminator,
+                    self.remote_discriminator,
+                    self.tx_interval_us,
+                ))
             }
             (BfdState::Up, BfdState::AdminDown) => {
                 self.state = BfdState::Down;
@@ -262,7 +291,8 @@ mod tests {
         assert_eq!(resp.state, BfdState::Init);
 
         // Remote sends Init/Up packet -> Local transitions to Up
-        let incoming_init = BfdControlPacket::build_control(BfdState::Init, 0x2002, 0x1001, 100_000);
+        let incoming_init =
+            BfdControlPacket::build_control(BfdState::Init, 0x2002, 0x1001, 100_000);
         let resp2 = session.process_packet(&incoming_init).unwrap();
         assert_eq!(session.state, BfdState::Up);
         assert_eq!(resp2.state, BfdState::Up);

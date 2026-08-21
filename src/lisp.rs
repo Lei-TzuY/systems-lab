@@ -109,7 +109,12 @@ impl LispDataPacket {
 }
 
 impl LispMapRequest {
-    pub fn build(nonce: u64, source_eid: Ipv4Address, itr_rloc: Ipv4Address, target_eid: Ipv4Address) -> Self {
+    pub fn build(
+        nonce: u64,
+        source_eid: Ipv4Address,
+        itr_rloc: Ipv4Address,
+        target_eid: Ipv4Address,
+    ) -> Self {
         LispMapRequest {
             nonce,
             source_eid,
@@ -170,7 +175,13 @@ impl LispMapRequest {
 }
 
 impl LispMapReply {
-    pub fn build(nonce: u64, target_eid: Ipv4Address, mask_len: u8, ttl_s: u32, locators: &[LispLocator]) -> Self {
+    pub fn build(
+        nonce: u64,
+        target_eid: Ipv4Address,
+        mask_len: u8,
+        ttl_s: u32,
+        locators: &[LispLocator],
+    ) -> Self {
         LispMapReply {
             nonce,
             target_eid,
@@ -236,8 +247,17 @@ impl LispMapReply {
             }
             let priority = data[offset];
             let weight = data[offset + 1];
-            let rloc_ip = Ipv4Address([data[offset + 6], data[offset + 7], data[offset + 8], data[offset + 9]]);
-            locators.push(LispLocator { priority, weight, rloc_ip });
+            let rloc_ip = Ipv4Address([
+                data[offset + 6],
+                data[offset + 7],
+                data[offset + 8],
+                data[offset + 9],
+            ]);
+            locators.push(LispLocator {
+                priority,
+                weight,
+                rloc_ip,
+            });
             offset += 10;
         }
 
@@ -265,15 +285,22 @@ impl LispMapResolver {
     }
 
     pub fn register_eid(&mut self, eid: Ipv4Address, rloc: Ipv4Address, priority: u8, weight: u8) {
-        self.database
-            .entry(eid)
-            .or_default()
-            .push(LispLocator { priority, weight, rloc_ip: rloc });
+        self.database.entry(eid).or_default().push(LispLocator {
+            priority,
+            weight,
+            rloc_ip: rloc,
+        });
     }
 
     pub fn resolve(&self, req: &LispMapRequest) -> Option<LispMapReply> {
         let locs = self.database.get(&req.target_eid)?;
-        Some(LispMapReply::build(req.nonce, req.target_eid, 32, 1440, locs))
+        Some(LispMapReply::build(
+            req.nonce,
+            req.target_eid,
+            32,
+            1440,
+            locs,
+        ))
     }
 }
 
@@ -290,9 +317,14 @@ mod tests {
         resolver.register_eid(eid_dst, rloc_gateway, 1, 100);
 
         // Control Plane: Map-Request -> Map-Reply
-        let req = LispMapRequest::build(0x1122334455667788, Ipv4Address::new(10, 0, 0, 1), Ipv4Address::new(192, 0, 2, 1), eid_dst);
+        let req = LispMapRequest::build(
+            0x1122334455667788,
+            Ipv4Address::new(10, 0, 0, 1),
+            Ipv4Address::new(192, 0, 2, 1),
+            eid_dst,
+        );
         let raw_req = req.serialize();
-        assert_eq!(raw_req.len() >= 30, true);
+        assert!(raw_req.len() >= 30);
 
         let parsed_req = LispMapRequest::parse(&raw_req).unwrap();
         assert_eq!(parsed_req.target_eid, eid_dst);

@@ -29,12 +29,7 @@ pub struct GeneveSfcPacket {
 }
 
 impl GeneveSfcPacket {
-    pub fn build(
-        vni: u32,
-        protocol_type: u16,
-        sfc_metadata: GeneveSfcHop,
-        payload: &[u8],
-    ) -> Self {
+    pub fn build(vni: u32, protocol_type: u16, sfc_metadata: GeneveSfcHop, payload: &[u8]) -> Self {
         GeneveSfcPacket {
             vni,
             protocol_type,
@@ -112,8 +107,10 @@ impl GeneveSfcPacket {
                     spi = u32::from_be_bytes([0, opt.data[0], opt.data[1], opt.data[2]]);
                     si = opt.data[3];
                 } else if opt.opt_type == GENEVE_OPT_TYPE_SFC_CONTEXT && opt.data.len() >= 8 {
-                    tenant_id = u32::from_be_bytes([opt.data[0], opt.data[1], opt.data[2], opt.data[3]]);
-                    security_group = u32::from_be_bytes([opt.data[4], opt.data[5], opt.data[6], opt.data[7]]);
+                    tenant_id =
+                        u32::from_be_bytes([opt.data[0], opt.data[1], opt.data[2], opt.data[3]]);
+                    security_group =
+                        u32::from_be_bytes([opt.data[4], opt.data[5], opt.data[6], opt.data[7]]);
                 }
             }
         }

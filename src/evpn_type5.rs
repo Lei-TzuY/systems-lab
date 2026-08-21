@@ -88,13 +88,13 @@ pub struct EvpnType5Rib {
 
 impl EvpnType5Rib {
     pub fn new() -> Self {
-        EvpnType5Rib {
-            routes: Vec::new(),
-        }
+        EvpnType5Rib { routes: Vec::new() }
     }
 
     pub fn add_route(&mut self, route: EvpnType5Route) {
-        if let Some(pos) = self.routes.iter().position(|r| r.rd == route.rd && r.ip_prefix == route.ip_prefix && r.prefix_len == route.prefix_len) {
+        if let Some(pos) = self.routes.iter().position(|r| {
+            r.rd == route.rd && r.ip_prefix == route.ip_prefix && r.prefix_len == route.prefix_len
+        }) {
             self.routes[pos] = route;
         } else {
             self.routes.push(route);

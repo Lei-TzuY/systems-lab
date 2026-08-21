@@ -147,7 +147,10 @@ impl<R: Read> PcapReader<R> {
         };
 
         if incl_len > 65535 * 4 {
-            return Err(PcapError::CorruptPacket(format!("incl_len too large: {}", incl_len)));
+            return Err(PcapError::CorruptPacket(format!(
+                "incl_len too large: {}",
+                incl_len
+            )));
         }
 
         let mut data = vec![0u8; incl_len as usize];
@@ -171,6 +174,7 @@ impl<R: Read> PcapReader<R> {
     }
 }
 
+#[derive(Debug)]
 pub struct PcapWriter<W> {
     writer: W,
 }
@@ -190,7 +194,12 @@ impl<W: Write> PcapWriter<W> {
         Ok(PcapWriter { writer })
     }
 
-    pub fn write_packet(&mut self, ts_sec: u32, ts_usec: u32, data: &[u8]) -> Result<(), PcapError> {
+    pub fn write_packet(
+        &mut self,
+        ts_sec: u32,
+        ts_usec: u32,
+        data: &[u8],
+    ) -> Result<(), PcapError> {
         let len = data.len() as u32;
         self.writer.write_all(&ts_sec.to_le_bytes())?;
         self.writer.write_all(&ts_usec.to_le_bytes())?;
@@ -199,6 +208,18 @@ impl<W: Write> PcapWriter<W> {
         self.writer.write_all(data)?;
         self.writer.flush()?;
         Ok(())
+    }
+
+    pub fn get_ref(&self) -> &W {
+        &self.writer
+    }
+
+    pub fn get_mut(&mut self) -> &mut W {
+        &mut self.writer
+    }
+
+    pub fn into_inner(self) -> W {
+        self.writer
     }
 }
 

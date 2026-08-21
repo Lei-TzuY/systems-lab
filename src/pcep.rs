@@ -91,14 +91,23 @@ impl PcepObject {
     pub fn serialize(&self) -> Vec<u8> {
         let mut body = Vec::new();
         let (class_num, ot) = match self {
-            PcepObject::Open { version, keepalive_s, deadtimer_s, sid } => {
+            PcepObject::Open {
+                version,
+                keepalive_s,
+                deadtimer_s,
+                sid,
+            } => {
                 body.push(version << 5);
                 body.push(*keepalive_s);
                 body.push(*deadtimer_s);
                 body.push(*sid);
                 (PCEP_CLASS_OPEN, 1)
             }
-            PcepObject::Rp { request_id, priority, is_strict } => {
+            PcepObject::Rp {
+                request_id,
+                priority,
+                is_strict,
+            } => {
                 body.extend_from_slice(&[0, 0, 0, 0]); // Reserved + Flags
                 let mut f = *priority & 0x07;
                 if *is_strict {
@@ -113,7 +122,11 @@ impl PcepObject {
                 body.extend_from_slice(&dst_ip.0);
                 (PCEP_CLASS_END_POINTS, 1)
             }
-            PcepObject::Lsp { plsp_id, is_delegated, is_operational } => {
+            PcepObject::Lsp {
+                plsp_id,
+                is_delegated,
+                is_operational,
+            } => {
                 let mut flags: u32 = 0;
                 if *is_delegated {
                     flags |= 0x01; // D-flag
@@ -128,13 +141,17 @@ impl PcepObject {
             PcepObject::SrEro { sids } => {
                 for &sid in sids {
                     body.push(36); // SR-ERO Subobject Type
-                    body.push(8);  // Subobject Length
+                    body.push(8); // Subobject Length
                     body.extend_from_slice(&[0, 0]); // Flags
                     body.extend_from_slice(&sid.to_be_bytes()); // 32-bit SID / Label
                 }
                 (PCEP_CLASS_ERO, 1)
             }
-            PcepObject::Raw { class_num, ot, body: b } => {
+            PcepObject::Raw {
+                class_num,
+                ot,
+                body: b,
+            } => {
                 body.extend_from_slice(b);
                 (*class_num, *ot)
             }
@@ -172,13 +189,22 @@ impl PcepObject {
                 let keepalive_s = body[1];
                 let deadtimer_s = body[2];
                 let sid = body[3];
-                PcepObject::Open { version, keepalive_s, deadtimer_s, sid }
+                PcepObject::Open {
+                    version,
+                    keepalive_s,
+                    deadtimer_s,
+                    sid,
+                }
             }
             (PCEP_CLASS_RP, 1) if body.len() >= 8 => {
                 let priority = body[3] & 0x07;
                 let is_strict = (body[3] & 0x08) != 0;
                 let request_id = u32::from_be_bytes([body[4], body[5], body[6], body[7]]);
-                PcepObject::Rp { request_id, priority, is_strict }
+                PcepObject::Rp {
+                    request_id,
+                    priority,
+                    is_strict,
+                }
             }
             (PCEP_CLASS_END_POINTS, 1) if body.len() >= 8 => {
                 let src_ip = Ipv4Address([body[0], body[1], body[2], body[3]]);
@@ -190,7 +216,11 @@ impl PcepObject {
                 let plsp_id = w >> 12;
                 let is_delegated = (w & 0x01) != 0;
                 let is_operational = (w & 0x08) != 0;
-                PcepObject::Lsp { plsp_id, is_delegated, is_operational }
+                PcepObject::Lsp {
+                    plsp_id,
+                    is_delegated,
+                    is_operational,
+                }
             }
             (PCEP_CLASS_ERO, 1) => {
                 let mut sids = Vec::new();
@@ -199,14 +229,23 @@ impl PcepObject {
                     let sub_type = body[offset];
                     let sub_len = body[offset + 1] as usize;
                     if sub_type == 36 && sub_len >= 8 {
-                        let sid = u32::from_be_bytes([body[offset + 4], body[offset + 5], body[offset + 6], body[offset + 7]]);
+                        let sid = u32::from_be_bytes([
+                            body[offset + 4],
+                            body[offset + 5],
+                            body[offset + 6],
+                            body[offset + 7],
+                        ]);
                         sids.push(sid);
                     }
                     offset += if sub_len >= 8 { sub_len } else { 8 };
                 }
                 PcepObject::SrEro { sids }
             }
-            _ => PcepObject::Raw { class_num, ot, body: body.to_vec() },
+            _ => PcepObject::Raw {
+                class_num,
+                ot,
+                body: body.to_vec(),
+            },
         };
 
         let consumed = (obj_len + 3) & !3;
@@ -378,7 +417,7 @@ mod tests {
 
         let req = PcepMessage::build_pcreq(101, src, dst);
         let raw_req = req.serialize();
-        assert_eq!(raw_req.len() >= 4, true);
+        assert!(raw_req.len() >= 4);
 
         let parsed_req = PcepMessage::parse(&raw_req).unwrap();
         assert_eq!(parsed_req.header.msg_type, PCEP_MSG_PCREQ);

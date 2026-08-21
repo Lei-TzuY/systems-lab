@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 use toy_tcpip::ptp_telecom::{
-    TelecomBmcaAttributes, TelecomClockType, TelecomProfileEngine, ETHERTYPE_PTP_TELECOM,
-    PTP_TELECOM_DEFAULT_LOCAL_PRIORITY,
+    ETHERTYPE_PTP_TELECOM, PTP_TELECOM_DEFAULT_LOCAL_PRIORITY, TelecomBmcaAttributes,
+    TelecomClockType, TelecomProfileEngine,
 };
 
 #[test]

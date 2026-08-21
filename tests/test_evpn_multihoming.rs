@@ -1,6 +1,6 @@
 use toy_tcpip::evpn::RouteDistinguisher;
 use toy_tcpip::evpn_multihoming::{
-    EvpnDfElectionEngine, EvpnEthernetSegmentRoute, EVPN_ROUTE_TYPE_ETHERNET_SEGMENT,
+    EVPN_ROUTE_TYPE_ETHERNET_SEGMENT, EvpnDfElectionEngine, EvpnEthernetSegmentRoute,
 };
 use toy_tcpip::ipv4::Ipv4Address;
 

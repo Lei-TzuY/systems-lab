@@ -1,5 +1,5 @@
 use toy_tcpip::ipv4::Ipv4Address;
-use toy_tcpip::rsvp::{RsvpObject, RsvpPacket, IP_PROTO_RSVP, RSVP_MSG_PATH, RSVP_MSG_RESV};
+use toy_tcpip::rsvp::{IP_PROTO_RSVP, RSVP_MSG_PATH, RSVP_MSG_RESV, RsvpObject, RsvpPacket};
 
 #[test]
 fn test_rsvp_path_and_explicit_route_object() {
@@ -18,7 +18,12 @@ fn test_rsvp_path_and_explicit_route_object() {
     assert_eq!(parsed.header.msg_type, RSVP_MSG_PATH);
     assert_eq!(parsed.objects.len(), 5);
 
-    if let RsvpObject::Session { dest_ip, tunnel_id, ext_tunnel_id } = &parsed.objects[0] {
+    if let RsvpObject::Session {
+        dest_ip,
+        tunnel_id,
+        ext_tunnel_id,
+    } = &parsed.objects[0]
+    {
         assert_eq!(*dest_ip, dst);
         assert_eq!(*tunnel_id, 401);
         assert_eq!(*ext_tunnel_id, src);

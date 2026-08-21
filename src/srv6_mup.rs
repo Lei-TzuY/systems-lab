@@ -3,8 +3,8 @@
 //! Enables seamless translation and interworking between 3GPP GTP-U (UDP 2152) and
 //! Segment Routing over IPv6 (SRv6) mobile user plane functions (`End.M.GTP4.E` and `End.M.GTP4.D`).
 
-use crate::gtp::{GtpPacket, GTP_U_UDP_PORT};
-use crate::ipv4::{Ipv4Address, Ipv4Packet, IP_PROTO_UDP};
+use crate::gtp::{GTP_U_UDP_PORT, GtpPacket};
+use crate::ipv4::{IP_PROTO_UDP, Ipv4Address, Ipv4Packet};
 use crate::ipv6::{Ipv6Address, Ipv6Packet, NEXT_HEADER_ROUTING};
 use crate::srv6::Srv6Header;
 use crate::tunnel::IP_PROTO_IP_IN_IP;
@@ -35,7 +35,8 @@ impl Srv6MupEngine {
     }
 
     pub fn register_session(&mut self, session: Srv6MupSession) {
-        self.uplink_sessions.insert((session.gnb_ipv4, session.teid), session.clone());
+        self.uplink_sessions
+            .insert((session.gnb_ipv4, session.teid), session.clone());
         self.downlink_sessions.insert(session.srv6_sid, session);
     }
 
@@ -128,12 +129,16 @@ mod tests {
         let user_data = b"5G NR PDU Session User Data Payload";
 
         // Uplink: GTP-U -> SRv6
-        let srv6_pkt = engine.process_uplink_gtp_to_srv6(gnb_ip, teid, user_data, router_v6).unwrap();
+        let srv6_pkt = engine
+            .process_uplink_gtp_to_srv6(gnb_ip, teid, user_data, router_v6)
+            .unwrap();
         let parsed_v6 = Ipv6Packet::parse(&srv6_pkt).unwrap();
         assert_eq!(parsed_v6.header.dst_ip, sid);
 
         // Downlink: SRv6 -> GTP-U
-        let gtp_ip_pkt = engine.process_downlink_srv6_to_gtp(sid, user_data, upf_ip).unwrap();
+        let gtp_ip_pkt = engine
+            .process_downlink_srv6_to_gtp(sid, user_data, upf_ip)
+            .unwrap();
         let parsed_v4 = Ipv4Packet::parse(&gtp_ip_pkt, true).unwrap();
         assert_eq!(parsed_v4.header.dst_ip, gnb_ip);
     }

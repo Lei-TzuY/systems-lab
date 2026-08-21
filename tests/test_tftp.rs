@@ -1,4 +1,4 @@
-use toy_tcpip::tftp::{TftpFileServer, TftpPacket, TFTP_BLOCK_SIZE};
+use toy_tcpip::tftp::{TFTP_BLOCK_SIZE, TftpFileServer, TftpPacket};
 
 #[test]
 fn test_tftp_packet_encoding_and_parsing() {

@@ -1,4 +1,4 @@
-use toy_tcpip::ldap::{LdapMessage, LdapOp, LdapServer, LDAP_PORT, LDAP_SUCCESS};
+use toy_tcpip::ldap::{LDAP_PORT, LDAP_SUCCESS, LdapMessage, LdapOp, LdapServer};
 
 #[test]
 fn test_ldap_bind_and_search_framing() {
@@ -13,7 +13,12 @@ fn test_ldap_bind_and_search_framing() {
 #[test]
 fn test_ldap_server_directory_lookup() {
     let srv = LdapServer::new();
-    let search = LdapMessage::new_search_request(11, "dc=example,dc=org", "(objectClass=*)", &["cn", "mail"]);
+    let search = LdapMessage::new_search_request(
+        11,
+        "dc=example,dc=org",
+        "(objectClass=*)",
+        &["cn", "mail"],
+    );
     let responses = srv.handle_request(&search);
 
     assert_eq!(responses.len(), 3); // 2 Entries + 1 SearchResultDone
@@ -24,7 +29,10 @@ fn test_ldap_server_directory_lookup() {
 
     for resp in &responses {
         match &resp.protocol_op {
-            LdapOp::SearchResultEntry { object_name, attributes } => {
+            LdapOp::SearchResultEntry {
+                object_name,
+                attributes,
+            } => {
                 if object_name.contains("alice") {
                     found_alice = true;
                     assert!(attributes.iter().any(|(k, _)| k == "mail"));

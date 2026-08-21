@@ -1,6 +1,6 @@
 use toy_tcpip::ethernet::MacAddress;
 use toy_tcpip::ipv4::Ipv4Address;
-use toy_tcpip::vrrp::{VrrpEngine, VrrpPacket, VrrpState, VRRP_VERSION_3};
+use toy_tcpip::vrrp::{VRRP_VERSION_3, VrrpEngine, VrrpPacket, VrrpState};
 
 #[test]
 fn test_vrrp_packet_structure_and_checksum() {
@@ -22,7 +22,10 @@ fn test_vrrp_packet_structure_and_checksum() {
     assert_eq!(parsed.vrid, 42);
     assert_eq!(parsed.priority, 255);
     assert_eq!(parsed.ip_addresses[0], vip);
-    assert_eq!(VrrpPacket::virtual_mac(42), MacAddress([0x00, 0x00, 0x5e, 0x00, 0x01, 42]));
+    assert_eq!(
+        VrrpPacket::virtual_mac(42),
+        MacAddress([0x00, 0x00, 0x5e, 0x00, 0x01, 42])
+    );
 }
 
 #[test]

@@ -31,8 +31,12 @@ pub enum VxlanError {
 impl fmt::Display for VxlanError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            VxlanError::PacketTooShort(l) => write!(f, "VXLAN packet too short ({} bytes, min 8)", l),
-            VxlanError::InvalidFlags(fl) => write!(f, "Invalid VXLAN flags: 0x{:02x} (expected 0x08)", fl),
+            VxlanError::PacketTooShort(l) => {
+                write!(f, "VXLAN packet too short ({} bytes, min 8)", l)
+            }
+            VxlanError::InvalidFlags(fl) => {
+                write!(f, "Invalid VXLAN flags: 0x{:02x} (expected 0x08)", fl)
+            }
             VxlanError::InvalidVni(v) => write!(f, "VXLAN VNI exceeds 24 bits: {}", v),
         }
     }

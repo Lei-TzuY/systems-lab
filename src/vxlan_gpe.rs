@@ -40,7 +40,9 @@ pub enum VxlanGpeError {
 impl fmt::Display for VxlanGpeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            VxlanGpeError::PacketTooShort(l) => write!(f, "VXLAN-GPE packet too short ({} bytes)", l),
+            VxlanGpeError::PacketTooShort(l) => {
+                write!(f, "VXLAN-GPE packet too short ({} bytes)", l)
+            }
             VxlanGpeError::InvalidFlags(fl) => write!(f, "Invalid VXLAN-GPE flags: 0x{:02X}", fl),
         }
     }
@@ -123,7 +125,7 @@ mod tests {
         let pkt = VxlanGpePacket::build_ipv4(5001, payload);
         let raw = pkt.serialize();
 
-        assert_eq!(raw.len() >= VXLAN_GPE_HEADER_LEN, true);
+        assert!(raw.len() >= VXLAN_GPE_HEADER_LEN);
         let parsed = VxlanGpePacket::parse(&raw).unwrap();
         assert_eq!(parsed.header.vni, 5001);
         assert_eq!(parsed.header.next_protocol, VXLAN_GPE_NP_IPV4);

@@ -1,4 +1,7 @@
-use toy_tcpip::ntp::{calculate_offset_and_delay, NtpPacket, NtpTimestamp, NTP_MODE_CLIENT, NTP_MODE_SERVER, NTP_VERSION_4};
+use toy_tcpip::ntp::{
+    NTP_MODE_CLIENT, NTP_MODE_SERVER, NTP_VERSION_4, NtpPacket, NtpTimestamp,
+    calculate_offset_and_delay,
+};
 
 #[test]
 fn test_ntp_packet_structure_and_serialization() {

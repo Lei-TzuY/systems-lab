@@ -74,9 +74,15 @@ pub enum IcmpError {
 impl fmt::Display for IcmpError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            IcmpError::PacketTooShort(len) => write!(f, "ICMP packet too short ({} bytes, min 8)", len),
+            IcmpError::PacketTooShort(len) => {
+                write!(f, "ICMP packet too short ({} bytes, min 8)", len)
+            }
             IcmpError::InvalidChecksum { computed, found } => {
-                write!(f, "ICMP checksum mismatch: computed 0x{:04x}, found 0x{:04x}", computed, found)
+                write!(
+                    f,
+                    "ICMP checksum mismatch: computed 0x{:04x}, found 0x{:04x}",
+                    computed, found
+                )
             }
         }
     }
@@ -154,6 +160,35 @@ impl<'a> IcmpPacket<'a> {
             sequence_number,
             payload,
         )
+    }
+
+    /// Builds an ICMP Time Exceeded (Type 11) message
+    pub fn build_time_exceeded(code: u8, orig_datagram: &[u8]) -> Vec<u8> {
+        let mut payload = Vec::with_capacity(4 + orig_datagram.len().min(28));
+        payload.extend_from_slice(&[0, 0, 0, 0]); // Unused 4 bytes (RFC 792)
+        // Include original IP header + first 8 bytes of original datagram payload
+        let copy_len = orig_datagram.len().min(28);
+        payload.extend_from_slice(&orig_datagram[..copy_len]);
+        Self::serialize(ICMP_TYPE_TIME_EXCEEDED, code, 0, 0, &payload)
+    }
+
+    /// Builds an ICMP Destination Unreachable (Type 3) message (e.g. Fragmentation Needed Code 4)
+    pub fn build_destination_unreachable(
+        code: u8,
+        next_hop_mtu: u16,
+        orig_datagram: &[u8],
+    ) -> Vec<u8> {
+        let mut payload = Vec::with_capacity(4 + orig_datagram.len().min(28));
+        if code == 4 {
+            // RFC 1191 Path MTU Discovery: 2 unused bytes + 2 bytes Next-Hop MTU
+            payload.extend_from_slice(&[0, 0]);
+            payload.extend_from_slice(&next_hop_mtu.to_be_bytes());
+        } else {
+            payload.extend_from_slice(&[0, 0, 0, 0]);
+        }
+        let copy_len = orig_datagram.len().min(28);
+        payload.extend_from_slice(&orig_datagram[..copy_len]);
+        Self::serialize(ICMP_TYPE_DEST_UNREACHABLE, code, 0, 0, &payload)
     }
 }
 

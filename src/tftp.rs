@@ -34,7 +34,9 @@ pub enum TftpError {
 impl fmt::Display for TftpError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TftpError::PacketTooShort(len) => write!(f, "TFTP packet too short ({} bytes, min 4)", len),
+            TftpError::PacketTooShort(len) => {
+                write!(f, "TFTP packet too short ({} bytes, min 4)", len)
+            }
             TftpError::InvalidOpcode(op) => write!(f, "Invalid TFTP opcode: {}", op),
             TftpError::MissingNullTerminator => write!(f, "TFTP string missing null terminator"),
         }
@@ -54,11 +56,17 @@ impl TftpPacket {
         match opcode {
             TFTP_OPCODE_RRQ | TFTP_OPCODE_WRQ => {
                 let rest = &data[2..];
-                let null1 = rest.iter().position(|&b| b == 0).ok_or(TftpError::MissingNullTerminator)?;
+                let null1 = rest
+                    .iter()
+                    .position(|&b| b == 0)
+                    .ok_or(TftpError::MissingNullTerminator)?;
                 let filename = String::from_utf8_lossy(&rest[..null1]).to_string();
 
                 let mode_rest = &rest[null1 + 1..];
-                let null2 = mode_rest.iter().position(|&b| b == 0).ok_or(TftpError::MissingNullTerminator)?;
+                let null2 = mode_rest
+                    .iter()
+                    .position(|&b| b == 0)
+                    .ok_or(TftpError::MissingNullTerminator)?;
                 let mode = String::from_utf8_lossy(&mode_rest[..null2]).to_string();
 
                 if opcode == TFTP_OPCODE_RRQ {
@@ -82,9 +90,15 @@ impl TftpPacket {
             TFTP_OPCODE_ERROR => {
                 let error_code = u16::from_be_bytes([data[2], data[3]]);
                 let msg_bytes = &data[4..];
-                let msg_len = msg_bytes.iter().position(|&b| b == 0).unwrap_or(msg_bytes.len());
+                let msg_len = msg_bytes
+                    .iter()
+                    .position(|&b| b == 0)
+                    .unwrap_or(msg_bytes.len());
                 let message = String::from_utf8_lossy(&msg_bytes[..msg_len]).to_string();
-                Ok(TftpPacket::Error { error_code, message })
+                Ok(TftpPacket::Error {
+                    error_code,
+                    message,
+                })
             }
             _ => Err(TftpError::InvalidOpcode(opcode)),
         }
@@ -117,7 +131,10 @@ impl TftpPacket {
                 buf.extend_from_slice(&TFTP_OPCODE_ACK.to_be_bytes());
                 buf.extend_from_slice(&block_num.to_be_bytes());
             }
-            TftpPacket::Error { error_code, message } => {
+            TftpPacket::Error {
+                error_code,
+                message,
+            } => {
                 buf.extend_from_slice(&TFTP_OPCODE_ERROR.to_be_bytes());
                 buf.extend_from_slice(&error_code.to_be_bytes());
                 buf.extend_from_slice(message.as_bytes());
@@ -145,7 +162,10 @@ impl TftpFileServer {
         let mut server = TftpFileServer {
             files: HashMap::new(),
         };
-        server.add_file("pxeboot.bin", b"VIRTUAL PXE BOOTLOADER PAYLOAD 1234567890".to_vec());
+        server.add_file(
+            "pxeboot.bin",
+            b"VIRTUAL PXE BOOTLOADER PAYLOAD 1234567890".to_vec(),
+        );
         server.add_file("firmware.img", vec![0xaa; 1000]); // 2 blocks (512B + 488B)
         server
     }

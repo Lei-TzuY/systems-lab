@@ -1,4 +1,4 @@
-use toy_tcpip::geneve_sfc::{GeneveSfcHop, GeneveSfcPacket, GENEVE_OPT_CLASS_SFC};
+use toy_tcpip::geneve_sfc::{GENEVE_OPT_CLASS_SFC, GeneveSfcHop, GeneveSfcPacket};
 
 #[test]
 fn test_geneve_sfc_multi_hop_chain_and_options() {

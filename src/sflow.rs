@@ -185,8 +185,18 @@ impl SflowDatagram {
             if offset + 8 > data.len() {
                 break;
             }
-            let sample_type = u32::from_be_bytes([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]]);
-            let sample_len = u32::from_be_bytes([data[offset + 4], data[offset + 5], data[offset + 6], data[offset + 7]]) as usize;
+            let sample_type = u32::from_be_bytes([
+                data[offset],
+                data[offset + 1],
+                data[offset + 2],
+                data[offset + 3],
+            ]);
+            let sample_len = u32::from_be_bytes([
+                data[offset + 4],
+                data[offset + 5],
+                data[offset + 6],
+                data[offset + 7],
+            ]) as usize;
             offset += 8;
 
             if offset + sample_len > data.len() {
@@ -205,8 +215,11 @@ impl SflowDatagram {
 
                 // Raw header record offset
                 if s_data.len() >= 56 {
-                    let orig_len = u32::from_be_bytes([s_data[44], s_data[45], s_data[46], s_data[47]]);
-                    let hdr_len = u32::from_be_bytes([s_data[52], s_data[53], s_data[54], s_data[55]]) as usize;
+                    let orig_len =
+                        u32::from_be_bytes([s_data[44], s_data[45], s_data[46], s_data[47]]);
+                    let hdr_len =
+                        u32::from_be_bytes([s_data[52], s_data[53], s_data[54], s_data[55]])
+                            as usize;
                     let sampled_hdr = if 56 + hdr_len <= s_data.len() {
                         s_data[56..56 + hdr_len].to_vec()
                     } else {
@@ -229,11 +242,22 @@ impl SflowDatagram {
                 let s_seq = u32::from_be_bytes([s_data[0], s_data[1], s_data[2], s_data[3]]);
                 let source_id = u32::from_be_bytes([s_data[4], s_data[5], s_data[6], s_data[7]]);
                 let if_index = u32::from_be_bytes([s_data[20], s_data[21], s_data[22], s_data[23]]);
-                let if_speed_bps = u64::from_be_bytes([s_data[28], s_data[29], s_data[30], s_data[31], s_data[32], s_data[33], s_data[34], s_data[35]]);
-                let in_octets = u64::from_be_bytes([s_data[44], s_data[45], s_data[46], s_data[47], s_data[48], s_data[49], s_data[50], s_data[51]]);
-                let in_packets = u32::from_be_bytes([s_data[52], s_data[53], s_data[54], s_data[55]]);
-                let out_octets = u64::from_be_bytes([s_data[72], s_data[73], s_data[74], s_data[75], s_data[76], s_data[77], s_data[78], s_data[79]]);
-                let out_packets = u32::from_be_bytes([s_data[80], s_data[81], s_data[82], s_data[83]]);
+                let if_speed_bps = u64::from_be_bytes([
+                    s_data[28], s_data[29], s_data[30], s_data[31], s_data[32], s_data[33],
+                    s_data[34], s_data[35],
+                ]);
+                let in_octets = u64::from_be_bytes([
+                    s_data[44], s_data[45], s_data[46], s_data[47], s_data[48], s_data[49],
+                    s_data[50], s_data[51],
+                ]);
+                let in_packets =
+                    u32::from_be_bytes([s_data[52], s_data[53], s_data[54], s_data[55]]);
+                let out_octets = u64::from_be_bytes([
+                    s_data[72], s_data[73], s_data[74], s_data[75], s_data[76], s_data[77],
+                    s_data[78], s_data[79],
+                ]);
+                let out_packets =
+                    u32::from_be_bytes([s_data[80], s_data[81], s_data[82], s_data[83]]);
 
                 samples.push(SflowSample::Counter(SflowCounterSample {
                     seq_num: s_seq,
@@ -296,7 +320,7 @@ mod tests {
         dgram.samples.push(SflowSample::Counter(counter));
 
         let raw = dgram.serialize();
-        assert_eq!(raw.len() >= 28, true);
+        assert!(raw.len() >= 28);
 
         let parsed = SflowDatagram::parse(&raw).unwrap();
         assert_eq!(parsed.version, 5);

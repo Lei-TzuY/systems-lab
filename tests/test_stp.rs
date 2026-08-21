@@ -1,5 +1,7 @@
 use toy_tcpip::ethernet::MacAddress;
-use toy_tcpip::stp::{BridgeId, StpBpdu, StpBridgeEngine, StpPortRole, StpPortState, STP_PROTOCOL_ID};
+use toy_tcpip::stp::{
+    BridgeId, STP_PROTOCOL_ID, StpBpdu, StpBridgeEngine, StpPortRole, StpPortState,
+};
 
 #[test]
 fn test_stp_bpdu_codec() {
@@ -27,10 +29,16 @@ fn test_stp_bridge_root_election_and_loop_blocking() {
     let bpdu1 = StpBpdu::build_config_bpdu(superior_root, superior_root, 0, 0x8001);
     bridge.process_bpdu(1, &bpdu1);
     assert_eq!(bridge.root_id, superior_root);
-    assert_eq!(bridge.port_states.get(&1), Some(&(StpPortRole::RootPort, StpPortState::Forwarding)));
+    assert_eq!(
+        bridge.port_states.get(&1),
+        Some(&(StpPortRole::RootPort, StpPortState::Forwarding))
+    );
 
     // 2. Ingest BPDU from competitor on port 2 with same root but lower bridge ID -> Port 2 is blocked!
     let bpdu2 = StpBpdu::build_config_bpdu(competitor_bridge, superior_root, 19, 0x8002);
     bridge.process_bpdu(2, &bpdu2);
-    assert_eq!(bridge.port_states.get(&2), Some(&(StpPortRole::BlockedPort, StpPortState::Blocking)));
+    assert_eq!(
+        bridge.port_states.get(&2),
+        Some(&(StpPortRole::BlockedPort, StpPortState::Blocking))
+    );
 }

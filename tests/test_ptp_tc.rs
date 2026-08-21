@@ -1,6 +1,4 @@
-use toy_tcpip::ptp_tc::{
-    HopMeasurement, TransparentClockEngine, TransparentClockMode,
-};
+use toy_tcpip::ptp_tc::{HopMeasurement, TransparentClockEngine, TransparentClockMode};
 
 #[test]
 fn test_ptp_tc_e2e_residence_time_accumulation() {

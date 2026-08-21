@@ -1,4 +1,4 @@
-use toy_tcpip::rtp::{RtcpSenderReport, RtpPacket, RTP_FIXED_HEADER_LEN, RTP_PT_PCMA};
+use toy_tcpip::rtp::{RTP_FIXED_HEADER_LEN, RTP_PT_PCMA, RtcpSenderReport, RtpPacket};
 
 #[test]
 fn test_rtp_audio_packet_framing_and_csrc() {

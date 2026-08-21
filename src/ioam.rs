@@ -66,7 +66,14 @@ impl IoamTraceHeader {
         }
     }
 
-    pub fn add_hop(&mut self, node_id: u32, ingress_if: u16, egress_if: u16, timestamp_ns: u64, transit_delay_ns: u32) {
+    pub fn add_hop(
+        &mut self,
+        node_id: u32,
+        ingress_if: u16,
+        egress_if: u16,
+        timestamp_ns: u64,
+        transit_delay_ns: u32,
+    ) {
         self.node_records.push(IoamTraceNode {
             node_id,
             ingress_if,
@@ -111,15 +118,29 @@ impl IoamTraceHeader {
             if offset + 20 > data.len() {
                 break;
             }
-            let node_id = u32::from_be_bytes([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]]);
+            let node_id = u32::from_be_bytes([
+                data[offset],
+                data[offset + 1],
+                data[offset + 2],
+                data[offset + 3],
+            ]);
             let ingress_if = u16::from_be_bytes([data[offset + 4], data[offset + 5]]);
             let egress_if = u16::from_be_bytes([data[offset + 6], data[offset + 7]]);
             let timestamp_ns = u64::from_be_bytes([
-                data[offset + 8], data[offset + 9], data[offset + 10], data[offset + 11],
-                data[offset + 12], data[offset + 13], data[offset + 14], data[offset + 15],
+                data[offset + 8],
+                data[offset + 9],
+                data[offset + 10],
+                data[offset + 11],
+                data[offset + 12],
+                data[offset + 13],
+                data[offset + 14],
+                data[offset + 15],
             ]);
             let transit_delay_ns = u32::from_be_bytes([
-                data[offset + 16], data[offset + 17], data[offset + 18], data[offset + 19],
+                data[offset + 16],
+                data[offset + 17],
+                data[offset + 18],
+                data[offset + 19],
             ]);
 
             node_records.push(IoamTraceNode {
@@ -192,7 +213,7 @@ mod tests {
         ioam.trace_header.add_hop(102, 2, 1, 1700000000100090, 50);
 
         let raw = ioam.serialize();
-        assert_eq!(raw.len() >= 68, true);
+        assert!(raw.len() >= 68);
 
         let parsed = IoamPacket::parse(&raw).unwrap();
         assert_eq!(parsed.trace_header.namespace_id, 1);

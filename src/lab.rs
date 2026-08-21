@@ -1,0 +1,547 @@
+//! Integrated Deterministic Virtual Network Lab.
+//!
+//! Provides a complete in-process virtual networking testbed supporting:
+//! - Multi-node, multi-subnet topologies with virtual links, switches, and routers
+//! - Deterministic link fault injection (MTU limits, packet drops, byte corruption)
+//! - Multi-interface IPv4 routing, TTL decrementing, and ICMP Time Exceeded generation
+//! - Full dual-stack protocol operation (Ethernet, ARP, IPv4, IPv6, ICMP, ICMPv6, NDP, UDP, TCP)
+//! - Integrated PCAP capture tap per link with Wireshark compatibility
+//! - Discrete event stepping and run-to-quiescence simulation
+
+use crate::arp::{ArpOpcode, ArpPacket, ArpTable};
+use crate::ethernet::{ETHERTYPE_ARP, ETHERTYPE_IPV4, EtherType, EthernetFrame, MacAddress};
+use crate::icmp::{IcmpPacket, IcmpType};
+use crate::ipv4::{IP_PROTO_ICMP, Ipv4Address, Ipv4Packet};
+use crate::pcap::{LINKTYPE_ETHERNET, PcapWriter};
+use crate::router::RoutingTable;
+use crate::stack::{NetStack, NetStackConfig};
+use std::collections::HashMap;
+
+/// Fault injection configuration and frame accounting for a virtual point-to-point or broadcast link.
+#[derive(Debug)]
+pub struct VirtualLink {
+    pub name: String,
+    pub mtu: usize,
+    pub drop_packet_indices: Vec<usize>,
+    pub corrupt_packet_indices: Vec<usize>,
+    pub total_packets_seen: usize,
+    pub frames_forwarded: usize,
+    pub frames_dropped: usize,
+    pub frames_corrupted: usize,
+    pcap_writer: Option<PcapWriter<Vec<u8>>>,
+}
+
+impl VirtualLink {
+    pub fn new(name: &str) -> Self {
+        VirtualLink {
+            name: name.to_string(),
+            mtu: 1500,
+            drop_packet_indices: Vec::new(),
+            corrupt_packet_indices: Vec::new(),
+            total_packets_seen: 0,
+            frames_forwarded: 0,
+            frames_dropped: 0,
+            frames_corrupted: 0,
+            pcap_writer: None,
+        }
+    }
+
+    pub fn with_mtu(mut self, mtu: usize) -> Self {
+        self.mtu = mtu;
+        self
+    }
+
+    pub fn enable_pcap(&mut self) {
+        let buffer = Vec::new();
+        let writer = PcapWriter::new(buffer, 65535, LINKTYPE_ETHERNET).expect("PcapWriter init");
+        self.pcap_writer = Some(writer);
+    }
+
+    pub fn take_pcap_bytes(&mut self) -> Option<Vec<u8>> {
+        self.pcap_writer.as_ref().map(|w| w.get_ref().clone())
+    }
+
+    /// Processes a frame attempting to cross this link.
+    /// Returns Some(frame) if delivered, or None if dropped/clipped.
+    pub fn process_frame_transit(&mut self, mut raw_frame: Vec<u8>) -> Option<Vec<u8>> {
+        self.total_packets_seen += 1;
+        let pkt_index = self.total_packets_seen;
+
+        // 1. Check MTU
+        if raw_frame.len() > self.mtu + 14 {
+            // Frame payload + Ethernet header exceeds link capacity
+            self.frames_dropped += 1;
+            return None;
+        }
+
+        // 2. Check deterministic drop rule
+        if self.drop_packet_indices.contains(&pkt_index) {
+            self.frames_dropped += 1;
+            return None;
+        }
+
+        // 3. Check deterministic corruption rule
+        if self.corrupt_packet_indices.contains(&pkt_index) && raw_frame.len() > 20 {
+            // Flip bits in the middle of payload to invalidate checksums
+            let corrupt_pos = raw_frame.len() - 1;
+            raw_frame[corrupt_pos] ^= 0xFF;
+            self.frames_corrupted += 1;
+        }
+
+        // 4. Capture in PCAP tap if enabled
+        if let Some(ref mut writer) = self.pcap_writer {
+            let ts_sec = (pkt_index as u32) / 10;
+            let ts_usec = ((pkt_index as u32) % 10) * 100_000;
+            let _ = writer.write_packet(ts_sec, ts_usec, &raw_frame);
+        }
+
+        self.frames_forwarded += 1;
+        Some(raw_frame)
+    }
+}
+
+/// A simulated Host node in the virtual network lab.
+pub struct LabHost {
+    pub name: String,
+    pub link_name: String,
+    pub stack: NetStack,
+}
+
+impl LabHost {
+    pub fn new(name: &str, link_name: &str, config: NetStackConfig) -> Self {
+        LabHost {
+            name: name.to_string(),
+            link_name: link_name.to_string(),
+            stack: NetStack::new(config),
+        }
+    }
+}
+
+/// An interface on a multi-homed Router node.
+#[derive(Debug, Clone)]
+pub struct RouterInterface {
+    pub name: String,
+    pub mac: MacAddress,
+    pub ip: Ipv4Address,
+    pub subnet_mask: u8,
+    pub link_name: String,
+}
+
+/// A multi-interface Router node with hardware-like packet forwarding, TTL decrementing,
+/// and ICMP error generation.
+pub struct LabRouter {
+    pub name: String,
+    pub interfaces: Vec<RouterInterface>,
+    pub routing_table: RoutingTable,
+    pub arp_tables: HashMap<String, ArpTable>,
+    pub pending_transit_packets: HashMap<(String, Ipv4Address), Vec<Vec<u8>>>,
+    pub ip_id_counter: u16,
+}
+
+impl LabRouter {
+    pub fn new(name: &str) -> Self {
+        LabRouter {
+            name: name.to_string(),
+            interfaces: Vec::new(),
+            routing_table: RoutingTable::new(),
+            arp_tables: HashMap::new(),
+            pending_transit_packets: HashMap::new(),
+            ip_id_counter: 100,
+        }
+    }
+
+    pub fn add_interface(
+        &mut self,
+        name: &str,
+        mac: MacAddress,
+        ip: Ipv4Address,
+        subnet_mask: u8,
+        link_name: &str,
+    ) {
+        let iface = RouterInterface {
+            name: name.to_string(),
+            mac,
+            ip,
+            subnet_mask,
+            link_name: link_name.to_string(),
+        };
+        self.arp_tables.insert(name.to_string(), ArpTable::new());
+
+        // Add local connected subnet route
+        let subnet_net = ip.mask(subnet_mask);
+        self.routing_table
+            .add_route(subnet_net, subnet_mask, None, name);
+        self.interfaces.push(iface);
+    }
+
+    fn next_ip_id(&mut self) -> u16 {
+        let id = self.ip_id_counter;
+        self.ip_id_counter = self.ip_id_counter.wrapping_add(1);
+        id
+    }
+
+    /// Processes an incoming frame arriving on a specific virtual link.
+    /// Returns a list of `(egress_link_name, frame_bytes)` to transmit.
+    pub fn process_incoming_frame(
+        &mut self,
+        ingress_link: &str,
+        raw_frame: &[u8],
+    ) -> Vec<(String, Vec<u8>)> {
+        let mut out_transmissions = Vec::new();
+
+        let ingress_iface = match self.interfaces.iter().find(|i| i.link_name == ingress_link) {
+            Some(i) => i.clone(),
+            None => return out_transmissions,
+        };
+
+        let eth = match EthernetFrame::parse(raw_frame) {
+            Ok(f) => f,
+            Err(_) => return out_transmissions,
+        };
+
+        // Filter: only accept if destination is ingress interface MAC, broadcast, or multicast
+        if !eth.dst_mac.is_broadcast()
+            && !eth.dst_mac.is_multicast()
+            && eth.dst_mac != ingress_iface.mac
+        {
+            return out_transmissions;
+        }
+
+        match eth.ethertype {
+            EtherType::Arp => {
+                if let Ok(arp) = ArpPacket::parse(eth.payload) {
+                    let arp_table = self
+                        .arp_tables
+                        .entry(ingress_iface.name.clone())
+                        .or_default();
+                    arp_table.insert(arp.sender_ip, arp.sender_mac);
+                    let sender_ipv4 = Ipv4Address(arp.sender_ip);
+
+                    // Check pending transit packets waiting for this ARP on this interface
+                    let pending_key = (ingress_iface.name.clone(), sender_ipv4);
+                    if let Some(queued) = self.pending_transit_packets.remove(&pending_key) {
+                        for ip_data in queued {
+                            let eth_out = EthernetFrame::serialize(
+                                arp.sender_mac,
+                                ingress_iface.mac,
+                                ETHERTYPE_IPV4,
+                                &ip_data,
+                            );
+                            out_transmissions.push((ingress_link.to_string(), eth_out));
+                        }
+                    }
+
+                    if arp.opcode == ArpOpcode::Request && arp.target_ip == ingress_iface.ip.0 {
+                        // Generate ARP reply
+                        let reply = ArpPacket::build_reply(
+                            ingress_iface.mac,
+                            ingress_iface.ip.0,
+                            arp.sender_mac,
+                            arp.sender_ip,
+                        );
+                        let eth_out = EthernetFrame::serialize(
+                            arp.sender_mac,
+                            ingress_iface.mac,
+                            ETHERTYPE_ARP,
+                            &reply.serialize(),
+                        );
+                        out_transmissions.push((ingress_link.to_string(), eth_out));
+                    }
+                }
+            }
+
+            EtherType::IPv4 => {
+                if let Ok(ip_pkt) = Ipv4Packet::parse(eth.payload, true) {
+                    // Update ARP table on ingress interface with sender
+                    let arp_table = self
+                        .arp_tables
+                        .entry(ingress_iface.name.clone())
+                        .or_default();
+                    arp_table.insert(ip_pkt.header.src_ip.0, eth.src_mac);
+
+                    let is_for_router =
+                        self.interfaces.iter().any(|i| i.ip == ip_pkt.header.dst_ip);
+
+                    if is_for_router {
+                        // Direct packet to router's own IP (e.g. pinging the router)
+                        if ip_pkt.header.protocol == crate::ipv4::IpProtocol::Icmp
+                            && let Ok(icmp) = IcmpPacket::parse(ip_pkt.payload, true)
+                            && icmp.icmp_type == IcmpType::EchoRequest
+                        {
+                            let echo_reply = IcmpPacket::build_echo_reply(&icmp);
+                            let ip_id = self.next_ip_id();
+                            let ip_out = Ipv4Packet::serialize(
+                                ip_pkt.header.dst_ip,
+                                ip_pkt.header.src_ip,
+                                IP_PROTO_ICMP,
+                                ip_id,
+                                64,
+                                &echo_reply,
+                            );
+                            let eth_out = EthernetFrame::serialize(
+                                eth.src_mac,
+                                ingress_iface.mac,
+                                ETHERTYPE_IPV4,
+                                &ip_out,
+                            );
+                            out_transmissions.push((ingress_link.to_string(), eth_out));
+                        }
+                    } else {
+                        // Forwarding data plane path
+                        // 1. Check TTL
+                        if ip_pkt.header.ttl <= 1 {
+                            // TTL expired in transit -> Generate ICMP Time Exceeded (Type 11 Code 0)
+                            let time_exceeded_payload =
+                                IcmpPacket::build_time_exceeded(0, eth.payload);
+                            let ip_id = self.next_ip_id();
+                            let ip_out = Ipv4Packet::serialize(
+                                ingress_iface.ip,
+                                ip_pkt.header.src_ip,
+                                IP_PROTO_ICMP,
+                                ip_id,
+                                64,
+                                &time_exceeded_payload,
+                            );
+                            let eth_out = EthernetFrame::serialize(
+                                eth.src_mac,
+                                ingress_iface.mac,
+                                ETHERTYPE_IPV4,
+                                &ip_out,
+                            );
+                            out_transmissions.push((ingress_link.to_string(), eth_out));
+                            return out_transmissions;
+                        }
+
+                        // 2. Decrement TTL and recompute checksum
+                        let new_ttl = ip_pkt.header.ttl - 1;
+
+                        // 3. Routing Table Lookup (LPM)
+                        if let Some(route) = self.routing_table.lookup(ip_pkt.header.dst_ip) {
+                            let egress_iface_name = route.interface.clone();
+                            let next_hop = route.next_hop(ip_pkt.header.dst_ip);
+
+                            if let Some(egress_iface) =
+                                self.interfaces.iter().find(|i| i.name == egress_iface_name)
+                            {
+                                let egress_link = egress_iface.link_name.clone();
+                                let ip_id = ip_pkt.header.identification;
+                                let forwarded_ip_bytes = Ipv4Packet::serialize(
+                                    ip_pkt.header.src_ip,
+                                    ip_pkt.header.dst_ip,
+                                    ip_pkt.header.protocol.to_u8(),
+                                    ip_id,
+                                    new_ttl,
+                                    ip_pkt.payload,
+                                );
+
+                                let egress_arp = self
+                                    .arp_tables
+                                    .entry(egress_iface.name.clone())
+                                    .or_default();
+                                if let Some(dst_mac) = egress_arp.lookup(&next_hop.0) {
+                                    let eth_out = EthernetFrame::serialize(
+                                        dst_mac,
+                                        egress_iface.mac,
+                                        ETHERTYPE_IPV4,
+                                        &forwarded_ip_bytes,
+                                    );
+                                    out_transmissions.push((egress_link, eth_out));
+                                } else {
+                                    // Queue transit packet and broadcast ARP Request on egress link
+                                    let pending_key = (egress_iface.name.clone(), next_hop);
+                                    self.pending_transit_packets
+                                        .entry(pending_key)
+                                        .or_default()
+                                        .push(forwarded_ip_bytes);
+
+                                    let arp_req = ArpPacket::build_request(
+                                        egress_iface.mac,
+                                        egress_iface.ip.0,
+                                        next_hop.0,
+                                    );
+                                    let eth_arp = EthernetFrame::serialize(
+                                        MacAddress::BROADCAST,
+                                        egress_iface.mac,
+                                        ETHERTYPE_ARP,
+                                        &arp_req.serialize(),
+                                    );
+                                    out_transmissions.push((egress_link, eth_arp));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            _ => {}
+        }
+
+        out_transmissions
+    }
+}
+
+/// Deterministic Virtual Network Lab orchestrator.
+#[derive(Default)]
+pub struct VirtualLab {
+    pub links: HashMap<String, VirtualLink>,
+    pub hosts: HashMap<String, LabHost>,
+    pub routers: HashMap<String, LabRouter>,
+    pub in_flight_frames: Vec<(String, String, Vec<u8>)>, // (sender_node, link_name, frame)
+    pub total_steps_executed: usize,
+    pub total_frames_delivered: usize,
+}
+
+impl VirtualLab {
+    pub fn new() -> Self {
+        VirtualLab {
+            links: HashMap::new(),
+            hosts: HashMap::new(),
+            routers: HashMap::new(),
+            in_flight_frames: Vec::new(),
+            total_steps_executed: 0,
+            total_frames_delivered: 0,
+        }
+    }
+
+    pub fn add_link(&mut self, name: &str) {
+        self.links.insert(name.to_string(), VirtualLink::new(name));
+    }
+
+    pub fn add_link_with_mtu(&mut self, name: &str, mtu: usize) {
+        self.links
+            .insert(name.to_string(), VirtualLink::new(name).with_mtu(mtu));
+    }
+
+    pub fn add_host(&mut self, name: &str, link_name: &str, config: NetStackConfig) {
+        if !self.links.contains_key(link_name) {
+            self.add_link(link_name);
+        }
+        let host = LabHost::new(name, link_name, config);
+        self.hosts.insert(name.to_string(), host);
+    }
+
+    pub fn add_router(&mut self, router: LabRouter) {
+        for iface in &router.interfaces {
+            if !self.links.contains_key(&iface.link_name) {
+                self.add_link(&iface.link_name);
+            }
+        }
+        self.routers.insert(router.name.clone(), router);
+    }
+
+    pub fn host(&self, name: &str) -> Option<&LabHost> {
+        self.hosts.get(name)
+    }
+
+    pub fn host_mut(&mut self, name: &str) -> Option<&mut LabHost> {
+        self.hosts.get_mut(name)
+    }
+
+    pub fn router(&self, name: &str) -> Option<&LabRouter> {
+        self.routers.get(name)
+    }
+
+    pub fn router_mut(&mut self, name: &str) -> Option<&mut LabRouter> {
+        self.routers.get_mut(name)
+    }
+
+    pub fn link(&self, name: &str) -> Option<&VirtualLink> {
+        self.links.get(name)
+    }
+
+    pub fn link_mut(&mut self, name: &str) -> Option<&mut VirtualLink> {
+        self.links.get_mut(name)
+    }
+
+    pub fn enable_pcap(&mut self, link_name: &str) {
+        if let Some(link) = self.links.get_mut(link_name) {
+            link.enable_pcap();
+        }
+    }
+
+    pub fn export_pcap(&mut self, link_name: &str) -> Option<Vec<u8>> {
+        self.links
+            .get_mut(link_name)
+            .and_then(|l| l.take_pcap_bytes())
+    }
+
+    /// Queues a raw frame transmission originating from a host.
+    pub fn send_from_host(&mut self, host_name: &str, frame: Vec<u8>) {
+        if let Some(host) = self.hosts.get(host_name) {
+            self.in_flight_frames
+                .push((host_name.to_string(), host.link_name.clone(), frame));
+        }
+    }
+
+    /// Executes one discrete simulation step:
+    /// Drains current in-flight frames, passes each through the corresponding link fault model,
+    /// delivers ready frames to connected hosts and routers on that link, and collects newly
+    /// generated reply or transit frames into the in-flight queue.
+    pub fn step(&mut self) -> usize {
+        if self.in_flight_frames.is_empty() {
+            return 0;
+        }
+
+        self.total_steps_executed += 1;
+        let current_batch = std::mem::take(&mut self.in_flight_frames);
+        let mut next_batch = Vec::new();
+        let mut frames_processed = 0;
+
+        for (sender, link_name, raw_frame) in current_batch {
+            frames_processed += 1;
+
+            // 1. Traverse Link (applies MTU, Drops, Corruption, PCAP Tap)
+            let delivered_frame = match self.links.get_mut(&link_name) {
+                Some(link) => match link.process_frame_transit(raw_frame) {
+                    Some(f) => f,
+                    None => continue, // Dropped by link!
+                },
+                None => raw_frame,
+            };
+
+            self.total_frames_delivered += 1;
+
+            // 2. Deliver to all other Hosts on this link
+            let host_names: Vec<String> = self.hosts.keys().cloned().collect();
+            for h_name in host_names {
+                if h_name == sender {
+                    continue;
+                }
+                let host = self.hosts.get_mut(&h_name).unwrap();
+                if host.link_name == link_name {
+                    let replies = host.stack.process_frame(&delivered_frame);
+                    for reply in replies {
+                        next_batch.push((h_name.clone(), link_name.clone(), reply));
+                    }
+                }
+            }
+
+            // 3. Deliver to all Routers with an interface attached to this link
+            let router_names: Vec<String> = self.routers.keys().cloned().collect();
+            for r_name in router_names {
+                if r_name == sender {
+                    continue;
+                }
+                let router = self.routers.get_mut(&r_name).unwrap();
+                let outgoing = router.process_incoming_frame(&link_name, &delivered_frame);
+                for (egress_link, frame) in outgoing {
+                    next_batch.push((r_name.clone(), egress_link, frame));
+                }
+            }
+        }
+
+        self.in_flight_frames = next_batch;
+        frames_processed
+    }
+
+    /// Runs simulation steps until no frames remain in-flight or `max_steps` is reached.
+    /// Returns the total number of steps executed.
+    pub fn run_until_quiescent(&mut self, max_steps: usize) -> usize {
+        let mut steps = 0;
+        while !self.in_flight_frames.is_empty() && steps < max_steps {
+            self.step();
+            steps += 1;
+        }
+        steps
+    }
+}

@@ -100,7 +100,9 @@ pub enum DhcpError {
 impl fmt::Display for DhcpError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            DhcpError::PacketTooShort(len) => write!(f, "DHCP packet too short ({} bytes, min 240)", len),
+            DhcpError::PacketTooShort(len) => {
+                write!(f, "DHCP packet too short ({} bytes, min 240)", len)
+            }
             DhcpError::InvalidMagicCookie => write!(f, "Invalid DHCP magic cookie"),
             DhcpError::InvalidOptionLength => write!(f, "Invalid DHCP option length"),
         }
@@ -134,7 +136,7 @@ impl DhcpPacket {
         chaddr_raw.copy_from_slice(&data[28..34]);
         let chaddr = MacAddress(chaddr_raw);
 
-        if &data[236..240] != &DHCP_MAGIC_COOKIE {
+        if data[236..240] != DHCP_MAGIC_COOKIE {
             return Err(DhcpError::InvalidMagicCookie);
         }
 
@@ -343,7 +345,10 @@ mod tests {
         let parsed_offer = DhcpPacket::parse(&raw_offer).unwrap();
         assert_eq!(parsed_offer.msg_type, DhcpMessageType::Offer);
         assert_eq!(parsed_offer.yiaddr, Ipv4Address::new(192, 168, 1, 100));
-        assert_eq!(parsed_offer.server_id, Some(Ipv4Address::new(192, 168, 1, 1)));
+        assert_eq!(
+            parsed_offer.server_id,
+            Some(Ipv4Address::new(192, 168, 1, 1))
+        );
         assert_eq!(parsed_offer.lease_time, Some(86400));
     }
 }

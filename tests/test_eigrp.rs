@@ -1,4 +1,4 @@
-use toy_tcpip::eigrp::{EigrpMetric, EigrpPacket, EigrpTopologyTable, EIGRP_OPCODE_HELLO};
+use toy_tcpip::eigrp::{EIGRP_OPCODE_HELLO, EigrpMetric, EigrpPacket, EigrpTopologyTable};
 use toy_tcpip::ipv4::Ipv4Address;
 
 #[test]

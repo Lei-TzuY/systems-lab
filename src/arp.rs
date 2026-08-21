@@ -75,10 +75,14 @@ pub enum ArpError {
 impl fmt::Display for ArpError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ArpError::PacketTooShort(len) => write!(f, "ARP packet too short ({} bytes, min 28)", len),
+            ArpError::PacketTooShort(len) => {
+                write!(f, "ARP packet too short ({} bytes, min 28)", len)
+            }
             ArpError::InvalidHardwareType(h) => write!(f, "Unsupported hardware type: {}", h),
             ArpError::InvalidProtocolType(p) => write!(f, "Unsupported protocol type: 0x{:04x}", p),
-            ArpError::InvalidAddressLengths(h, p) => write!(f, "Invalid address lengths: hlen={}, plen={}", h, p),
+            ArpError::InvalidAddressLengths(h, p) => {
+                write!(f, "Invalid address lengths: hlen={}, plen={}", h, p)
+            }
         }
     }
 }

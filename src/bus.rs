@@ -4,7 +4,7 @@
 //! to exchange real Ethernet frames in a virtual switched environment.
 
 use crate::ethernet::{EthernetFrame, MacAddress};
-use crate::pcap::{PcapWriter, LINKTYPE_ETHERNET};
+use crate::pcap::{LINKTYPE_ETHERNET, PcapWriter};
 use crate::stack::NetStack;
 use std::collections::HashMap;
 
@@ -96,7 +96,7 @@ mod tests {
     use crate::arp::ArpPacket;
     use crate::ethernet::{ETHERTYPE_ARP, ETHERTYPE_IPV4};
     use crate::icmp::IcmpPacket;
-    use crate::ipv4::{Ipv4Address, Ipv4Packet, IP_PROTO_ICMP};
+    use crate::ipv4::{IP_PROTO_ICMP, Ipv4Address, Ipv4Packet};
     use crate::stack::NetStackConfig;
 
     #[test]

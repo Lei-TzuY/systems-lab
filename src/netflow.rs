@@ -59,8 +59,12 @@ pub enum NetflowError {
 impl fmt::Display for NetflowError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            NetflowError::PacketTooShort(l) => write!(f, "NetFlow packet too short ({} bytes, min 20)", l),
-            NetflowError::InvalidVersion(v) => write!(f, "Invalid NetFlow version: expected 9, found {}", v),
+            NetflowError::PacketTooShort(l) => {
+                write!(f, "NetFlow packet too short ({} bytes, min 20)", l)
+            }
+            NetflowError::InvalidVersion(v) => {
+                write!(f, "Invalid NetFlow version: expected 9, found {}", v)
+            }
             NetflowError::LengthMismatch => write!(f, "NetFlow FlowSet length mismatch"),
         }
     }
@@ -117,14 +121,35 @@ impl NetflowPacket {
                 let rec_size = 22;
                 let mut rec_offset = offset + 4;
                 while rec_offset + rec_size <= offset + flowset_len {
-                    let src_ip = Ipv4Address([data[rec_offset], data[rec_offset + 1], data[rec_offset + 2], data[rec_offset + 3]]);
-                    let dst_ip = Ipv4Address([data[rec_offset + 4], data[rec_offset + 5], data[rec_offset + 6], data[rec_offset + 7]]);
+                    let src_ip = Ipv4Address([
+                        data[rec_offset],
+                        data[rec_offset + 1],
+                        data[rec_offset + 2],
+                        data[rec_offset + 3],
+                    ]);
+                    let dst_ip = Ipv4Address([
+                        data[rec_offset + 4],
+                        data[rec_offset + 5],
+                        data[rec_offset + 6],
+                        data[rec_offset + 7],
+                    ]);
                     let src_port = u16::from_be_bytes([data[rec_offset + 8], data[rec_offset + 9]]);
-                    let dst_port = u16::from_be_bytes([data[rec_offset + 10], data[rec_offset + 11]]);
+                    let dst_port =
+                        u16::from_be_bytes([data[rec_offset + 10], data[rec_offset + 11]]);
                     let protocol = data[rec_offset + 12];
                     let tcp_flags = data[rec_offset + 13];
-                    let packets = u32::from_be_bytes([data[rec_offset + 14], data[rec_offset + 15], data[rec_offset + 16], data[rec_offset + 17]]);
-                    let bytes = u32::from_be_bytes([data[rec_offset + 18], data[rec_offset + 19], data[rec_offset + 20], data[rec_offset + 21]]);
+                    let packets = u32::from_be_bytes([
+                        data[rec_offset + 14],
+                        data[rec_offset + 15],
+                        data[rec_offset + 16],
+                        data[rec_offset + 17],
+                    ]);
+                    let bytes = u32::from_be_bytes([
+                        data[rec_offset + 18],
+                        data[rec_offset + 19],
+                        data[rec_offset + 20],
+                        data[rec_offset + 21],
+                    ]);
 
                     records.push(NetflowRecord {
                         src_ip,
@@ -261,7 +286,10 @@ impl NetflowFlowTable {
         bytes: u32,
         flags: u8,
     ) {
-        let entry = self.flows.entry((src_ip, dst_ip, src_p, dst_p, proto)).or_insert((0, 0, 0));
+        let entry = self
+            .flows
+            .entry((src_ip, dst_ip, src_p, dst_p, proto))
+            .or_insert((0, 0, 0));
         entry.0 += pkts;
         entry.1 += bytes;
         entry.2 |= flags;
@@ -269,7 +297,9 @@ impl NetflowFlowTable {
 
     pub fn export_records(&self) -> Vec<NetflowRecord> {
         let mut list = Vec::new();
-        for (&(src_ip, dst_ip, src_port, dst_port, protocol), &(packets, bytes, tcp_flags)) in &self.flows {
+        for (&(src_ip, dst_ip, src_port, dst_port, protocol), &(packets, bytes, tcp_flags)) in
+            &self.flows
+        {
             list.push(NetflowRecord {
                 src_ip,
                 dst_ip,

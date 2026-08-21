@@ -1,4 +1,7 @@
-use toy_tcpip::roce::{PfcPauseFrame, RdmaQueuePair, RocePacket, ETHERTYPE_FLOW_CONTROL, IB_OPCODE_RC_ACK, IB_OPCODE_RC_RDMA_WRITE_ONLY, IB_OPCODE_RC_SEND_ONLY, PFC_MULTICAST_MAC, PFC_OPCODE, ROCEV2_UDP_PORT};
+use toy_tcpip::roce::{
+    ETHERTYPE_FLOW_CONTROL, IB_OPCODE_RC_ACK, IB_OPCODE_RC_RDMA_WRITE_ONLY, IB_OPCODE_RC_SEND_ONLY,
+    PFC_MULTICAST_MAC, PFC_OPCODE, PfcPauseFrame, ROCEV2_UDP_PORT, RdmaQueuePair, RocePacket,
+};
 
 #[test]
 fn test_roce_send_rdma_write_and_ack() {
@@ -17,11 +20,17 @@ fn test_roce_send_rdma_write_and_ack() {
     assert_eq!(ROCEV2_UDP_PORT, 4791);
 
     let recv_ok = qp_server.receive_packet(&parsed_send);
-    assert_eq!(recv_ok, true);
+    assert!(recv_ok);
     assert_eq!(qp_server.expected_recv_psn, 101);
 
     // 2. RDMA Write with RETH header
-    let write_pkt = RocePacket::build_rdma_write(2002, 101, 0x7FFF_0000_1000, 0xAABBCCDD, b"Direct Memory Buffer Write");
+    let write_pkt = RocePacket::build_rdma_write(
+        2002,
+        101,
+        0x7FFF_0000_1000,
+        0xAABBCCDD,
+        b"Direct Memory Buffer Write",
+    );
     let raw_write = write_pkt.serialize();
 
     let parsed_write = RocePacket::parse(&raw_write).unwrap();

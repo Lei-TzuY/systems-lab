@@ -44,8 +44,12 @@ impl CqfEngine {
 
     /// Ingress: Enqueues an incoming frame into the active receiving cycle buffer
     pub fn enqueue(&mut self, id: u32, priority: u8, payload: Vec<u8>) {
-        let pkt = CqfPacket { id, priority, payload };
-        if self.current_cycle_index % 2 == 0 {
+        let pkt = CqfPacket {
+            id,
+            priority,
+            payload,
+        };
+        if self.current_cycle_index.is_multiple_of(2) {
             // In even cycle: Receive into buffer_even
             self.buffer_even.packets.push(pkt);
         } else {
@@ -59,7 +63,7 @@ impl CqfEngine {
         self.current_cycle_index = self.current_cycle_index.wrapping_add(1);
 
         // If new cycle is odd, we transmit frames accumulated in buffer_even during the previous even cycle
-        let tx_packets = if self.current_cycle_index % 2 != 0 {
+        let tx_packets = if !self.current_cycle_index.is_multiple_of(2) {
             std::mem::take(&mut self.buffer_even.packets)
         } else {
             // If new cycle is even, we transmit frames accumulated in buffer_odd during the previous odd cycle

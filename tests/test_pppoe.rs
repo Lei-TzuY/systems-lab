@@ -1,4 +1,4 @@
-use toy_tcpip::pppoe::{PppoePacket, PPPOE_CODE_PADI, PPPOE_CODE_SESSION_DATA, PPP_PROTO_IPV4};
+use toy_tcpip::pppoe::{PPP_PROTO_IPV4, PPPOE_CODE_PADI, PPPOE_CODE_SESSION_DATA, PppoePacket};
 
 #[test]
 fn test_pppoe_padi_discovery_stage() {

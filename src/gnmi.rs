@@ -149,7 +149,11 @@ impl GnmiServer {
         updates
     }
 
-    pub fn handle_subscribe(&self, path_query: &str, mode: GnmiSubscriptionMode) -> (GnmiSubscriptionMode, Vec<GnmiUpdate>) {
+    pub fn handle_subscribe(
+        &self,
+        path_query: &str,
+        mode: GnmiSubscriptionMode,
+    ) -> (GnmiSubscriptionMode, Vec<GnmiUpdate>) {
         let updates = self.get(path_query);
         (mode, updates)
     }
@@ -165,7 +169,8 @@ mod tests {
         let updates = server.get("/interfaces/interface[name=HundredGigE0/1]/state");
         assert_eq!(updates.len(), 4);
 
-        let octets = server.get("/interfaces/interface[name=HundredGigE0/1]/state/counters/in-octets");
+        let octets =
+            server.get("/interfaces/interface[name=HundredGigE0/1]/state/counters/in-octets");
         assert_eq!(octets.len(), 1);
         assert_eq!(octets[0].val, GnmiValue::UintVal(104857600));
     }
@@ -173,13 +178,14 @@ mod tests {
     #[test]
     fn test_gnmi_subscribe_stream_mode() {
         let server = GnmiServer::new();
-        let (mode, stream_updates) = server.handle_subscribe(
-            "/system/state/hostname",
-            GnmiSubscriptionMode::OnChange,
-        );
+        let (mode, stream_updates) =
+            server.handle_subscribe("/system/state/hostname", GnmiSubscriptionMode::OnChange);
 
         assert_eq!(mode, GnmiSubscriptionMode::OnChange);
         assert_eq!(stream_updates.len(), 1);
-        assert_eq!(stream_updates[0].val, GnmiValue::StringVal("switch-spine-01".to_string()));
+        assert_eq!(
+            stream_updates[0].val,
+            GnmiValue::StringVal("switch-spine-01".to_string())
+        );
     }
 }

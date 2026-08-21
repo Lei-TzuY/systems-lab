@@ -70,15 +70,42 @@ impl IpfixMessage {
             Some(IpfixTemplateRecord {
                 template_id: IPFIX_DEFAULT_TEMPLATE_ID,
                 fields: vec![
-                    IpfixFieldSpecifier { element_id: IE_SOURCE_IPV4_ADDRESS, field_length: 4 },
-                    IpfixFieldSpecifier { element_id: IE_DESTINATION_IPV4_ADDRESS, field_length: 4 },
-                    IpfixFieldSpecifier { element_id: IE_SOURCE_TRANSPORT_PORT, field_length: 2 },
-                    IpfixFieldSpecifier { element_id: IE_DESTINATION_TRANSPORT_PORT, field_length: 2 },
-                    IpfixFieldSpecifier { element_id: IE_PROTOCOL_IDENTIFIER, field_length: 1 },
-                    IpfixFieldSpecifier { element_id: IE_PACKET_DELTA_COUNT, field_length: 8 },
-                    IpfixFieldSpecifier { element_id: IE_OCTET_DELTA_COUNT, field_length: 8 },
-                    IpfixFieldSpecifier { element_id: IE_TCP_CONTROL_BITS, field_length: 2 },
-                    IpfixFieldSpecifier { element_id: IE_DOT1Q_VLAN_ID, field_length: 2 },
+                    IpfixFieldSpecifier {
+                        element_id: IE_SOURCE_IPV4_ADDRESS,
+                        field_length: 4,
+                    },
+                    IpfixFieldSpecifier {
+                        element_id: IE_DESTINATION_IPV4_ADDRESS,
+                        field_length: 4,
+                    },
+                    IpfixFieldSpecifier {
+                        element_id: IE_SOURCE_TRANSPORT_PORT,
+                        field_length: 2,
+                    },
+                    IpfixFieldSpecifier {
+                        element_id: IE_DESTINATION_TRANSPORT_PORT,
+                        field_length: 2,
+                    },
+                    IpfixFieldSpecifier {
+                        element_id: IE_PROTOCOL_IDENTIFIER,
+                        field_length: 1,
+                    },
+                    IpfixFieldSpecifier {
+                        element_id: IE_PACKET_DELTA_COUNT,
+                        field_length: 8,
+                    },
+                    IpfixFieldSpecifier {
+                        element_id: IE_OCTET_DELTA_COUNT,
+                        field_length: 8,
+                    },
+                    IpfixFieldSpecifier {
+                        element_id: IE_TCP_CONTROL_BITS,
+                        field_length: 2,
+                    },
+                    IpfixFieldSpecifier {
+                        element_id: IE_DOT1Q_VLAN_ID,
+                        field_length: 2,
+                    },
                 ],
             })
         } else {
@@ -187,31 +214,61 @@ impl IpfixMessage {
                     for _ in 0..f_count {
                         if f_off + 4 <= set_data.len() {
                             let elem = u16::from_be_bytes([set_data[f_off], set_data[f_off + 1]]);
-                            let flen = u16::from_be_bytes([set_data[f_off + 2], set_data[f_off + 3]]);
-                            fields.push(IpfixFieldSpecifier { element_id: elem, field_length: flen });
+                            let flen =
+                                u16::from_be_bytes([set_data[f_off + 2], set_data[f_off + 3]]);
+                            fields.push(IpfixFieldSpecifier {
+                                element_id: elem,
+                                field_length: flen,
+                            });
                             f_off += 4;
                         }
                     }
-                    template = Some(IpfixTemplateRecord { template_id: tid, fields });
+                    template = Some(IpfixTemplateRecord {
+                        template_id: tid,
+                        fields,
+                    });
                 }
             } else if set_id >= IPFIX_DEFAULT_TEMPLATE_ID {
                 // Record length for standard template = 4+4+2+2+1+8+8+2+2 = 33 bytes
                 let mut d_off = 0;
                 while d_off + 33 <= set_data.len() {
-                    let src_ip = Ipv4Address([set_data[d_off], set_data[d_off + 1], set_data[d_off + 2], set_data[d_off + 3]]);
-                    let dst_ip = Ipv4Address([set_data[d_off + 4], set_data[d_off + 5], set_data[d_off + 6], set_data[d_off + 7]]);
+                    let src_ip = Ipv4Address([
+                        set_data[d_off],
+                        set_data[d_off + 1],
+                        set_data[d_off + 2],
+                        set_data[d_off + 3],
+                    ]);
+                    let dst_ip = Ipv4Address([
+                        set_data[d_off + 4],
+                        set_data[d_off + 5],
+                        set_data[d_off + 6],
+                        set_data[d_off + 7],
+                    ]);
                     let src_port = u16::from_be_bytes([set_data[d_off + 8], set_data[d_off + 9]]);
                     let dst_port = u16::from_be_bytes([set_data[d_off + 10], set_data[d_off + 11]]);
                     let protocol = set_data[d_off + 12];
                     let packets = u64::from_be_bytes([
-                        set_data[d_off + 13], set_data[d_off + 14], set_data[d_off + 15], set_data[d_off + 16],
-                        set_data[d_off + 17], set_data[d_off + 18], set_data[d_off + 19], set_data[d_off + 20],
+                        set_data[d_off + 13],
+                        set_data[d_off + 14],
+                        set_data[d_off + 15],
+                        set_data[d_off + 16],
+                        set_data[d_off + 17],
+                        set_data[d_off + 18],
+                        set_data[d_off + 19],
+                        set_data[d_off + 20],
                     ]);
                     let octets = u64::from_be_bytes([
-                        set_data[d_off + 21], set_data[d_off + 22], set_data[d_off + 23], set_data[d_off + 24],
-                        set_data[d_off + 25], set_data[d_off + 26], set_data[d_off + 27], set_data[d_off + 28],
+                        set_data[d_off + 21],
+                        set_data[d_off + 22],
+                        set_data[d_off + 23],
+                        set_data[d_off + 24],
+                        set_data[d_off + 25],
+                        set_data[d_off + 26],
+                        set_data[d_off + 27],
+                        set_data[d_off + 28],
                     ]);
-                    let tcp_flags = u16::from_be_bytes([set_data[d_off + 29], set_data[d_off + 30]]);
+                    let tcp_flags =
+                        u16::from_be_bytes([set_data[d_off + 29], set_data[d_off + 30]]);
                     let vlan_id = u16::from_be_bytes([set_data[d_off + 31], set_data[d_off + 32]]);
 
                     flow_records.push(IpfixFlowRecord {
@@ -248,19 +305,17 @@ mod tests {
 
     #[test]
     fn test_ipfix_template_and_data_export_roundtrip() {
-        let flows = vec![
-            IpfixFlowRecord {
-                src_ip: Ipv4Address::new(10, 1, 1, 100),
-                dst_ip: Ipv4Address::new(10, 2, 2, 200),
-                src_port: 54321,
-                dst_port: 443,
-                protocol: 6,
-                packets: 1540,
-                octets: 1540000,
-                tcp_flags: 0x0018,
-                vlan_id: 100,
-            },
-        ];
+        let flows = vec![IpfixFlowRecord {
+            src_ip: Ipv4Address::new(10, 1, 1, 100),
+            dst_ip: Ipv4Address::new(10, 2, 2, 200),
+            src_port: 54321,
+            dst_port: 443,
+            protocol: 6,
+            packets: 1540,
+            octets: 1540000,
+            tcp_flags: 0x0018,
+            vlan_id: 100,
+        }];
 
         let msg = IpfixMessage::build_standard_flow_export(1700000000, 1, 101, &flows, true);
         let raw = msg.serialize();
@@ -272,7 +327,10 @@ mod tests {
         assert_eq!(parsed.observation_domain_id, 101);
         assert!(parsed.template.is_some());
         assert_eq!(parsed.flow_records.len(), 1);
-        assert_eq!(parsed.flow_records[0].src_ip, Ipv4Address::new(10, 1, 1, 100));
+        assert_eq!(
+            parsed.flow_records[0].src_ip,
+            Ipv4Address::new(10, 1, 1, 100)
+        );
         assert_eq!(parsed.flow_records[0].dst_port, 443);
         assert_eq!(parsed.flow_records[0].packets, 1540);
     }

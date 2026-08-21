@@ -44,7 +44,9 @@ impl fmt::Display for PimError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             PimError::PacketTooShort(l) => write!(f, "PIM packet too short ({} bytes, min 4)", l),
-            PimError::InvalidVersion(v) => write!(f, "Invalid PIM version: expected 2, found {}", v),
+            PimError::InvalidVersion(v) => {
+                write!(f, "Invalid PIM version: expected 2, found {}", v)
+            }
             PimError::InvalidChecksum => write!(f, "PIM header checksum verification failed"),
         }
     }
@@ -119,7 +121,11 @@ impl PimPacket {
         }
     }
 
-    pub fn build_join_group(upstream_neighbor: Ipv4Address, group: Ipv4Address, rp: Ipv4Address) -> Self {
+    pub fn build_join_group(
+        upstream_neighbor: Ipv4Address,
+        group: Ipv4Address,
+        rp: Ipv4Address,
+    ) -> Self {
         let mut payload = Vec::new();
         // Upstream Neighbor Unicast Address (Family 1 = IPv4)
         payload.push(1); // Addr Family IPv4

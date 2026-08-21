@@ -70,17 +70,26 @@ impl SaiSwitchAdapter {
     pub fn create_next_hop(&mut self, ip: Ipv4Address, mac: MacAddress, port_id: u64) -> u64 {
         let nh_id = self.next_id;
         self.next_id += 1;
-        self.next_hops.insert(nh_id, SaiNextHop {
-            id: nh_id,
-            ip,
-            mac,
-            port_id,
-        });
+        self.next_hops.insert(
+            nh_id,
+            SaiNextHop {
+                id: nh_id,
+                ip,
+                mac,
+                port_id,
+            },
+        );
         nh_id
     }
 
     /// SAI Route Create: Programs hardware Route entry mapped to NextHop object
-    pub fn create_route_entry(&mut self, vr_id: u64, destination: Ipv4Address, prefix_len: u8, next_hop_id: u64) -> u32 {
+    pub fn create_route_entry(
+        &mut self,
+        vr_id: u64,
+        destination: Ipv4Address,
+        prefix_len: u8,
+        next_hop_id: u64,
+    ) -> u32 {
         let entry = SaiRouteEntry {
             switch_id: self.switch_id,
             vr_id,
@@ -109,7 +118,11 @@ impl SaiSwitchAdapter {
             if entry.vr_id != vr_id {
                 continue;
             }
-            let mask = if entry.prefix_len == 0 { 0u32 } else { !0u32 << (32 - entry.prefix_len) };
+            let mask = if entry.prefix_len == 0 {
+                0u32
+            } else {
+                !0u32 << (32 - entry.prefix_len)
+            };
             if (ip.to_u32() & mask) == (entry.destination.to_u32() & mask) {
                 if let Some((_, best_len, _)) = best_match {
                     if entry.prefix_len > best_len {
@@ -153,7 +166,9 @@ mod tests {
             SAI_STATUS_SUCCESS
         );
 
-        let resolved_nh = adapter.lookup_route(0, Ipv4Address::new(10, 20, 30, 40)).unwrap();
+        let resolved_nh = adapter
+            .lookup_route(0, Ipv4Address::new(10, 20, 30, 40))
+            .unwrap();
         assert_eq!(resolved_nh.port_id, 1);
         assert_eq!(resolved_nh.ip, Ipv4Address::new(192, 168, 1, 1));
     }

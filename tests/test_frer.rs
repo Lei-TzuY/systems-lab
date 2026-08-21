@@ -1,5 +1,5 @@
 use toy_tcpip::ethernet::MacAddress;
-use toy_tcpip::frer::{FrerEngine, RTagFrame, ETHERTYPE_RTAG};
+use toy_tcpip::frer::{ETHERTYPE_RTAG, FrerEngine, RTagFrame};
 
 #[test]
 fn test_frer_rtag_frame_codec() {

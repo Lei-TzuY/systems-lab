@@ -37,9 +37,17 @@ pub enum GeneveError {
 impl fmt::Display for GeneveError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            GeneveError::PacketTooShort(l) => write!(f, "Geneve packet too short ({} bytes, min 8)", l),
-            GeneveError::InvalidVersion(v) => write!(f, "Invalid Geneve version: expected 0, found {}", v),
-            GeneveError::OptionLengthMismatch(exp, act) => write!(f, "Geneve option length mismatch: expected {}, buffer has {}", exp, act),
+            GeneveError::PacketTooShort(l) => {
+                write!(f, "Geneve packet too short ({} bytes, min 8)", l)
+            }
+            GeneveError::InvalidVersion(v) => {
+                write!(f, "Invalid Geneve version: expected 0, found {}", v)
+            }
+            GeneveError::OptionLengthMismatch(exp, act) => write!(
+                f,
+                "Geneve option length mismatch: expected {}, buffer has {}",
+                exp, act
+            ),
         }
     }
 }
@@ -62,7 +70,10 @@ impl GenevePacket {
         }
 
         if data.len() < GENEVE_BASE_HEADER_LEN + opt_len_bytes {
-            return Err(GeneveError::OptionLengthMismatch(GENEVE_BASE_HEADER_LEN + opt_len_bytes, data.len()));
+            return Err(GeneveError::OptionLengthMismatch(
+                GENEVE_BASE_HEADER_LEN + opt_len_bytes,
+                data.len(),
+            ));
         }
 
         let b1 = data[1];
@@ -120,7 +131,11 @@ impl GenevePacket {
         let mut options_bytes = Vec::new();
         for opt in &self.options {
             options_bytes.extend_from_slice(&opt.class.to_be_bytes());
-            let raw_type = if opt.critical { opt.opt_type | 0x80 } else { opt.opt_type };
+            let raw_type = if opt.critical {
+                opt.opt_type | 0x80
+            } else {
+                opt.opt_type
+            };
             options_bytes.push(raw_type);
             let opt_data_words = (opt.data.len() / 4) as u8;
             options_bytes.push(opt_data_words & 0x1F);
@@ -132,8 +147,12 @@ impl GenevePacket {
 
         buf[0] = (self.version << 6) | (opt_len_words & 0x3F);
         let mut b1 = 0u8;
-        if self.oam { b1 |= 0x80; }
-        if self.critical { b1 |= 0x40; }
+        if self.oam {
+            b1 |= 0x80;
+        }
+        if self.critical {
+            b1 |= 0x40;
+        }
         buf[1] = b1;
 
         buf[2..4].copy_from_slice(&self.protocol_type.to_be_bytes());
@@ -142,7 +161,8 @@ impl GenevePacket {
         buf[6] = (self.vni & 0xFF) as u8;
         buf[7] = 0x00; // Reserved
 
-        buf[GENEVE_BASE_HEADER_LEN..GENEVE_BASE_HEADER_LEN + options_bytes.len()].copy_from_slice(&options_bytes);
+        buf[GENEVE_BASE_HEADER_LEN..GENEVE_BASE_HEADER_LEN + options_bytes.len()]
+            .copy_from_slice(&options_bytes);
         buf[GENEVE_BASE_HEADER_LEN + options_bytes.len()..].copy_from_slice(&self.payload);
 
         buf
@@ -168,7 +188,9 @@ mod tests {
 
     #[test]
     fn test_geneve_encapsulation_roundtrip() {
-        let inner_eth = vec![0x00, 0x50, 0x56, 0x11, 0x22, 0x33, 0x00, 0x0C, 0x29, 0x44, 0x55, 0x66, 0x08, 0x00];
+        let inner_eth = vec![
+            0x00, 0x50, 0x56, 0x11, 0x22, 0x33, 0x00, 0x0C, 0x29, 0x44, 0x55, 0x66, 0x08, 0x00,
+        ];
         let encap = GenevePacket::encapsulate_eth(100200, &inner_eth);
 
         assert_eq!(encap.len(), GENEVE_BASE_HEADER_LEN + inner_eth.len());

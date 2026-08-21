@@ -3,7 +3,7 @@
 //! Handles splitting oversized IPv4 packets into $\le \text{MTU}$ fragments
 //! (aligned to 8-byte boundaries) and reassembling out-of-order IP fragments.
 
-use crate::ipv4::{Ipv4Address, IPV4_MIN_HEADER_LEN};
+use crate::ipv4::{IPV4_MIN_HEADER_LEN, Ipv4Address};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

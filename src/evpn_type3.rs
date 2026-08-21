@@ -12,9 +12,9 @@ pub const PMSI_TUNNEL_TYPE_INGRESS_REPLICATION: u8 = 6;
 /// PMSI Tunnel Attribute (RFC 6514 / RFC 7432)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PmsiTunnelAttribute {
-    pub flags: u8,                  // e.g. Leaf Information Required (0x01)
-    pub tunnel_type: u8,            // 0x06 = Ingress Replication (IR)
-    pub mpls_label_or_vni: u32,     // 24-bit VNI or 20-bit MPLS label
+    pub flags: u8,                    // e.g. Leaf Information Required (0x01)
+    pub tunnel_type: u8,              // 0x06 = Ingress Replication (IR)
+    pub mpls_label_or_vni: u32,       // 24-bit VNI or 20-bit MPLS label
     pub tunnel_endpoint: Ipv4Address, // Tunnel Egress IP
 }
 
@@ -129,7 +129,11 @@ impl EvpnBumFloodingTree {
     }
 
     pub fn add_route(&mut self, route: EvpnType3Route) {
-        self.routes.retain(|r| !(r.rd == route.rd && r.eth_tag == route.eth_tag && r.originating_router_ip == route.originating_router_ip));
+        self.routes.retain(|r| {
+            !(r.rd == route.rd
+                && r.eth_tag == route.eth_tag
+                && r.originating_router_ip == route.originating_router_ip)
+        });
         self.routes.push(route);
     }
 
@@ -150,12 +154,7 @@ mod tests {
     #[test]
     fn test_evpn_type3_serialization_and_parsing() {
         let rd = RouteDistinguisher::new(Ipv4Address::new(192, 0, 2, 1), 100);
-        let route = EvpnType3Route::new_ipv4(
-            rd,
-            0,
-            Ipv4Address::new(192, 0, 2, 1),
-            10010,
-        );
+        let route = EvpnType3Route::new_ipv4(rd, 0, Ipv4Address::new(192, 0, 2, 1), 10010);
 
         let bytes = route.serialize();
         let parsed = EvpnType3Route::parse(&bytes).unwrap();

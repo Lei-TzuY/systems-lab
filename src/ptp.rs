@@ -24,7 +24,10 @@ pub struct PtpTimestamp {
 
 impl PtpTimestamp {
     pub fn new(seconds: u64, nanoseconds: u32) -> Self {
-        PtpTimestamp { seconds, nanoseconds }
+        PtpTimestamp {
+            seconds,
+            nanoseconds,
+        }
     }
 
     pub fn to_total_nanoseconds(&self) -> i128 {
@@ -159,7 +162,9 @@ impl PtpPacket {
         let message_length = u16::from_be_bytes([data[2], data[3]]);
         let domain_number = data[4];
         let flags = u16::from_be_bytes([data[6], data[7]]);
-        let correction_field = i64::from_be_bytes([data[8], data[9], data[10], data[11], data[12], data[13], data[14], data[15]]);
+        let correction_field = i64::from_be_bytes([
+            data[8], data[9], data[10], data[11], data[12], data[13], data[14], data[15],
+        ]);
 
         let mut clock_identity = [0u8; 8];
         clock_identity.copy_from_slice(&data[20..28]);
@@ -189,8 +194,16 @@ impl PtpPacket {
             let mut sec_buf = [0u8; 8];
             sec_buf[2..8].copy_from_slice(&data[offset..offset + 6]);
             let seconds = u64::from_be_bytes(sec_buf);
-            let nanoseconds = u32::from_be_bytes([data[offset + 6], data[offset + 7], data[offset + 8], data[offset + 9]]);
-            origin_timestamp = Some(PtpTimestamp { seconds, nanoseconds });
+            let nanoseconds = u32::from_be_bytes([
+                data[offset + 6],
+                data[offset + 7],
+                data[offset + 8],
+                data[offset + 9],
+            ]);
+            origin_timestamp = Some(PtpTimestamp {
+                seconds,
+                nanoseconds,
+            });
             offset += 10;
         }
 
@@ -211,7 +224,12 @@ impl PtpPacket {
 /// Calculate PTP Offset and Mean Path Delay in nanoseconds:
 /// Offset: ((t2 - t1) - (t4 - t3)) / 2
 /// Mean Path Delay: ((t2 - t1) + (t4 - t3)) / 2
-pub fn calculate_ptp_offset_and_delay(t1: PtpTimestamp, t2: PtpTimestamp, t3: PtpTimestamp, t4: PtpTimestamp) -> (i64, i64) {
+pub fn calculate_ptp_offset_and_delay(
+    t1: PtpTimestamp,
+    t2: PtpTimestamp,
+    t3: PtpTimestamp,
+    t4: PtpTimestamp,
+) -> (i64, i64) {
     let t1_ns = t1.to_total_nanoseconds();
     let t2_ns = t2.to_total_nanoseconds();
     let t3_ns = t3.to_total_nanoseconds();

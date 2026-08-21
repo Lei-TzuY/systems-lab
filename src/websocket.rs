@@ -31,9 +31,18 @@ pub enum WebSocketError {
 impl fmt::Display for WebSocketError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            WebSocketError::FrameTooShort(len) => write!(f, "WebSocket frame too short ({} bytes, min 2)", len),
-            WebSocketError::InvalidLength { specified, available } => {
-                write!(f, "WebSocket payload length {} exceeds available buffer {}", specified, available)
+            WebSocketError::FrameTooShort(len) => {
+                write!(f, "WebSocket frame too short ({} bytes, min 2)", len)
+            }
+            WebSocketError::InvalidLength {
+                specified,
+                available,
+            } => {
+                write!(
+                    f,
+                    "WebSocket payload length {} exceeds available buffer {}",
+                    specified, available
+                )
             }
         }
     }
@@ -85,7 +94,12 @@ impl WebSocketFrame {
             if data.len() < offset + 4 {
                 return Err(WebSocketError::FrameTooShort(data.len()));
             }
-            let key = [data[offset], data[offset + 1], data[offset + 2], data[offset + 3]];
+            let key = [
+                data[offset],
+                data[offset + 1],
+                data[offset + 2],
+                data[offset + 3],
+            ];
             offset += 4;
             Some(key)
         } else {

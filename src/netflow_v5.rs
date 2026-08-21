@@ -11,12 +11,12 @@ pub const NETFLOW_V5_RECORD_LEN: usize = 48;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NetflowV5Header {
-    pub version: u16,        // Always 5
-    pub count: u16,          // Number of flow records in packet (1..30)
-    pub sys_uptime_ms: u32,  // Router uptime in ms
-    pub unix_secs: u32,      // Current seconds since epoch
-    pub unix_nsecs: u32,     // Residual nanoseconds
-    pub flow_sequence: u32,  // Sequence counter of total flows exported
+    pub version: u16,       // Always 5
+    pub count: u16,         // Number of flow records in packet (1..30)
+    pub sys_uptime_ms: u32, // Router uptime in ms
+    pub unix_secs: u32,     // Current seconds since epoch
+    pub unix_nsecs: u32,    // Residual nanoseconds
+    pub flow_sequence: u32, // Sequence counter of total flows exported
     pub engine_type: u8,
     pub engine_id: u8,
     pub sampling_interval: u16,
@@ -56,7 +56,9 @@ impl NetflowV5Packet {
     }
 
     pub fn serialize(&self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(NETFLOW_V5_HEADER_LEN + (self.records.len() * NETFLOW_V5_RECORD_LEN));
+        let mut buf = Vec::with_capacity(
+            NETFLOW_V5_HEADER_LEN + (self.records.len() * NETFLOW_V5_RECORD_LEN),
+        );
 
         // 24-byte Header
         buf.extend_from_slice(&self.header.version.to_be_bytes());
@@ -135,15 +137,50 @@ impl NetflowV5Packet {
         let mut offset = NETFLOW_V5_HEADER_LEN;
 
         for _ in 0..count {
-            let src_addr = Ipv4Address::new(data[offset], data[offset + 1], data[offset + 2], data[offset + 3]);
-            let dst_addr = Ipv4Address::new(data[offset + 4], data[offset + 5], data[offset + 6], data[offset + 7]);
-            let next_hop = Ipv4Address::new(data[offset + 8], data[offset + 9], data[offset + 10], data[offset + 11]);
+            let src_addr = Ipv4Address::new(
+                data[offset],
+                data[offset + 1],
+                data[offset + 2],
+                data[offset + 3],
+            );
+            let dst_addr = Ipv4Address::new(
+                data[offset + 4],
+                data[offset + 5],
+                data[offset + 6],
+                data[offset + 7],
+            );
+            let next_hop = Ipv4Address::new(
+                data[offset + 8],
+                data[offset + 9],
+                data[offset + 10],
+                data[offset + 11],
+            );
             let input_ifindex = u16::from_be_bytes([data[offset + 12], data[offset + 13]]);
             let output_ifindex = u16::from_be_bytes([data[offset + 14], data[offset + 15]]);
-            let packet_count = u32::from_be_bytes([data[offset + 16], data[offset + 17], data[offset + 18], data[offset + 19]]);
-            let octet_count = u32::from_be_bytes([data[offset + 20], data[offset + 21], data[offset + 22], data[offset + 23]]);
-            let first_uptime_ms = u32::from_be_bytes([data[offset + 24], data[offset + 25], data[offset + 26], data[offset + 27]]);
-            let last_uptime_ms = u32::from_be_bytes([data[offset + 28], data[offset + 29], data[offset + 30], data[offset + 31]]);
+            let packet_count = u32::from_be_bytes([
+                data[offset + 16],
+                data[offset + 17],
+                data[offset + 18],
+                data[offset + 19],
+            ]);
+            let octet_count = u32::from_be_bytes([
+                data[offset + 20],
+                data[offset + 21],
+                data[offset + 22],
+                data[offset + 23],
+            ]);
+            let first_uptime_ms = u32::from_be_bytes([
+                data[offset + 24],
+                data[offset + 25],
+                data[offset + 26],
+                data[offset + 27],
+            ]);
+            let last_uptime_ms = u32::from_be_bytes([
+                data[offset + 28],
+                data[offset + 29],
+                data[offset + 30],
+                data[offset + 31],
+            ]);
             let src_port = u16::from_be_bytes([data[offset + 32], data[offset + 33]]);
             let dst_port = u16::from_be_bytes([data[offset + 34], data[offset + 35]]);
             let tcp_flags = data[offset + 37];

@@ -35,7 +35,10 @@ impl TimeAwareShaper {
 
     /// Adds a scheduled slot entry to the Gate Control List (GCL)
     pub fn add_entry(&mut self, gate_states: u8, duration_us: u32) {
-        self.gcl.push(GclEntry { gate_states, duration_us });
+        self.gcl.push(GclEntry {
+            gate_states,
+            duration_us,
+        });
         self.cycle_time_us += duration_us;
     }
 

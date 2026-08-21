@@ -1,5 +1,8 @@
 use std::str::FromStr;
-use toy_tcpip::flowspec::{FlowspecAction, FlowspecDecision, FlowspecEngine, FlowspecMatch, FlowspecRule, BGP_SAFI_FLOWSPEC};
+use toy_tcpip::flowspec::{
+    BGP_SAFI_FLOWSPEC, FlowspecAction, FlowspecDecision, FlowspecEngine, FlowspecMatch,
+    FlowspecRule,
+};
 use toy_tcpip::ipv4::Ipv4Address;
 
 #[test]
@@ -70,7 +73,10 @@ fn test_flowspec_constants_and_ddos_filtering() {
         Some(443),
         None,
     );
-    assert_eq!(res2, FlowspecDecision::Redirect(Ipv4Address::new(10, 255, 255, 1)));
+    assert_eq!(
+        res2,
+        FlowspecDecision::Redirect(Ipv4Address::new(10, 255, 255, 1))
+    );
 
     // Evaluate SIP VoIP traffic
     let res3 = engine.evaluate(
@@ -112,6 +118,6 @@ fn test_flowspec_serialization_and_display() {
 
     let engine = FlowspecEngine::new();
     let bytes = engine.serialize_rule(&rule);
-    assert_eq!(bytes.is_empty(), false);
+    assert!(!bytes.is_empty());
     assert_eq!(format!("{}", rule.action), "RATE-LIMIT (500000 bps)");
 }

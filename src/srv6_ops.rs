@@ -11,9 +11,14 @@ pub enum Srv6Behavior {
     /// End: Standard SRv6 Transit Segment (Updates DA to next SID and forwards)
     End,
     /// End.X: Endpoint with Layer-3 Adjacency Cross-Connect
-    EndX { next_hop_ip: Ipv6Address, out_if: String },
+    EndX {
+        next_hop_ip: Ipv6Address,
+        out_if: String,
+    },
     /// End.DX4: Decapsulate outer IPv6 header and forward inner IPv4 packet to next-hop
-    EndDx4 { next_hop_ipv4: crate::ipv4::Ipv4Address },
+    EndDx4 {
+        next_hop_ipv4: crate::ipv4::Ipv4Address,
+    },
     /// End.DX6: Decapsulate outer IPv6 header and forward inner IPv6 packet to next-hop
     EndDx6 { next_hop_ipv6: Ipv6Address },
     /// End.DT4: Decapsulate outer IPv6 header and lookup inner IPv4 in VRF table
@@ -87,7 +92,9 @@ impl Srv6Engine {
                     srh.segments_left -= 1;
                     let next_idx = srh.segments_left as usize;
                     if next_idx >= srh.segment_list.len() {
-                        return Srv6ExecutionResult::Drop("Segments left out of bounds".to_string());
+                        return Srv6ExecutionResult::Drop(
+                            "Segments left out of bounds".to_string(),
+                        );
                     }
                     let next_sid = srh.segment_list[next_idx];
                     Srv6ExecutionResult::ForwardNextSid {
@@ -95,7 +102,10 @@ impl Srv6Engine {
                         updated_srh: srh,
                     }
                 }
-                Srv6Behavior::EndX { next_hop_ip, out_if } => {
+                Srv6Behavior::EndX {
+                    next_hop_ip,
+                    out_if,
+                } => {
                     if srh.segments_left > 0 {
                         srh.segments_left -= 1;
                         let next_idx = srh.segments_left as usize;
@@ -118,30 +128,22 @@ impl Srv6Engine {
                         payload: inner_payload.to_vec(),
                     }
                 }
-                Srv6Behavior::EndDx6 { .. } => {
-                    Srv6ExecutionResult::DecapIpv6 {
-                        vrf_id: None,
-                        payload: inner_payload.to_vec(),
-                    }
-                }
-                Srv6Behavior::EndDt4 { vrf_id } => {
-                    Srv6ExecutionResult::DecapIpv4 {
-                        vrf_id: Some(*vrf_id),
-                        payload: inner_payload.to_vec(),
-                    }
-                }
-                Srv6Behavior::EndDt6 { vrf_id } => {
-                    Srv6ExecutionResult::DecapIpv6 {
-                        vrf_id: Some(*vrf_id),
-                        payload: inner_payload.to_vec(),
-                    }
-                }
-                Srv6Behavior::EndDx2 { out_if } => {
-                    Srv6ExecutionResult::DecapEthernet {
-                        out_if: out_if.clone(),
-                        frame: inner_payload.to_vec(),
-                    }
-                }
+                Srv6Behavior::EndDx6 { .. } => Srv6ExecutionResult::DecapIpv6 {
+                    vrf_id: None,
+                    payload: inner_payload.to_vec(),
+                },
+                Srv6Behavior::EndDt4 { vrf_id } => Srv6ExecutionResult::DecapIpv4 {
+                    vrf_id: Some(*vrf_id),
+                    payload: inner_payload.to_vec(),
+                },
+                Srv6Behavior::EndDt6 { vrf_id } => Srv6ExecutionResult::DecapIpv6 {
+                    vrf_id: Some(*vrf_id),
+                    payload: inner_payload.to_vec(),
+                },
+                Srv6Behavior::EndDx2 { out_if } => Srv6ExecutionResult::DecapEthernet {
+                    out_if: out_if.clone(),
+                    frame: inner_payload.to_vec(),
+                },
             }
         } else {
             Srv6ExecutionResult::Drop("SID not in My-SID Table".to_string())
@@ -169,7 +171,10 @@ mod tests {
         let res1 = engine.process_srv6_packet(sid_transit, srh, b"Inner Payload");
 
         match res1 {
-            Srv6ExecutionResult::ForwardNextSid { next_sid, updated_srh } => {
+            Srv6ExecutionResult::ForwardNextSid {
+                next_sid,
+                updated_srh,
+            } => {
                 assert_eq!(next_sid, sid_egress);
                 assert_eq!(updated_srh.segments_left, 0);
             }

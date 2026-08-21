@@ -57,7 +57,9 @@ impl FromStr for MacAddress {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let parts: Vec<&str> = s.split(':').collect();
         if parts.len() != 6 {
-            return Err("Invalid MAC address format (expected 6 colon-separated hex bytes)".to_string());
+            return Err(
+                "Invalid MAC address format (expected 6 colon-separated hex bytes)".to_string(),
+            );
         }
         let mut bytes = [0u8; 6];
         for (i, p) in parts.iter().enumerate() {

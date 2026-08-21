@@ -1,11 +1,20 @@
 use toy_tcpip::ipv4::Ipv4Address;
-use toy_tcpip::radius::{RadiusPacket, RADIUS_ATTR_USER_NAME, RADIUS_CODE_ACCESS_ACCEPT, RADIUS_CODE_ACCESS_REQUEST};
+use toy_tcpip::radius::{
+    RADIUS_ATTR_USER_NAME, RADIUS_CODE_ACCESS_ACCEPT, RADIUS_CODE_ACCESS_REQUEST, RadiusPacket,
+};
 
 #[test]
 fn test_radius_access_request_and_password_obfuscation() {
     let auth = [0x99; 16];
     let secret = b"mysecretkey";
-    let req = RadiusPacket::build_access_request(42, auth, "bob", "password123", secret, Ipv4Address::new(192, 168, 1, 1));
+    let req = RadiusPacket::build_access_request(
+        42,
+        auth,
+        "bob",
+        "password123",
+        secret,
+        Ipv4Address::new(192, 168, 1, 1),
+    );
     let raw = req.serialize();
 
     let parsed = RadiusPacket::parse(&raw).unwrap();

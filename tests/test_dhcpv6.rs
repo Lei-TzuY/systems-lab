@@ -1,5 +1,8 @@
 use std::str::FromStr;
-use toy_tcpip::dhcpv6::{Dhcpv6Message, Dhcpv6Server, DHCPV6_CLIENT_PORT, DHCPV6_MSG_ADVERTISE, DHCPV6_MSG_SOLICIT, DHCPV6_SERVER_PORT};
+use toy_tcpip::dhcpv6::{
+    DHCPV6_CLIENT_PORT, DHCPV6_MSG_ADVERTISE, DHCPV6_MSG_SOLICIT, DHCPV6_SERVER_PORT,
+    Dhcpv6Message, Dhcpv6Server,
+};
 use toy_tcpip::ipv6::Ipv6Address;
 
 #[test]

@@ -90,40 +90,40 @@ impl FlowspecEngine {
         for rule in &self.rules {
             let m = &rule.match_fields;
 
-            if let Some((d_ip, d_mask)) = m.dst_prefix {
-                if !matches_cidr(dst_ip, d_ip, d_mask) {
-                    continue;
-                }
+            if let Some((d_ip, d_mask)) = m.dst_prefix
+                && !matches_cidr(dst_ip, d_ip, d_mask)
+            {
+                continue;
             }
 
-            if let Some((s_ip, s_mask)) = m.src_prefix {
-                if !matches_cidr(src_ip, s_ip, s_mask) {
-                    continue;
-                }
+            if let Some((s_ip, s_mask)) = m.src_prefix
+                && !matches_cidr(src_ip, s_ip, s_mask)
+            {
+                continue;
             }
 
-            if let Some(proto) = m.ip_protocol {
-                if proto != protocol {
-                    continue;
-                }
+            if let Some(proto) = m.ip_protocol
+                && proto != protocol
+            {
+                continue;
             }
 
-            if let Some(dp) = m.dst_port {
-                if dst_port != Some(dp) {
-                    continue;
-                }
+            if let Some(dp) = m.dst_port
+                && dst_port != Some(dp)
+            {
+                continue;
             }
 
-            if let Some(sp) = m.src_port {
-                if src_port != Some(sp) {
-                    continue;
-                }
+            if let Some(sp) = m.src_port
+                && src_port != Some(sp)
+            {
+                continue;
             }
 
-            if let Some(flags) = m.tcp_flags {
-                if tcp_flags != Some(flags) {
-                    continue;
-                }
+            if let Some(flags) = m.tcp_flags
+                && tcp_flags != Some(flags)
+            {
+                continue;
             }
 
             // Match succeeded, return action decision
@@ -145,7 +145,7 @@ impl FlowspecEngine {
         if let Some((dst, mask)) = rule.match_fields.dst_prefix {
             buf.push(FLOWSPEC_TYPE_DST_PREFIX);
             buf.push(mask);
-            let bytes_to_write = (mask as usize + 7) / 8;
+            let bytes_to_write = (mask as usize).div_ceil(8);
             buf.extend_from_slice(&dst.0[..bytes_to_write]);
         }
 
@@ -153,7 +153,7 @@ impl FlowspecEngine {
         if let Some((src, mask)) = rule.match_fields.src_prefix {
             buf.push(FLOWSPEC_TYPE_SRC_PREFIX);
             buf.push(mask);
-            let bytes_to_write = (mask as usize + 7) / 8;
+            let bytes_to_write = (mask as usize).div_ceil(8);
             buf.extend_from_slice(&src.0[..bytes_to_write]);
         }
 

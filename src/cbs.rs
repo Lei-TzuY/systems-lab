@@ -7,13 +7,13 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreditBasedShaper {
     pub class_name: String,
-    pub idle_slope_bps: i64,       // Rate credit increases when waiting (bps)
-    pub send_slope_bps: i64,       // Rate credit decreases when transmitting (bps)
+    pub idle_slope_bps: i64, // Rate credit increases when waiting (bps)
+    pub send_slope_bps: i64, // Rate credit decreases when transmitting (bps)
     pub port_transmit_rate_bps: i64, // Physical port speed (e.g. 1 Gbps)
-    pub max_credit_bits: i64,      // Upper credit bound (prevents excessive burst)
-    pub min_credit_bits: i64,      // Lower credit bound
-    pub current_credit_bits: i64,  // Current credit in bits (signed)
-    pub last_update_time_us: u64,  // Timestamp of last update (microseconds)
+    pub max_credit_bits: i64, // Upper credit bound (prevents excessive burst)
+    pub min_credit_bits: i64, // Lower credit bound
+    pub current_credit_bits: i64, // Current credit in bits (signed)
+    pub last_update_time_us: u64, // Timestamp of last update (microseconds)
     pub is_transmitting: bool,
     pub has_queued_frames: bool,
 }
@@ -26,8 +26,10 @@ impl CreditBasedShaper {
         max_interference_frame_bytes: usize,
     ) -> Self {
         let send_slope_bps = idle_slope_bps - port_rate_bps; // Negative
-        let max_credit_bits = ((max_interference_frame_bytes as i64) * 8 * idle_slope_bps) / port_rate_bps;
-        let min_credit_bits = ((max_interference_frame_bytes as i64) * 8 * send_slope_bps) / port_rate_bps;
+        let max_credit_bits =
+            ((max_interference_frame_bytes as i64) * 8 * idle_slope_bps) / port_rate_bps;
+        let min_credit_bits =
+            ((max_interference_frame_bytes as i64) * 8 * send_slope_bps) / port_rate_bps;
 
         CreditBasedShaper {
             class_name: class_name.to_string(),
@@ -127,11 +129,11 @@ mod tests {
     #[test]
     fn test_cbs_credit_accumulation_and_transmission_cycle() {
         let mut cbs = CreditBasedShaper::new("Class-A", 100_000_000, 1_000_000_000, 1500);
-        
+
         // 1. Frame arrives at t=100µs, queue waiting
         cbs.advance_time(100);
         cbs.has_queued_frames = true;
-        
+
         // Advance 100µs while waiting -> credit accumulates: 100_000_000 * 100 / 1_000_000 = 10,000 bits
         cbs.advance_time(200);
         assert!(cbs.current_credit_bits > 0);

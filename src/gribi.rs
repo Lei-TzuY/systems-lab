@@ -71,7 +71,8 @@ impl GribiAftTable {
 
     /// Injects or modifies an IPv4 prefix route entry
     pub fn set_ipv4_entry(&mut self, entry: GribiIpv4Entry) {
-        self.ipv4_entries.insert((entry.prefix, entry.prefix_len), entry);
+        self.ipv4_entries
+            .insert((entry.prefix, entry.prefix_len), entry);
         self.programmed_operations_count += 1;
     }
 
@@ -101,12 +102,11 @@ impl GribiAftTable {
             }
         }
 
-        if let Some((entry, _)) = best_match {
-            if let Some(nhg) = self.next_hop_groups.get(&entry.next_hop_group_id) {
-                if let Some(&first_nh_id) = nhg.next_hop_ids.first() {
-                    return self.next_hops.get(&first_nh_id);
-                }
-            }
+        if let Some((entry, _)) = best_match
+            && let Some(nhg) = self.next_hop_groups.get(&entry.next_hop_group_id)
+            && let Some(&first_nh_id) = nhg.next_hop_ids.first()
+        {
+            return self.next_hops.get(&first_nh_id);
         }
         None
     }

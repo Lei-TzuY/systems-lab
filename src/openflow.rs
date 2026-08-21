@@ -45,7 +45,7 @@ pub struct OfpMatch {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OfpAction {
-    Output(u32), // port number
+    Output(u32),  // port number
     SetVlan(u16), // VLAN ID
     Drop,
 }
@@ -61,11 +61,21 @@ pub struct OfpFlowEntry {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OfpMessage {
-    Hello { version_bitmap: u32 },
-    EchoRequest { data: Vec<u8> },
-    EchoReply { data: Vec<u8> },
+    Hello {
+        version_bitmap: u32,
+    },
+    EchoRequest {
+        data: Vec<u8>,
+    },
+    EchoReply {
+        data: Vec<u8>,
+    },
     FeaturesRequest,
-    FeaturesReply { datapath_id: u64, n_buffers: u32, n_tables: u8 },
+    FeaturesReply {
+        datapath_id: u64,
+        n_buffers: u32,
+        n_tables: u8,
+    },
     FlowMod {
         command: u8,
         priority: u16,
@@ -97,7 +107,9 @@ impl fmt::Display for OfpError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             OfpError::PacketTooShort(l) => write!(f, "OpenFlow message too short ({} bytes)", l),
-            OfpError::UnsupportedVersion(v) => write!(f, "Unsupported OpenFlow version: 0x{:02X}", v),
+            OfpError::UnsupportedVersion(v) => {
+                write!(f, "Unsupported OpenFlow version: 0x{:02X}", v)
+            }
             OfpError::InvalidLength => write!(f, "Invalid OpenFlow message length"),
         }
     }
@@ -107,15 +119,15 @@ impl std::error::Error for OfpError {}
 
 impl OfpMatch {
     pub fn matches(&self, in_port: u32, eth_type: u16, ip_dst: Option<Ipv4Address>) -> bool {
-        if let Some(p) = self.in_port {
-            if p != in_port {
-                return false;
-            }
+        if let Some(p) = self.in_port
+            && p != in_port
+        {
+            return false;
         }
-        if let Some(et) = self.eth_type {
-            if et != eth_type {
-                return false;
-            }
+        if let Some(et) = self.eth_type
+            && et != eth_type
+        {
+            return false;
         }
         if let Some(target_dst) = self.ip_dst {
             if let Some(dst) = ip_dst {
@@ -137,7 +149,9 @@ pub struct OfpFlowTable {
 
 impl OfpFlowTable {
     pub fn new() -> Self {
-        OfpFlowTable { entries: Vec::new() }
+        OfpFlowTable {
+            entries: Vec::new(),
+        }
     }
 
     pub fn add_entry(&mut self, priority: u16, match_fields: OfpMatch, actions: Vec<OfpAction>) {
@@ -152,7 +166,13 @@ impl OfpFlowTable {
         self.entries.sort_by(|a, b| b.priority.cmp(&a.priority));
     }
 
-    pub fn lookup_and_execute(&mut self, in_port: u32, eth_type: u16, ip_dst: Option<Ipv4Address>, pkt_len: usize) -> Option<Vec<OfpAction>> {
+    pub fn lookup_and_execute(
+        &mut self,
+        in_port: u32,
+        eth_type: u16,
+        ip_dst: Option<Ipv4Address>,
+        pkt_len: usize,
+    ) -> Option<Vec<OfpAction>> {
         for entry in &mut self.entries {
             if entry.match_fields.matches(in_port, eth_type, ip_dst) {
                 entry.packet_count += 1;
@@ -172,7 +192,12 @@ impl OfpMessage {
             length: 16,
             xid,
         };
-        (hdr, OfpMessage::Hello { version_bitmap: 0x00000010 })
+        (
+            hdr,
+            OfpMessage::Hello {
+                version_bitmap: 0x00000010,
+            },
+        )
     }
 
     pub fn build_features_reply(xid: u32, datapath_id: u64) -> (OfpHeader, Self) {
@@ -182,11 +207,14 @@ impl OfpMessage {
             length: 32,
             xid,
         };
-        (hdr, OfpMessage::FeaturesReply {
-            datapath_id,
-            n_buffers: 256,
-            n_tables: 64,
-        })
+        (
+            hdr,
+            OfpMessage::FeaturesReply {
+                datapath_id,
+                n_buffers: 256,
+                n_tables: 64,
+            },
+        )
     }
 
     pub fn serialize(&self, hdr: &OfpHeader) -> Vec<u8> {
@@ -197,7 +225,11 @@ impl OfpMessage {
                 body.extend_from_slice(&8u16.to_be_bytes()); // Length 8
                 body.extend_from_slice(&version_bitmap.to_be_bytes());
             }
-            OfpMessage::FeaturesReply { datapath_id, n_buffers, n_tables } => {
+            OfpMessage::FeaturesReply {
+                datapath_id,
+                n_buffers,
+                n_tables,
+            } => {
                 body.extend_from_slice(&datapath_id.to_be_bytes());
                 body.extend_from_slice(&n_buffers.to_be_bytes());
                 body.push(*n_tables);
@@ -256,7 +288,9 @@ impl OfpMessage {
                 } else {
                     0x10
                 };
-                OfpMessage::Hello { version_bitmap: bmp }
+                OfpMessage::Hello {
+                    version_bitmap: bmp,
+                }
             }
             OFPT_FEATURES_REQUEST => OfpMessage::FeaturesRequest,
             OFPT_FEATURES_REPLY if body.len() >= 16 => {
@@ -271,9 +305,15 @@ impl OfpMessage {
                     n_tables: n_tab,
                 }
             }
-            OFPT_ECHO_REQUEST => OfpMessage::EchoRequest { data: body.to_vec() },
-            OFPT_ECHO_REPLY => OfpMessage::EchoReply { data: body.to_vec() },
-            _ => OfpMessage::EchoRequest { data: body.to_vec() },
+            OFPT_ECHO_REQUEST => OfpMessage::EchoRequest {
+                data: body.to_vec(),
+            },
+            OFPT_ECHO_REPLY => OfpMessage::EchoReply {
+                data: body.to_vec(),
+            },
+            _ => OfpMessage::EchoRequest {
+                data: body.to_vec(),
+            },
         };
 
         Ok((header, msg))

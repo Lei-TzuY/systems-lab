@@ -44,9 +44,15 @@ impl fmt::Display for TunnelError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             TunnelError::PacketTooShort(len) => write!(f, "GRE packet too short ({} bytes)", len),
-            TunnelError::InvalidVersion(v) => write!(f, "Invalid GRE version: expected 0, found {}", v),
+            TunnelError::InvalidVersion(v) => {
+                write!(f, "Invalid GRE version: expected 0, found {}", v)
+            }
             TunnelError::InvalidChecksum { computed, expected } => {
-                write!(f, "GRE checksum mismatch: computed 0x{:04x}, expected 0x{:04x}", computed, expected)
+                write!(
+                    f,
+                    "GRE checksum mismatch: computed 0x{:04x}, expected 0x{:04x}",
+                    computed, expected
+                )
             }
         }
     }

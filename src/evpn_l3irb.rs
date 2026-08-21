@@ -62,7 +62,8 @@ impl EvpnL3VrfTable {
     }
 
     pub fn add_prefix_route(&mut self, route: EvpnIpPrefixRoute) {
-        self.routes.insert((route.ip_prefix, route.prefix_len), route);
+        self.routes
+            .insert((route.ip_prefix, route.prefix_len), route);
     }
 
     /// Performs longest prefix match (LPM) and resolves Symmetric IRB forwarding attributes

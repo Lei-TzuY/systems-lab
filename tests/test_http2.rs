@@ -1,6 +1,6 @@
 use toy_tcpip::http2::{
-    Http2Frame, HTTP2_FLAG_ACK, HTTP2_FLAG_END_HEADERS, HTTP2_FLAG_END_STREAM, HTTP2_FRAME_DATA,
-    HTTP2_FRAME_HEADERS, HTTP2_FRAME_SETTINGS,
+    HTTP2_FLAG_ACK, HTTP2_FLAG_END_HEADERS, HTTP2_FLAG_END_STREAM, HTTP2_FRAME_DATA,
+    HTTP2_FRAME_HEADERS, HTTP2_FRAME_SETTINGS, Http2Frame,
 };
 
 #[test]
@@ -11,7 +11,10 @@ fn test_http2_headers_and_data_multiplexing() {
 
     assert_eq!(parsed_h.stream_id, 1);
     assert_eq!(parsed_h.frame_type, HTTP2_FRAME_HEADERS);
-    assert_eq!(parsed_h.flags & HTTP2_FLAG_END_HEADERS, HTTP2_FLAG_END_HEADERS);
+    assert_eq!(
+        parsed_h.flags & HTTP2_FLAG_END_HEADERS,
+        HTTP2_FLAG_END_HEADERS
+    );
 
     let data = Http2Frame::build_data(1, true, b"<html><body>Hello HTTP/2</body></html>");
     let raw_data = data.serialize();
@@ -19,7 +22,10 @@ fn test_http2_headers_and_data_multiplexing() {
 
     assert_eq!(parsed_d.stream_id, 1);
     assert_eq!(parsed_d.frame_type, HTTP2_FRAME_DATA);
-    assert_eq!(parsed_d.flags & HTTP2_FLAG_END_STREAM, HTTP2_FLAG_END_STREAM);
+    assert_eq!(
+        parsed_d.flags & HTTP2_FLAG_END_STREAM,
+        HTTP2_FLAG_END_STREAM
+    );
 }
 
 #[test]

@@ -1,4 +1,6 @@
-use toy_tcpip::geneve_int::{GeneveIntPacket, IntHopTelemetry, GENEVE_OPT_CLASS_INT, GENEVE_OPT_TYPE_INT_HOP};
+use toy_tcpip::geneve_int::{
+    GENEVE_OPT_CLASS_INT, GENEVE_OPT_TYPE_INT_HOP, GeneveIntPacket, IntHopTelemetry,
+};
 
 #[test]
 fn test_geneve_int_hop_collection_and_decoding() {

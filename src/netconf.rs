@@ -7,14 +7,37 @@ pub const NETCONF_EOM_1_0: &str = "]]>]]>";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NetconfRpc {
-    Hello { session_id: u32, capabilities: Vec<String> },
-    GetConfig { message_id: String, source: String },
-    EditConfig { message_id: String, target: String, config_xml: String },
-    Commit { message_id: String },
-    Lock { message_id: String, target: String },
-    Unlock { message_id: String, target: String },
-    CloseSession { message_id: String },
-    Unknown { message_id: String, raw_xml: String },
+    Hello {
+        session_id: u32,
+        capabilities: Vec<String>,
+    },
+    GetConfig {
+        message_id: String,
+        source: String,
+    },
+    EditConfig {
+        message_id: String,
+        target: String,
+        config_xml: String,
+    },
+    Commit {
+        message_id: String,
+    },
+    Lock {
+        message_id: String,
+        target: String,
+    },
+    Unlock {
+        message_id: String,
+        target: String,
+    },
+    CloseSession {
+        message_id: String,
+    },
+    Unknown {
+        message_id: String,
+        raw_xml: String,
+    },
 }
 
 impl NetconfRpc {
@@ -68,13 +91,21 @@ impl NetconfRpc {
                 ],
             }
         } else if xml.contains("<get-config>") {
-            let source = if xml.contains("<candidate/>") { "candidate" } else { "running" };
+            let source = if xml.contains("<candidate/>") {
+                "candidate"
+            } else {
+                "running"
+            };
             NetconfRpc::GetConfig {
                 message_id: msg_id,
                 source: source.to_string(),
             }
         } else if xml.contains("<edit-config>") {
-            let target = if xml.contains("<candidate/>") { "candidate" } else { "running" };
+            let target = if xml.contains("<candidate/>") {
+                "candidate"
+            } else {
+                "running"
+            };
             NetconfRpc::EditConfig {
                 message_id: msg_id,
                 target: target.to_string(),
@@ -83,9 +114,15 @@ impl NetconfRpc {
         } else if xml.contains("<commit/>") {
             NetconfRpc::Commit { message_id: msg_id }
         } else if xml.contains("<lock>") {
-            NetconfRpc::Lock { message_id: msg_id, target: "running".to_string() }
+            NetconfRpc::Lock {
+                message_id: msg_id,
+                target: "running".to_string(),
+            }
         } else if xml.contains("<unlock>") {
-            NetconfRpc::Unlock { message_id: msg_id, target: "running".to_string() }
+            NetconfRpc::Unlock {
+                message_id: msg_id,
+                target: "running".to_string(),
+            }
         } else if xml.contains("<close-session/>") {
             NetconfRpc::CloseSession { message_id: msg_id }
         } else {
@@ -142,7 +179,11 @@ impl NetconfServer {
                 let data_xml = format!("<data>\n  {}\n</data>", cfg);
                 NetconfRpc::build_rpc_reply(&message_id, &data_xml)
             }
-            NetconfRpc::EditConfig { message_id, config_xml, .. } => {
+            NetconfRpc::EditConfig {
+                message_id,
+                config_xml,
+                ..
+            } => {
                 self.candidate_config = config_xml;
                 NetconfRpc::build_ok(&message_id)
             }
@@ -175,19 +216,19 @@ mod tests {
         // 1. Client Hello
         let client_hello = "<hello xmlns=\"urn:ietf:params:xml:ns:netconf:base:1.0\"><capabilities><capability>urn:ietf:params:netconf:base:1.0</capability></capabilities></hello>]]>]]>";
         let resp_hello = server.handle_request(client_hello);
-        assert_eq!(resp_hello.contains("<session-id>101</session-id>"), true);
-        assert_eq!(resp_hello.ends_with(NETCONF_EOM_1_0), true);
+        assert!(resp_hello.contains("<session-id>101</session-id>"));
+        assert!(resp_hello.ends_with(NETCONF_EOM_1_0));
 
         // 2. Get Config
         let get_cfg = "<rpc message-id=\"102\" xmlns=\"urn:ietf:params:xml:ns:netconf:base:1.0\"><get-config><source><running/></source></get-config></rpc>]]>]]>";
         let resp_get = server.handle_request(get_cfg);
-        assert_eq!(resp_get.contains("<rpc-reply message-id=\"102\""), true);
-        assert_eq!(resp_get.contains("<name>eth0</name>"), true);
+        assert!(resp_get.contains("<rpc-reply message-id=\"102\""));
+        assert!(resp_get.contains("<name>eth0</name>"));
 
         // 3. Commit
         let commit = "<rpc message-id=\"103\" xmlns=\"urn:ietf:params:xml:ns:netconf:base:1.0\"><commit/></rpc>]]>]]>";
         let resp_commit = server.handle_request(commit);
-        assert_eq!(resp_commit.contains("<ok/>"), true);
+        assert!(resp_commit.contains("<ok/>"));
 
         assert_eq!(NETCONF_PORT, 830);
     }

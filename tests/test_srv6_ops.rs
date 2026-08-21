@@ -17,15 +17,34 @@ fn test_srv6_endpoint_behaviors_pipeline() {
     let next_hop_dx4 = Ipv4Address::new(10, 0, 0, 1);
 
     engine.register_sid(sid_transit, Srv6Behavior::End);
-    engine.register_sid(sid_x, Srv6Behavior::EndX { next_hop_ip: next_hop_x, out_if: "eth1".to_string() });
-    engine.register_sid(sid_dx4, Srv6Behavior::EndDx4 { next_hop_ipv4: next_hop_dx4 });
-    engine.register_sid(sid_dx2, Srv6Behavior::EndDx2 { out_if: "tap0".to_string() });
+    engine.register_sid(
+        sid_x,
+        Srv6Behavior::EndX {
+            next_hop_ip: next_hop_x,
+            out_if: "eth1".to_string(),
+        },
+    );
+    engine.register_sid(
+        sid_dx4,
+        Srv6Behavior::EndDx4 {
+            next_hop_ipv4: next_hop_dx4,
+        },
+    );
+    engine.register_sid(
+        sid_dx2,
+        Srv6Behavior::EndDx2 {
+            out_if: "tap0".to_string(),
+        },
+    );
 
     // Test End Behavior (Transit Hop)
     let srh_transit = Srv6Header::build(4, &[sid_dx4, sid_transit]);
     let res1 = engine.process_srv6_packet(sid_transit, srh_transit, b"IPv4 Data");
     match res1 {
-        Srv6ExecutionResult::ForwardNextSid { next_sid, updated_srh } => {
+        Srv6ExecutionResult::ForwardNextSid {
+            next_sid,
+            updated_srh,
+        } => {
             assert_eq!(next_sid, sid_dx4);
             assert_eq!(updated_srh.segments_left, 0);
         }
@@ -36,7 +55,11 @@ fn test_srv6_endpoint_behaviors_pipeline() {
     let srh_x = Srv6Header::build(4, &[sid_dx4, sid_x]);
     let res2 = engine.process_srv6_packet(sid_x, srh_x, b"L3 Payload");
     match res2 {
-        Srv6ExecutionResult::ForwardAdjacency { next_sid, next_hop, out_if } => {
+        Srv6ExecutionResult::ForwardAdjacency {
+            next_sid,
+            next_hop,
+            out_if,
+        } => {
             assert_eq!(next_sid, sid_dx4);
             assert_eq!(next_hop, next_hop_x);
             assert_eq!(out_if, "eth1");

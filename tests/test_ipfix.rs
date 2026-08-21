@@ -1,5 +1,6 @@
 use toy_tcpip::ipfix::{
-    IpfixFlowRecord, IpfixMessage, IPFIX_DEFAULT_TEMPLATE_ID, IPFIX_TCP_PORT, IPFIX_UDP_PORT, IPFIX_VERSION,
+    IPFIX_DEFAULT_TEMPLATE_ID, IPFIX_TCP_PORT, IPFIX_UDP_PORT, IPFIX_VERSION, IpfixFlowRecord,
+    IpfixMessage,
 };
 use toy_tcpip::ipv4::Ipv4Address;
 
@@ -10,19 +11,17 @@ fn test_ipfix_constants_and_template_framing() {
     assert_eq!(IPFIX_TCP_PORT, 4739);
     assert_eq!(IPFIX_DEFAULT_TEMPLATE_ID, 256);
 
-    let flows = vec![
-        IpfixFlowRecord {
-            src_ip: Ipv4Address::new(192, 168, 10, 5),
-            dst_ip: Ipv4Address::new(172, 16, 20, 8),
-            src_port: 49152,
-            dst_port: 80,
-            protocol: 6,
-            packets: 500,
-            octets: 750000,
-            tcp_flags: 0x0010,
-            vlan_id: 200,
-        },
-    ];
+    let flows = vec![IpfixFlowRecord {
+        src_ip: Ipv4Address::new(192, 168, 10, 5),
+        dst_ip: Ipv4Address::new(172, 16, 20, 8),
+        src_port: 49152,
+        dst_port: 80,
+        protocol: 6,
+        packets: 500,
+        octets: 750000,
+        tcp_flags: 0x0010,
+        vlan_id: 200,
+    }];
 
     let msg = IpfixMessage::build_standard_flow_export(1700001000, 42, 7, &flows, true);
     let raw = msg.serialize();

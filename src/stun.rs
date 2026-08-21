@@ -65,7 +65,11 @@ impl StunPacket {
         }
     }
 
-    pub fn build_binding_response(req: &StunPacket, reflexive_ip: Ipv4Address, reflexive_port: u16) -> Self {
+    pub fn build_binding_response(
+        req: &StunPacket,
+        reflexive_ip: Ipv4Address,
+        reflexive_port: u16,
+    ) -> Self {
         // XOR-MAPPED-ADDRESS computation (RFC 8489)
         // Family: 0x01 IPv4
         // X-Port: Port ^ (MagicCookie >> 16)
@@ -209,11 +213,13 @@ mod tests {
 
     #[test]
     fn test_stun_binding_request_and_response_roundtrip() {
-        let tid = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC];
+        let tid = [
+            0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC,
+        ];
         let req = StunPacket::build_binding_request(tid);
         let raw_req = req.serialize();
 
-        assert_eq!(raw_req.len() >= STUN_HEADER_LEN, true);
+        assert!(raw_req.len() >= STUN_HEADER_LEN);
         let parsed_req = StunPacket::parse(&raw_req).unwrap();
         assert_eq!(parsed_req.msg_type, STUN_BINDING_REQUEST);
 

@@ -9,12 +9,12 @@ pub const ETHERTYPE_ETAG: u16 = 0x893F;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ETagHeader {
-    pub pcp: u8,                  // 3 bits: Priority Code Point
-    pub dei: bool,                // 1 bit: Drop Eligible Indicator
-    pub ingress_e_cid: u32,       // 20 bits: Ingress Extender Port ID
-    pub grp: u8,                  // 2 bits: Group / Multicast indicator
-    pub e_cid: u32,               // 20 bits: Target Extender Port ID
-    pub inner_ethertype: u16,     // 16 bits: Inner EtherType (e.g. 0x0800 IPv4)
+    pub pcp: u8,              // 3 bits: Priority Code Point
+    pub dei: bool,            // 1 bit: Drop Eligible Indicator
+    pub ingress_e_cid: u32,   // 20 bits: Ingress Extender Port ID
+    pub grp: u8,              // 2 bits: Group / Multicast indicator
+    pub e_cid: u32,           // 20 bits: Target Extender Port ID
+    pub inner_ethertype: u16, // 16 bits: Inner EtherType (e.g. 0x0800 IPv4)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -146,7 +146,7 @@ mod tests {
                 dei: false,
                 ingress_e_cid: 0x12345, // 20-bit port ID
                 grp: 0,
-                e_cid: 0x6789A,         // 20-bit target port ID
+                e_cid: 0x6789A, // 20-bit target port ID
                 inner_ethertype: 0x0800,
             },
             b"IEEE 802.1BR Fabric Extender Payload".to_vec(),

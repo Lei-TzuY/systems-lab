@@ -15,10 +15,10 @@ pub enum PacketPriority {
 /// Token Bucket Algorithm for Traffic Shaping and Rate Limiting (RFC 2697).
 #[derive(Debug, Clone)]
 pub struct TokenBucket {
-    pub capacity_bytes: f64,       // Maximum token capacity (Burst size)
-    pub tokens: f64,               // Current token balance (in bytes)
-    pub rate_bytes_per_sec: f64,   // Token replenishment rate (Bytes/sec)
-    pub last_update_ms: u64,       // Timestamp of last update
+    pub capacity_bytes: f64,     // Maximum token capacity (Burst size)
+    pub tokens: f64,             // Current token balance (in bytes)
+    pub rate_bytes_per_sec: f64, // Token replenishment rate (Bytes/sec)
+    pub last_update_ms: u64,     // Timestamp of last update
 }
 
 impl TokenBucket {

@@ -67,7 +67,9 @@ impl fmt::Display for IsisError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             IsisError::PacketTooShort(l) => write!(f, "IS-IS packet too short ({} bytes)", l),
-            IsisError::InvalidDiscriminator(d) => write!(f, "Invalid IS-IS discriminator 0x{:02X} (expected 0x83)", d),
+            IsisError::InvalidDiscriminator(d) => {
+                write!(f, "Invalid IS-IS discriminator 0x{:02X} (expected 0x83)", d)
+            }
             IsisError::InvalidPduType(t) => write!(f, "Unsupported IS-IS PDU type: {}", t),
             IsisError::InvalidTlvLength => write!(f, "Invalid IS-IS TLV length field"),
         }
@@ -151,7 +153,8 @@ impl IsisHelloPacket {
             tlvs_bytes.extend_from_slice(&tlv.value);
         }
 
-        let total_pdu_len = (ISIS_COMMON_HEADER_LEN + ISIS_LAN_IIH_FIXED_LEN + tlvs_bytes.len()) as u16;
+        let total_pdu_len =
+            (ISIS_COMMON_HEADER_LEN + ISIS_LAN_IIH_FIXED_LEN + tlvs_bytes.len()) as u16;
         let mut buf = vec![0u8; total_pdu_len as usize];
 
         buf[0] = self.header.nlpid;
@@ -190,9 +193,18 @@ impl IsisHelloPacket {
         area_tlv.extend_from_slice(area_id);
 
         let tlvs = vec![
-            IsisTlv { tlv_type: ISIS_TLV_AREA_ADDRESSES, value: area_tlv },
-            IsisTlv { tlv_type: ISIS_TLV_PROTOCOLS_SUPPORTED, value: vec![NLPID_IPV4, NLPID_IPV6] },
-            IsisTlv { tlv_type: ISIS_TLV_IP_INTERFACE_ADDR, value: ip.0.to_vec() },
+            IsisTlv {
+                tlv_type: ISIS_TLV_AREA_ADDRESSES,
+                value: area_tlv,
+            },
+            IsisTlv {
+                tlv_type: ISIS_TLV_PROTOCOLS_SUPPORTED,
+                value: vec![NLPID_IPV4, NLPID_IPV6],
+            },
+            IsisTlv {
+                tlv_type: ISIS_TLV_IP_INTERFACE_ADDR,
+                value: ip.0.to_vec(),
+            },
         ];
 
         let mut lan_id = [0u8; 7];

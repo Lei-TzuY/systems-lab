@@ -85,12 +85,7 @@ impl fmt::Display for HsrpError {
 impl std::error::Error for HsrpError {}
 
 impl HsrpPacket {
-    pub fn build_hello(
-        state: HsrpState,
-        group: u8,
-        priority: u8,
-        virtual_ip: Ipv4Address,
-    ) -> Self {
+    pub fn build_hello(state: HsrpState, group: u8, priority: u8, virtual_ip: Ipv4Address) -> Self {
         let mut auth = [0u8; 8];
         auth[..5].copy_from_slice(b"cisco");
         HsrpPacket {

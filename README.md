@@ -441,45 +441,51 @@ TCP-IP Stack/
 │   ├── test_snmp.rs       # SNMPv2c BER encoding & MIB tests
 │   ├── test_dns.rs        # DNS query and response tests
 │   ├── test_dhcp.rs       # DHCP DORA handshake tests
-│   ├── test_dhcpv6.rs     # DHCPv6 Solicit/Advertise handshake tests
 │   ├── test_bus.rs        # Virtual network bus multi-node tests
-│   └── test_stack.rs      # End-to-end PCAP pipeline integration tests
+│   ├── test_stack.rs      # End-to-end PCAP pipeline integration tests
+│   └── test_lab_e2e.rs    # Integrated Virtual Network Lab end-to-end data plane tests
 ```
+
+---
+
+## 🌐 Integrated Virtual Network Lab & Data Plane Simulation
+
+The project includes an in-process **Deterministic Virtual Network Lab** (`src/lab.rs`) allowing realistic multi-node, multi-subnet networking topologies without external kernel privileges, root access, or physical hardware:
+
+* **Topologies**: Arbitrary point-to-point and switched multi-access broadcast links (`VirtualLink`), multi-homed routers (`LabRouter`), and dual-stack end hosts (`LabHost`).
+* **Hardware-like Forwarding Plane**: LPM route table lookup, TTL decrementing & header checksum recalculation, cold ARP resolution queuing, and ICMP Time Exceeded (Type 11 Code 0) generation.
+* **Full TCP Connection Lifecycle**: RFC 793 active 3-way handshake (`SYN` $\rightarrow$ `SYN-ACK` $\rightarrow$ `ACK`), sliding window data transfer, and 4-way teardown (`FIN-ACK` $\rightarrow$ `LAST-ACK` $\rightarrow$ `TIME-WAIT` $\rightarrow$ `CLOSED`).
+* **Fault Injection Engine**: Configurable link MTU limits, deterministic drop sequences, and bit-level payload corruption to verify strict checksum rejection.
+* **Integrated PCAP Tap**: Continuous packet capture on every virtual link, exportable directly to Wireshark-compatible `.pcap` trace files.
 
 ---
 
 ## 🚀 Quickstart & Commands
 
-### 1. Run All Tests (181 Unit & Integration Tests)
+### 1. Run All Tests (225 Unit Tests & 70+ Integration Test Suites)
 ```bash
 cargo test
 ```
 
-### 2. Launch the Dual-Stack Interactive Shell (REPL)
+### 2. Run End-to-End Virtual Lab Test Suite
+```bash
+cargo test --test test_lab_e2e
+```
+
+### 3. Launch the Dual-Stack Interactive Shell (REPL)
 ```bash
 cargo run -- shell
 ```
 Inside the interactive shell:
 ```text
+netstack > lab topology
+netstack > lab ping4 192.168.1.20
+netstack > lab ping6 2001:db8:1::20
+netstack > lab route4 10.0.2.2 64
+netstack > lab route4 10.0.2.2 1
+netstack > lab udp-echo "Hello Virtual Network Lab"
+netstack > lab tcp-demo
+netstack > lab pcap lab_capture.pcap
 netstack > status
-netstack > flowspec rules
-netstack > flowspec drop 192.168.1.100 53
-netstack > otlp export
-netstack > gre6 encap "Multi-Protocol Overlay Packet over IPv6"
-netstack > ioam record "Spine-Leaf IOAM Telemetry Flow"
-netstack > netconf get
-netstack > lisp lookup 10.1.1.50
-netstack > wireguard handshake
-netstack > gptp pdelay
-netstack > pcep req 10.0.0.4
-netstack > rsvp path 192.168.1.10 100
-netstack > ofp tables
-netstack > diameter cer
-netstack > nsh encap 100 255 "Service Chained Flow"
-netstack > sflow export
-netstack > roce send 202 "GPU Tensor Buffer"
-netstack > pfc pause 3
-netstack > ping 192.168.1.10
-netstack > ping6 2001:db8::10
 netstack > exit
 ```

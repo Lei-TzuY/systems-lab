@@ -40,9 +40,17 @@ impl fmt::Display for EspError {
         match self {
             EspError::PacketTooShort(l) => write!(f, "ESP packet too short ({} bytes, min 26)", l),
             EspError::InvalidPadding => write!(f, "ESP trailer padding verification failed"),
-            EspError::InvalidIcv => write!(f, "ESP Integrity Check Value (ICV) authentication failed"),
-            EspError::ReplayDetected(s) => write!(f, "ESP anti-replay check failed: sequence #{}", s),
-            EspError::SaNotFound(spi) => write!(f, "Security Association (SA) not found for SPI 0x{:08X}", spi),
+            EspError::InvalidIcv => {
+                write!(f, "ESP Integrity Check Value (ICV) authentication failed")
+            }
+            EspError::ReplayDetected(s) => {
+                write!(f, "ESP anti-replay check failed: sequence #{}", s)
+            }
+            EspError::SaNotFound(spi) => write!(
+                f,
+                "Security Association (SA) not found for SPI 0x{:08X}",
+                spi
+            ),
         }
     }
 }
@@ -263,7 +271,12 @@ mod tests {
 
     #[test]
     fn test_esp_anti_replay_window() {
-        let mut sa = SecurityAssociation::new(0x1000, Ipv4Address::new(1, 1, 1, 1), Ipv4Address::new(2, 2, 2, 2), [0; 16]);
+        let mut sa = SecurityAssociation::new(
+            0x1000,
+            Ipv4Address::new(1, 1, 1, 1),
+            Ipv4Address::new(2, 2, 2, 2),
+            [0; 16],
+        );
 
         // Sequential packets: accepted
         assert!(sa.check_anti_replay(1));

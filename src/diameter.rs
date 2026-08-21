@@ -16,8 +16,8 @@ pub const DIAMETER_FLAG_RETRANSMITTED: u8 = 0x10;
 
 // Command Codes
 pub const DIAMETER_CMD_CAPABILITIES_EXCHANGE: u32 = 257; // CER / CEA
-pub const DIAMETER_CMD_DEVICE_WATCHDOG: u32 = 280;       // DWR / DWA
-pub const DIAMETER_CMD_ACCOUNTING: u32 = 271;            // ACR / ACA
+pub const DIAMETER_CMD_DEVICE_WATCHDOG: u32 = 280; // DWR / DWA
+pub const DIAMETER_CMD_ACCOUNTING: u32 = 271; // ACR / ACA
 
 // AVP Codes
 pub const DIAMETER_AVP_HOST_IP_ADDRESS: u32 = 257;
@@ -67,8 +67,12 @@ pub enum DiameterError {
 impl fmt::Display for DiameterError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            DiameterError::PacketTooShort(l) => write!(f, "Diameter message too short ({} bytes)", l),
-            DiameterError::UnsupportedVersion(v) => write!(f, "Unsupported Diameter version: {}", v),
+            DiameterError::PacketTooShort(l) => {
+                write!(f, "Diameter message too short ({} bytes)", l)
+            }
+            DiameterError::UnsupportedVersion(v) => {
+                write!(f, "Unsupported Diameter version: {}", v)
+            }
             DiameterError::InvalidLength => write!(f, "Invalid Diameter message length"),
         }
     }
@@ -194,7 +198,12 @@ impl DiameterMessage {
         DiameterMessage { header, avps }
     }
 
-    pub fn build_cea(req: &DiameterMessage, origin_host: &str, origin_realm: &str, result_code: u32) -> Self {
+    pub fn build_cea(
+        req: &DiameterMessage,
+        origin_host: &str,
+        origin_realm: &str,
+        result_code: u32,
+    ) -> Self {
         let header = DiameterHeader {
             version: DIAMETER_VERSION_1,
             length: 0,
@@ -305,13 +314,24 @@ impl DiameterServer {
 
     pub fn handle_request(&self, req: &DiameterMessage) -> DiameterMessage {
         match req.header.command_code {
-            DIAMETER_CMD_CAPABILITIES_EXCHANGE => {
-                DiameterMessage::build_cea(req, &self.origin_host, &self.origin_realm, DIAMETER_SUCCESS)
-            }
-            DIAMETER_CMD_DEVICE_WATCHDOG => {
-                DiameterMessage::build_cea(req, &self.origin_host, &self.origin_realm, DIAMETER_SUCCESS)
-            }
-            _ => DiameterMessage::build_cea(req, &self.origin_host, &self.origin_realm, DIAMETER_COMMAND_UNSUPPORTED),
+            DIAMETER_CMD_CAPABILITIES_EXCHANGE => DiameterMessage::build_cea(
+                req,
+                &self.origin_host,
+                &self.origin_realm,
+                DIAMETER_SUCCESS,
+            ),
+            DIAMETER_CMD_DEVICE_WATCHDOG => DiameterMessage::build_cea(
+                req,
+                &self.origin_host,
+                &self.origin_realm,
+                DIAMETER_SUCCESS,
+            ),
+            _ => DiameterMessage::build_cea(
+                req,
+                &self.origin_host,
+                &self.origin_realm,
+                DIAMETER_COMMAND_UNSUPPORTED,
+            ),
         }
     }
 }
@@ -333,22 +353,39 @@ mod tests {
         );
 
         let raw_cer = cer.serialize();
-        assert_eq!(raw_cer.len() >= 20, true);
+        assert!(raw_cer.len() >= 20);
 
         let parsed_cer = DiameterMessage::parse(&raw_cer).unwrap();
-        assert_eq!(parsed_cer.header.command_code, DIAMETER_CMD_CAPABILITIES_EXCHANGE);
-        assert_eq!(parsed_cer.header.flags & DIAMETER_FLAG_REQUEST != 0, true);
+        assert_eq!(
+            parsed_cer.header.command_code,
+            DIAMETER_CMD_CAPABILITIES_EXCHANGE
+        );
+        assert!(parsed_cer.header.flags & DIAMETER_FLAG_REQUEST != 0);
         assert_eq!(parsed_cer.avps.len(), 6);
 
-        let server = DiameterServer::new("hss01.epc.mnc001.mcc001.3gppnetwork.org", "epc.mnc001.mcc001.3gppnetwork.org");
+        let server = DiameterServer::new(
+            "hss01.epc.mnc001.mcc001.3gppnetwork.org",
+            "epc.mnc001.mcc001.3gppnetwork.org",
+        );
         let cea = server.handle_request(&parsed_cer);
         let raw_cea = cea.serialize();
 
         let parsed_cea = DiameterMessage::parse(&raw_cea).unwrap();
-        assert_eq!(parsed_cea.header.command_code, DIAMETER_CMD_CAPABILITIES_EXCHANGE);
-        assert_eq!(parsed_cea.header.flags & DIAMETER_FLAG_REQUEST == 0, true);
+        assert_eq!(
+            parsed_cea.header.command_code,
+            DIAMETER_CMD_CAPABILITIES_EXCHANGE
+        );
+        assert!(parsed_cea.header.flags & DIAMETER_FLAG_REQUEST == 0);
         assert_eq!(parsed_cea.avps[0].code, DIAMETER_AVP_RESULT_CODE);
-        assert_eq!(u32::from_be_bytes([parsed_cea.avps[0].data[0], parsed_cea.avps[0].data[1], parsed_cea.avps[0].data[2], parsed_cea.avps[0].data[3]]), DIAMETER_SUCCESS);
+        assert_eq!(
+            u32::from_be_bytes([
+                parsed_cea.avps[0].data[0],
+                parsed_cea.avps[0].data[1],
+                parsed_cea.avps[0].data[2],
+                parsed_cea.avps[0].data[3]
+            ]),
+            DIAMETER_SUCCESS
+        );
         assert_eq!(DIAMETER_PORT, 3868);
     }
 }

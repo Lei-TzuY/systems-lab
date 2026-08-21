@@ -23,7 +23,10 @@ pub struct NtpTimestamp {
 }
 
 impl NtpTimestamp {
-    pub const ZERO: NtpTimestamp = NtpTimestamp { seconds: 0, fraction: 0 };
+    pub const ZERO: NtpTimestamp = NtpTimestamp {
+        seconds: 0,
+        fraction: 0,
+    };
 
     pub fn new(seconds: u32, fraction: u32) -> Self {
         NtpTimestamp { seconds, fraction }
@@ -85,7 +88,9 @@ pub enum NtpError {
 impl fmt::Display for NtpError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            NtpError::PacketTooShort(len) => write!(f, "NTP packet too short ({} bytes, min 48)", len),
+            NtpError::PacketTooShort(len) => {
+                write!(f, "NTP packet too short ({} bytes, min 48)", len)
+            }
         }
     }
 }
@@ -138,7 +143,8 @@ impl NtpPacket {
     pub fn serialize(&self) -> Vec<u8> {
         let mut buf = vec![0u8; NTP_HEADER_LEN];
 
-        buf[0] = ((self.leap_indicator & 0x03) << 6) | ((self.version & 0x07) << 3) | (self.mode & 0x07);
+        buf[0] =
+            ((self.leap_indicator & 0x03) << 6) | ((self.version & 0x07) << 3) | (self.mode & 0x07);
         buf[1] = self.stratum;
         buf[2] = self.poll as u8;
         buf[3] = self.precision as u8;

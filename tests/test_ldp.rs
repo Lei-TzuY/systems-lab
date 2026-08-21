@@ -1,5 +1,5 @@
 use toy_tcpip::ipv4::Ipv4Address;
-use toy_tcpip::ldp::{LdpPdu, LDP_MSG_HELLO, LDP_MSG_LABEL_MAPPING, LDP_PORT};
+use toy_tcpip::ldp::{LDP_MSG_HELLO, LDP_MSG_LABEL_MAPPING, LDP_PORT, LdpPdu};
 
 #[test]
 fn test_ldp_hello_discovery_packet() {

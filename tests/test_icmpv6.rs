@@ -1,6 +1,6 @@
 use std::str::FromStr;
 use toy_tcpip::ethernet::MacAddress;
-use toy_tcpip::icmpv6::{Icmpv6Packet, NdpTable, ICMPV6_TYPE_ECHO_REPLY, ICMPV6_TYPE_ECHO_REQUEST};
+use toy_tcpip::icmpv6::{ICMPV6_TYPE_ECHO_REPLY, ICMPV6_TYPE_ECHO_REQUEST, Icmpv6Packet, NdpTable};
 use toy_tcpip::ipv6::Ipv6Address;
 
 #[test]
@@ -28,7 +28,9 @@ fn test_ndp_neighbor_solicitation_and_cache() {
     let parsed_ns = Icmpv6Packet::parse(client_ip, target_ip, &ns, true).unwrap();
     assert_eq!(parsed_ns.code, 0);
 
-    let na = Icmpv6Packet::build_neighbor_advertisement(target_ip, client_ip, target_ip, target_mac, true, true, true);
+    let na = Icmpv6Packet::build_neighbor_advertisement(
+        target_ip, client_ip, target_ip, target_mac, true, true, true,
+    );
     let parsed_na = Icmpv6Packet::parse(target_ip, client_ip, &na, true).unwrap();
     assert_eq!(parsed_na.code, 0);
 

@@ -52,11 +52,19 @@ pub enum VrrpError {
 impl fmt::Display for VrrpError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            VrrpError::PacketTooShort(len) => write!(f, "VRRP packet too short ({} bytes, min 8)", len),
-            VrrpError::InvalidChecksum { computed, expected } => {
-                write!(f, "VRRP checksum mismatch: computed 0x{:04x}, expected 0x{:04x}", computed, expected)
+            VrrpError::PacketTooShort(len) => {
+                write!(f, "VRRP packet too short ({} bytes, min 8)", len)
             }
-            VrrpError::InvalidVersion(v) => write!(f, "Invalid VRRP version: expected 3, found {}", v),
+            VrrpError::InvalidChecksum { computed, expected } => {
+                write!(
+                    f,
+                    "VRRP checksum mismatch: computed 0x{:04x}, expected 0x{:04x}",
+                    computed, expected
+                )
+            }
+            VrrpError::InvalidVersion(v) => {
+                write!(f, "Invalid VRRP version: expected 3, found {}", v)
+            }
         }
     }
 }
@@ -231,7 +239,10 @@ mod tests {
         assert_eq!(parsed.vrid, 10);
         assert_eq!(parsed.priority, 150);
         assert_eq!(parsed.ip_addresses[0], Ipv4Address::new(192, 168, 1, 1));
-        assert_eq!(VrrpPacket::virtual_mac(10), MacAddress([0x00, 0x00, 0x5e, 0x00, 0x01, 10]));
+        assert_eq!(
+            VrrpPacket::virtual_mac(10),
+            MacAddress([0x00, 0x00, 0x5e, 0x00, 0x01, 10])
+        );
     }
 
     #[test]

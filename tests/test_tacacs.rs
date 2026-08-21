@@ -1,4 +1,7 @@
-use toy_tcpip::tacacs::{TacacsPacket, TacacsServer, TACACS_AUTHEN_STATUS_FAIL, TACACS_AUTHEN_STATUS_PASS, TACACS_PORT, TACACS_TYPE_AUTHEN};
+use toy_tcpip::tacacs::{
+    TACACS_AUTHEN_STATUS_FAIL, TACACS_AUTHEN_STATUS_PASS, TACACS_PORT, TACACS_TYPE_AUTHEN,
+    TacacsPacket, TacacsServer,
+};
 
 #[test]
 fn test_tacacs_header_and_packet_serialization() {
@@ -15,7 +18,9 @@ fn test_tacacs_header_and_packet_serialization() {
 #[test]
 fn test_tacacs_server_authentication() {
     let mut server = TacacsServer::new();
-    server.users.insert("alice".to_string(), "wonderland".to_string());
+    server
+        .users
+        .insert("alice".to_string(), "wonderland".to_string());
 
     let req_ok = TacacsPacket::build_authen_start(1, "alice", "tty1", "wonderland");
     let resp_ok = server.authenticate(&req_ok);

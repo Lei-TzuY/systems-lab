@@ -1,4 +1,6 @@
-use toy_tcpip::geneve::{GeneveOption, GenevePacket, ETHERTYPE_TRANSPARENT_ETH, GENEVE_BASE_HEADER_LEN, GENEVE_UDP_PORT};
+use toy_tcpip::geneve::{
+    ETHERTYPE_TRANSPARENT_ETH, GENEVE_BASE_HEADER_LEN, GENEVE_UDP_PORT, GeneveOption, GenevePacket,
+};
 
 #[test]
 fn test_geneve_encapsulation_and_vni() {
@@ -38,6 +40,6 @@ fn test_geneve_tlv_option_parsing() {
     let parsed = GenevePacket::parse(&serialized).unwrap();
     assert_eq!(parsed.options.len(), 1);
     assert_eq!(parsed.options[0].class, 0x0102);
-    assert_eq!(parsed.options[0].critical, true);
+    assert!(parsed.options[0].critical);
     assert_eq!(parsed.options[0].data, vec![0xDE, 0xAD, 0xBE, 0xEF]);
 }

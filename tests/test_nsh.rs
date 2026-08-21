@@ -1,4 +1,6 @@
-use toy_tcpip::nsh::{NshPacket, ServiceFunctionForwarder, NSH_MD_TYPE_1, NSH_NP_ETHERNET, NSH_NP_IPV4};
+use toy_tcpip::nsh::{
+    NSH_MD_TYPE_1, NSH_NP_ETHERNET, NSH_NP_IPV4, NshPacket, ServiceFunctionForwarder,
+};
 
 #[test]
 fn test_nsh_base_and_context_headers() {
@@ -39,5 +41,7 @@ fn test_nsh_service_function_chaining_hops() {
     assert_eq!(pkt.header.service_index, 0);
 
     // End of Chain
-    assert_eq!(ServiceFunctionForwarder::forward_next_service_hop(&mut pkt), false);
+    assert!(!ServiceFunctionForwarder::forward_next_service_hop(
+        &mut pkt
+    ));
 }

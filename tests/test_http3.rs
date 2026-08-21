@@ -1,4 +1,4 @@
-use toy_tcpip::http3::{Http3Frame, HTTP3_FRAME_DATA, HTTP3_FRAME_HEADERS, HTTP3_FRAME_SETTINGS};
+use toy_tcpip::http3::{HTTP3_FRAME_DATA, HTTP3_FRAME_HEADERS, HTTP3_FRAME_SETTINGS, Http3Frame};
 
 #[test]
 fn test_http3_vint_framing_roundtrip() {
@@ -12,7 +12,11 @@ fn test_http3_vint_framing_roundtrip() {
 
 #[test]
 fn test_http3_multiplexed_headers_and_payload() {
-    let headers = vec![(":method", "POST"), (":path", "/graphql"), (":scheme", "https")];
+    let headers = vec![
+        (":method", "POST"),
+        (":path", "/graphql"),
+        (":scheme", "https"),
+    ];
     let hdr_frame = Http3Frame::build_headers(&headers);
     let hdr_raw = hdr_frame.serialize();
 

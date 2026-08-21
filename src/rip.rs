@@ -42,9 +42,15 @@ pub enum RipError {
 impl fmt::Display for RipError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            RipError::PacketTooShort(len) => write!(f, "RIP packet too short ({} bytes, min 4)", len),
-            RipError::InvalidVersion(v) => write!(f, "Invalid RIP version: expected 2, found {}", v),
-            RipError::InvalidEntrySize(len) => write!(f, "Invalid RIP entry length remainder: {} bytes", len),
+            RipError::PacketTooShort(len) => {
+                write!(f, "RIP packet too short ({} bytes, min 4)", len)
+            }
+            RipError::InvalidVersion(v) => {
+                write!(f, "Invalid RIP version: expected 2, found {}", v)
+            }
+            RipError::InvalidEntrySize(len) => {
+                write!(f, "Invalid RIP entry length remainder: {} bytes", len)
+            }
         }
     }
 }
@@ -66,7 +72,7 @@ impl RipPacket {
         let routing_domain = u16::from_be_bytes([data[2], data[3]]);
 
         let entry_bytes = &data[4..];
-        if entry_bytes.len() % 20 != 0 {
+        if !entry_bytes.len().is_multiple_of(20) {
             return Err(RipError::InvalidEntrySize(entry_bytes.len()));
         }
 
@@ -218,12 +224,14 @@ impl RipEngine {
             if let Some(idx) = existing_idx {
                 if new_metric < self.route_metrics[idx].2 {
                     self.route_metrics[idx].2 = new_metric;
-                    self.routes.add_route(entry.ip, prefix_len, Some(neighbor_ip), interface);
+                    self.routes
+                        .add_route(entry.ip, prefix_len, Some(neighbor_ip), interface);
                     updated += 1;
                 }
             } else {
                 self.route_metrics.push((entry.ip, prefix_len, new_metric));
-                self.routes.add_route(entry.ip, prefix_len, Some(neighbor_ip), interface);
+                self.routes
+                    .add_route(entry.ip, prefix_len, Some(neighbor_ip), interface);
                 updated += 1;
             }
         }
@@ -274,11 +282,15 @@ mod tests {
 
         // R1 advertises to R2
         let adv_from_r1 = r1.build_advertisement();
-        let updated = r2.process_advertisement(Ipv4Address::new(192, 168, 1, 1), &adv_from_r1, "eth0");
+        let updated =
+            r2.process_advertisement(Ipv4Address::new(192, 168, 1, 1), &adv_from_r1, "eth0");
 
         assert_eq!(updated, 1);
         // R2 should now know how to reach 192.168.1.0/24 with metric 2 via R1!
-        let route = r2.routes.lookup(Ipv4Address::new(192, 168, 1, 100)).unwrap();
+        let route = r2
+            .routes
+            .lookup(Ipv4Address::new(192, 168, 1, 100))
+            .unwrap();
         assert_eq!(route.gateway, Some(Ipv4Address::new(192, 168, 1, 1)));
     }
 }

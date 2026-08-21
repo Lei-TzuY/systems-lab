@@ -18,14 +18,14 @@ pub const GTP_MSG_GPDU: u8 = 255; // User plane PDU (IP packet)
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GtpHeader {
-    pub version: u8,      // Typically 1
+    pub version: u8,         // Typically 1
     pub protocol_type: bool, // 1 for GTP (0 for GTP')
-    pub ext_flag: bool,   // Extension header present
-    pub seq_flag: bool,   // Sequence number present
-    pub npdu_flag: bool,  // N-PDU number present
+    pub ext_flag: bool,      // Extension header present
+    pub seq_flag: bool,      // Sequence number present
+    pub npdu_flag: bool,     // N-PDU number present
     pub msg_type: u8,
-    pub length: u16,      // Length of payload (plus optional 4B if flags set)
-    pub teid: u32,        // Tunnel Endpoint Identifier
+    pub length: u16, // Length of payload (plus optional 4B if flags set)
+    pub teid: u32,   // Tunnel Endpoint Identifier
     pub seq_num: Option<u16>,
     pub npdu_num: Option<u8>,
     pub next_ext: Option<u8>,

@@ -25,8 +25,10 @@ pub struct Ipv6Address(pub [u8; 16]);
 impl Ipv6Address {
     pub const UNSPECIFIED: Ipv6Address = Ipv6Address([0; 16]);
     pub const LOOPBACK: Ipv6Address = Ipv6Address([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
-    pub const LINK_LOCAL_ALL_NODES: Ipv6Address = Ipv6Address([0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
-    pub const LINK_LOCAL_ALL_ROUTERS: Ipv6Address = Ipv6Address([0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2]);
+    pub const LINK_LOCAL_ALL_NODES: Ipv6Address =
+        Ipv6Address([0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
+    pub const LINK_LOCAL_ALL_ROUTERS: Ipv6Address =
+        Ipv6Address([0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2]);
 
     pub fn new(words: [u16; 8]) -> Self {
         let mut bytes = [0u8; 16];
@@ -39,8 +41,8 @@ impl Ipv6Address {
 
     pub fn to_words(&self) -> [u16; 8] {
         let mut words = [0u16; 8];
-        for i in 0..8 {
-            words[i] = u16::from_be_bytes([self.0[i * 2], self.0[i * 2 + 1]]);
+        for (i, word) in words.iter_mut().enumerate() {
+            *word = u16::from_be_bytes([self.0[i * 2], self.0[i * 2 + 1]]);
         }
         words
     }
@@ -187,16 +189,30 @@ pub struct Ipv6Packet<'a> {
 pub enum Ipv6Error {
     PacketTooShort(usize),
     InvalidVersion(u8),
-    PayloadLengthMismatch { header_len: usize, actual_len: usize },
+    PayloadLengthMismatch {
+        header_len: usize,
+        actual_len: usize,
+    },
 }
 
 impl fmt::Display for Ipv6Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Ipv6Error::PacketTooShort(len) => write!(f, "IPv6 packet too short ({} bytes, min 40)", len),
-            Ipv6Error::InvalidVersion(v) => write!(f, "Invalid IP version: expected 6, found {}", v),
-            Ipv6Error::PayloadLengthMismatch { header_len, actual_len } => {
-                write!(f, "IPv6 payload length mismatch: header specifies {}, found {}", header_len, actual_len)
+            Ipv6Error::PacketTooShort(len) => {
+                write!(f, "IPv6 packet too short ({} bytes, min 40)", len)
+            }
+            Ipv6Error::InvalidVersion(v) => {
+                write!(f, "Invalid IP version: expected 6, found {}", v)
+            }
+            Ipv6Error::PayloadLengthMismatch {
+                header_len,
+                actual_len,
+            } => {
+                write!(
+                    f,
+                    "IPv6 payload length mismatch: header specifies {}, found {}",
+                    header_len, actual_len
+                )
             }
         }
     }

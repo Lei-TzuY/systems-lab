@@ -149,7 +149,8 @@ mod tests {
         let dst = MacAddress([0x00, 0x11, 0x22, 0x33, 0x44, 0x55]);
         let src = MacAddress([0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB]);
 
-        let (path_a, path_b) = engine.replicate(dst, src, 0x0800, b"TSN Time-Critical Mission Control");
+        let (path_a, path_b) =
+            engine.replicate(dst, src, 0x0800, b"TSN Time-Critical Mission Control");
         assert_eq!(path_a.rtag.sequence_number, 1);
         assert_eq!(path_b.rtag.sequence_number, 1);
 

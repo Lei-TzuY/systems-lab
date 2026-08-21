@@ -1,4 +1,7 @@
-use toy_tcpip::gtp::{GtpPacket, GtpTunnelTable, GTP_MSG_ECHO_REQUEST, GTP_MSG_ECHO_RESPONSE, GTP_MSG_GPDU, GTP_U_UDP_PORT};
+use toy_tcpip::gtp::{
+    GTP_MSG_ECHO_REQUEST, GTP_MSG_ECHO_RESPONSE, GTP_MSG_GPDU, GTP_U_UDP_PORT, GtpPacket,
+    GtpTunnelTable,
+};
 use toy_tcpip::ipv4::Ipv4Address;
 
 #[test]

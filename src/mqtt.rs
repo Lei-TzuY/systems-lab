@@ -64,7 +64,9 @@ impl fmt::Display for MqttError {
         match self {
             MqttError::PacketTooShort => write!(f, "MQTT packet too short"),
             MqttError::InvalidPacketType(t) => write!(f, "Invalid MQTT packet type: {}", t),
-            MqttError::InvalidRemainingLength => write!(f, "Malformed MQTT variable-length integer"),
+            MqttError::InvalidRemainingLength => {
+                write!(f, "Malformed MQTT variable-length integer")
+            }
             MqttError::MalformedUtf8String => write!(f, "Malformed UTF-8 string in MQTT packet"),
         }
     }
@@ -114,10 +116,10 @@ impl MqttPacket {
         body.extend_from_slice(&(topic.len() as u16).to_be_bytes());
         body.extend_from_slice(topic.as_bytes());
         // Packet ID if QoS > 0
-        if qos > 0 {
-            if let Some(pid) = packet_id {
-                body.extend_from_slice(&pid.to_be_bytes());
-            }
+        if qos > 0
+            && let Some(pid) = packet_id
+        {
+            body.extend_from_slice(&pid.to_be_bytes());
         }
         body.extend_from_slice(msg);
 
@@ -165,7 +167,8 @@ impl MqttPacket {
 
         let p_type_val = data[0] >> 4;
         let flags = data[0] & 0x0F;
-        let packet_type = MqttPacketType::from_u8(p_type_val).ok_or(MqttError::InvalidPacketType(p_type_val))?;
+        let packet_type =
+            MqttPacketType::from_u8(p_type_val).ok_or(MqttError::InvalidPacketType(p_type_val))?;
 
         let (rem_len, offset) = decode_remaining_length(data, 1)?;
         if data.len() < offset + rem_len {
@@ -178,18 +181,18 @@ impl MqttPacket {
 
         if packet_type == MqttPacketType::Publish && payload.len() >= 2 {
             let topic_len = u16::from_be_bytes([payload[0], payload[1]]) as usize;
-            if payload.len() >= 2 + topic_len {
-                if let Ok(t) = std::str::from_utf8(&payload[2..2 + topic_len]) {
-                    topic = Some(t.to_string());
-                }
+            if payload.len() >= 2 + topic_len
+                && let Ok(t) = std::str::from_utf8(&payload[2..2 + topic_len])
+            {
+                topic = Some(t.to_string());
             }
         } else if packet_type == MqttPacketType::Subscribe && payload.len() >= 4 {
             packet_id = Some(u16::from_be_bytes([payload[0], payload[1]]));
             let topic_len = u16::from_be_bytes([payload[2], payload[3]]) as usize;
-            if payload.len() >= 4 + topic_len {
-                if let Ok(t) = std::str::from_utf8(&payload[4..4 + topic_len]) {
-                    topic = Some(t.to_string());
-                }
+            if payload.len() >= 4 + topic_len
+                && let Ok(t) = std::str::from_utf8(&payload[4..4 + topic_len])
+            {
+                topic = Some(t.to_string());
             }
         }
 

@@ -1,4 +1,6 @@
-use toy_tcpip::bfd::{BfdControlPacket, BfdSession, BfdState, BFD_CONTROL_PORT, BFD_MIN_PACKET_LEN};
+use toy_tcpip::bfd::{
+    BFD_CONTROL_PORT, BFD_MIN_PACKET_LEN, BfdControlPacket, BfdSession, BfdState,
+};
 
 #[test]
 fn test_bfd_control_packet_serialization() {

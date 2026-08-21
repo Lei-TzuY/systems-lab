@@ -68,8 +68,12 @@ impl fmt::Display for LdapError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             LdapError::PacketTooShort => write!(f, "LDAP packet too short"),
-            LdapError::InvalidBerEncoding => write!(f, "Invalid ASN.1/BER encoding in LDAP message"),
-            LdapError::UnsupportedOp(tag) => write!(f, "Unsupported LDAP protocol op tag: 0x{:02X}", tag),
+            LdapError::InvalidBerEncoding => {
+                write!(f, "Invalid ASN.1/BER encoding in LDAP message")
+            }
+            LdapError::UnsupportedOp(tag) => {
+                write!(f, "Unsupported LDAP protocol op tag: 0x{:02X}", tag)
+            }
         }
     }
 }
@@ -102,7 +106,11 @@ impl LdapMessage {
     pub fn serialize(&self) -> Vec<u8> {
         let mut op_body = Vec::new();
         let op_tag = match &self.protocol_op {
-            LdapOp::BindRequest { version, name, password } => {
+            LdapOp::BindRequest {
+                version,
+                name,
+                password,
+            } => {
                 // Integer version
                 op_body.push(0x02);
                 op_body.push(1);
@@ -115,7 +123,11 @@ impl LdapMessage {
                 op_body.extend_from_slice(password.as_bytes());
                 LDAP_TAG_BIND_REQUEST
             }
-            LdapOp::BindResponse { result_code, matched_dn, diagnostic_message } => {
+            LdapOp::BindResponse {
+                result_code,
+                matched_dn,
+                diagnostic_message,
+            } => {
                 // Enumerated result_code
                 op_body.push(0x0A);
                 op_body.push(1);
@@ -126,22 +138,40 @@ impl LdapMessage {
                 encode_octet_string(&mut op_body, diagnostic_message.as_bytes());
                 LDAP_TAG_BIND_RESPONSE
             }
-            LdapOp::SearchRequest { base_object, filter, .. } => {
+            LdapOp::SearchRequest {
+                base_object,
+                filter,
+                ..
+            } => {
                 encode_octet_string(&mut op_body, base_object.as_bytes());
-                op_body.push(0x0A); op_body.push(1); op_body.push(2); // Scope: wholeSubtree (2)
-                op_body.push(0x0A); op_body.push(1); op_body.push(0); // Deref: neverDerefAliases (0)
-                op_body.push(0x02); op_body.push(1); op_body.push(0); // SizeLimit: 0
-                op_body.push(0x02); op_body.push(1); op_body.push(0); // TimeLimit: 0
-                op_body.push(0x01); op_body.push(1); op_body.push(0); // TypesOnly: false
+                op_body.push(0x0A);
+                op_body.push(1);
+                op_body.push(2); // Scope: wholeSubtree (2)
+                op_body.push(0x0A);
+                op_body.push(1);
+                op_body.push(0); // Deref: neverDerefAliases (0)
+                op_body.push(0x02);
+                op_body.push(1);
+                op_body.push(0); // SizeLimit: 0
+                op_body.push(0x02);
+                op_body.push(1);
+                op_body.push(0); // TimeLimit: 0
+                op_body.push(0x01);
+                op_body.push(1);
+                op_body.push(0); // TypesOnly: false
                 // Filter: EqualityMatch string [CONTEXT 3]
                 op_body.push(0xA3);
                 encode_length(&mut op_body, filter.len());
                 op_body.extend_from_slice(filter.as_bytes());
                 // Attributes Sequence
-                op_body.push(0x30); op_body.push(0x00);
+                op_body.push(0x30);
+                op_body.push(0x00);
                 LDAP_TAG_SEARCH_REQUEST
             }
-            LdapOp::SearchResultEntry { object_name, attributes } => {
+            LdapOp::SearchResultEntry {
+                object_name,
+                attributes,
+            } => {
                 encode_octet_string(&mut op_body, object_name.as_bytes());
                 // PartialAttributeList SEQUENCE OF
                 let mut attr_list_bytes = Vec::new();
@@ -167,7 +197,11 @@ impl LdapMessage {
                 op_body.extend_from_slice(&attr_list_bytes);
                 LDAP_TAG_SEARCH_RESULT_ENTRY
             }
-            LdapOp::SearchResultDone { result_code, matched_dn, diagnostic_message } => {
+            LdapOp::SearchResultDone {
+                result_code,
+                matched_dn,
+                diagnostic_message,
+            } => {
                 op_body.push(0x0A);
                 op_body.push(1);
                 op_body.push(*result_code);
@@ -234,7 +268,11 @@ impl LdapMessage {
                 }
             }
             LDAP_TAG_BIND_RESPONSE => {
-                let result_code = if !op_body.is_empty() && op_body[0] == 0x0A { op_body[2] } else { 0 };
+                let result_code = if !op_body.is_empty() && op_body[0] == 0x0A {
+                    op_body[2]
+                } else {
+                    0
+                };
                 LdapOp::BindResponse {
                     result_code,
                     matched_dn: "".to_string(),
@@ -257,7 +295,11 @@ impl LdapMessage {
                 }
             }
             LDAP_TAG_SEARCH_RESULT_DONE => {
-                let result_code = if !op_body.is_empty() && op_body[0] == 0x0A { op_body[2] } else { 0 };
+                let result_code = if !op_body.is_empty() && op_body[0] == 0x0A {
+                    op_body[2]
+                } else {
+                    0
+                };
                 LdapOp::SearchResultDone {
                     result_code,
                     matched_dn: "".to_string(),
@@ -296,10 +338,14 @@ fn decode_length(data: &[u8], offset: usize) -> Result<(usize, usize), LdapError
     if b < 128 {
         Ok((b as usize, offset + 1))
     } else if b == 0x81 {
-        if offset + 1 >= data.len() { return Err(LdapError::InvalidBerEncoding); }
+        if offset + 1 >= data.len() {
+            return Err(LdapError::InvalidBerEncoding);
+        }
         Ok((data[offset + 1] as usize, offset + 2))
     } else if b == 0x82 {
-        if offset + 2 >= data.len() { return Err(LdapError::InvalidBerEncoding); }
+        if offset + 2 >= data.len() {
+            return Err(LdapError::InvalidBerEncoding);
+        }
         let len = ((data[offset + 1] as usize) << 8) | (data[offset + 2] as usize);
         Ok((len, offset + 3))
     } else {
@@ -343,7 +389,10 @@ impl LdapServer {
         let mut directory = HashMap::new();
 
         let mut alice = HashMap::new();
-        alice.insert("objectClass".to_string(), vec!["person".to_string(), "inetOrgPerson".to_string()]);
+        alice.insert(
+            "objectClass".to_string(),
+            vec!["person".to_string(), "inetOrgPerson".to_string()],
+        );
         alice.insert("cn".to_string(), vec!["Alice Cooper".to_string()]);
         alice.insert("mail".to_string(), vec!["alice@example.org".to_string()]);
         alice.insert("userPassword".to_string(), vec!["secret123".to_string()]);
@@ -423,7 +472,12 @@ mod tests {
         let resps = srv.handle_request(&bind_req);
         assert_eq!(resps.len(), 1);
 
-        let search_req = LdapMessage::new_search_request(2, "dc=example,dc=org", "(objectClass=*)", &["cn", "mail"]);
+        let search_req = LdapMessage::new_search_request(
+            2,
+            "dc=example,dc=org",
+            "(objectClass=*)",
+            &["cn", "mail"],
+        );
         let search_resps = srv.handle_request(&search_req);
         assert_eq!(search_resps.len(), 3); // Alice + Bob + SearchResultDone
     }

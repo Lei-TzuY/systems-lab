@@ -7,8 +7,8 @@
 use crate::ipv6::Ipv6Address;
 
 pub const USID_CARRIER_BLOCK_LEN_BITS: usize = 32; // 32-bit block prefix
-pub const USID_LEN_BITS: usize = 16;               // 16-bit uSID per hop
-pub const USID_MAX_HOPS: usize = 6;                // (128 - 32) / 16 = 6 micro-SIDs
+pub const USID_LEN_BITS: usize = 16; // 16-bit uSID per hop
+pub const USID_MAX_HOPS: usize = 6; // (128 - 32) / 16 = 6 micro-SIDs
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UsidBehavior {
@@ -20,8 +20,8 @@ pub enum UsidBehavior {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UsidCarrier {
-    pub block_prefix: u32,       // e.g. 0xFC000001 (fc00:1::/32)
-    pub micro_sids: Vec<u16>,     // list of 16-bit micro-SIDs
+    pub block_prefix: u32,    // e.g. 0xFC000001 (fc00:1::/32)
+    pub micro_sids: Vec<u16>, // list of 16-bit micro-SIDs
 }
 
 impl UsidCarrier {
@@ -83,7 +83,10 @@ impl UsidForwardingEngine {
     }
 
     /// Performs the uSID Shift-and-Forward processing on an ingress IPv6 Destination Address
-    pub fn process_destination_address(&self, da: &Ipv6Address) -> Option<(Ipv6Address, UsidBehavior)> {
+    pub fn process_destination_address(
+        &self,
+        da: &Ipv6Address,
+    ) -> Option<(Ipv6Address, UsidBehavior)> {
         let mut carrier = UsidCarrier::from_ipv6(da);
         if carrier.micro_sids.is_empty() {
             return None;

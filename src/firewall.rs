@@ -3,7 +3,7 @@
 //! Provides rule matching across INPUT, OUTPUT, and FORWARD chains with CIDR subnet matching,
 //! protocol filtering, port range evaluation, and ACCEPT / DROP / REJECT verdicts.
 
-use crate::ipv4::{Ipv4Address, Ipv4Packet, IP_PROTO_TCP, IP_PROTO_UDP};
+use crate::ipv4::{IP_PROTO_TCP, IP_PROTO_UDP, Ipv4Address, Ipv4Packet};
 use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -13,8 +13,9 @@ pub enum FirewallChain {
     Forward,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum FirewallAction {
+    #[default]
     Accept,
     Drop,
     Reject,
@@ -65,33 +66,27 @@ pub struct FirewallRule {
     pub action: FirewallAction,
 }
 
-impl Default for FirewallAction {
-    fn default() -> Self {
-        FirewallAction::Accept
-    }
-}
-
 impl FirewallRule {
     pub fn matches(&self, packet: &Ipv4Packet<'_>) -> bool {
         // 1. Source IP check
-        if let Some(ref src_cidr) = self.src_cidr {
-            if !src_cidr.matches(packet.header.src_ip) {
-                return false;
-            }
+        if let Some(ref src_cidr) = self.src_cidr
+            && !src_cidr.matches(packet.header.src_ip)
+        {
+            return false;
         }
 
         // 2. Destination IP check
-        if let Some(ref dst_cidr) = self.dst_cidr {
-            if !dst_cidr.matches(packet.header.dst_ip) {
-                return false;
-            }
+        if let Some(ref dst_cidr) = self.dst_cidr
+            && !dst_cidr.matches(packet.header.dst_ip)
+        {
+            return false;
         }
 
         // 3. Protocol check
-        if let Some(proto) = self.protocol {
-            if packet.header.protocol.to_u8() != proto {
-                return false;
-            }
+        if let Some(proto) = self.protocol
+            && packet.header.protocol.to_u8() != proto
+        {
+            return false;
         }
 
         // 4. Port ranges (TCP/UDP)
@@ -104,16 +99,16 @@ impl FirewallRule {
                 let src_port = u16::from_be_bytes([packet.payload[0], packet.payload[1]]);
                 let dst_port = u16::from_be_bytes([packet.payload[2], packet.payload[3]]);
 
-                if let Some((min_sp, max_sp)) = self.src_port_range {
-                    if src_port < min_sp || src_port > max_sp {
-                        return false;
-                    }
+                if let Some((min_sp, max_sp)) = self.src_port_range
+                    && (src_port < min_sp || src_port > max_sp)
+                {
+                    return false;
                 }
 
-                if let Some((min_dp, max_dp)) = self.dst_port_range {
-                    if dst_port < min_dp || dst_port > max_dp {
-                        return false;
-                    }
+                if let Some((min_dp, max_dp)) = self.dst_port_range
+                    && (dst_port < min_dp || dst_port > max_dp)
+                {
+                    return false;
                 }
             } else {
                 return false;
@@ -229,7 +224,10 @@ mod tests {
             &[8, 0, 0, 0],
         );
         let pkt_icmp = Ipv4Packet::parse(&raw_icmp, false).unwrap();
-        assert_eq!(fw.evaluate(FirewallChain::Input, &pkt_icmp), FirewallAction::Drop);
+        assert_eq!(
+            fw.evaluate(FirewallChain::Input, &pkt_icmp),
+            FirewallAction::Drop
+        );
 
         // 2. Packet from 192.168.1.100 ICMP -> should ACCEPT (default policy)
         let raw_icmp2 = Ipv4Packet::serialize(
@@ -241,6 +239,9 @@ mod tests {
             &[8, 0, 0, 0],
         );
         let pkt_icmp2 = Ipv4Packet::parse(&raw_icmp2, false).unwrap();
-        assert_eq!(fw.evaluate(FirewallChain::Input, &pkt_icmp2), FirewallAction::Accept);
+        assert_eq!(
+            fw.evaluate(FirewallChain::Input, &pkt_icmp2),
+            FirewallAction::Accept
+        );
     }
 }

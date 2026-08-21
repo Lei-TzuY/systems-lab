@@ -75,7 +75,8 @@ impl NrfRegistry {
 
     /// Nnrf_NFManagement_NFRegister service operation
     pub fn register_nf(&mut self, profile: NfProfile) {
-        self.profiles.insert(profile.nf_instance_id.clone(), profile);
+        self.profiles
+            .insert(profile.nf_instance_id.clone(), profile);
     }
 
     /// Nnrf_NFManagement_NFDeregister service operation
@@ -116,7 +117,10 @@ impl SbaMessageBus {
         if candidates.is_empty() {
             return SbaResponse {
                 status_code: 404,
-                body_json: format!("{{\"error\":\"No registered NF instances found for {}\"}}", req.target_nf.as_str()),
+                body_json: format!(
+                    "{{\"error\":\"No registered NF instances found for {}\"}}",
+                    req.target_nf.as_str()
+                ),
             };
         }
 
@@ -126,7 +130,9 @@ impl SbaMessageBus {
                 // Namf_Communication_CreateUEContext
                 SbaResponse {
                     status_code: 201,
-                    body_json: "{\"amfStatus\":\"UE_CONTEXT_CREATED\",\"supi\":\"imsi-208950000000001\"}".to_string(),
+                    body_json:
+                        "{\"amfStatus\":\"UE_CONTEXT_CREATED\",\"supi\":\"imsi-208950000000001\"}"
+                            .to_string(),
                 }
             }
             NfType::Smf => {

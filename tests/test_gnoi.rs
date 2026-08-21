@@ -1,4 +1,4 @@
-use toy_tcpip::gnoi::{GnoiHealthStatus, GnoiServer, GNOI_PORT, GNOI_VERSION};
+use toy_tcpip::gnoi::{GNOI_PORT, GNOI_VERSION, GnoiHealthStatus, GnoiServer};
 use toy_tcpip::ipv4::Ipv4Address;
 
 #[test]
@@ -9,7 +9,11 @@ fn test_gnoi_system_ping_and_healthz() {
     assert_eq!(ping_results[3].sequence, 4);
 
     let health = server.check_health();
-    assert!(health.iter().any(|h| h.component == "SwitchingFabric" && h.status == GnoiHealthStatus::Healthy));
+    assert!(
+        health
+            .iter()
+            .any(|h| h.component == "SwitchingFabric" && h.status == GnoiHealthStatus::Healthy)
+    );
 }
 
 #[test]

@@ -26,9 +26,9 @@ pub struct BthHeader {
     pub solicited: bool,
     pub pad_count: u8,
     pub pkey: u16,
-    pub dest_qp: u32,  // 24-bit Destination Queue Pair
+    pub dest_qp: u32, // 24-bit Destination Queue Pair
     pub ack_req: bool,
-    pub psn: u32,      // 24-bit Packet Sequence Number
+    pub psn: u32, // 24-bit Packet Sequence Number
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,7 +63,9 @@ impl fmt::Display for RoceError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             RoceError::PacketTooShort(l) => write!(f, "RoCEv2 packet too short ({} bytes)", l),
-            RoceError::InvalidOpcode(op) => write!(f, "Invalid InfiniBand BTH OpCode: 0x{:02X}", op),
+            RoceError::InvalidOpcode(op) => {
+                write!(f, "Invalid InfiniBand BTH OpCode: 0x{:02X}", op)
+            }
             RoceError::InvalidLength => write!(f, "Invalid RoCEv2 length"),
         }
     }
@@ -244,7 +246,9 @@ impl RocePacket {
         let bth = BthHeader::parse(&data[..ROCEV2_BTH_LEN])?;
         let mut offset = ROCEV2_BTH_LEN;
 
-        let reth = if bth.opcode == IB_OPCODE_RC_RDMA_WRITE_ONLY || bth.opcode == IB_OPCODE_RC_RDMA_READ_REQUEST {
+        let reth = if bth.opcode == IB_OPCODE_RC_RDMA_WRITE_ONLY
+            || bth.opcode == IB_OPCODE_RC_RDMA_READ_REQUEST
+        {
             if data.len() < offset + ROCEV2_RETH_LEN + ROCEV2_ICRC_LEN {
                 return Err(RoceError::PacketTooShort(data.len()));
             }
@@ -317,9 +321,9 @@ impl PfcPauseFrame {
 
         let class_enable_vector = data[3];
         let mut pause_times = [0u16; 8];
-        for i in 0..8 {
+        for (i, pause_time) in pause_times.iter_mut().enumerate() {
             let offset = 4 + i * 2;
-            pause_times[i] = u16::from_be_bytes([data[offset], data[offset + 1]]);
+            *pause_time = u16::from_be_bytes([data[offset], data[offset + 1]]);
         }
 
         Ok(PfcPauseFrame {
@@ -381,7 +385,7 @@ mod tests {
         assert_eq!(parsed.payload, b"Direct GPU Memory RDMA Buffer Transfer");
 
         let ok = qp2.receive_packet(&parsed);
-        assert_eq!(ok, true);
+        assert!(ok);
         assert_eq!(qp2.expected_recv_psn, 1001);
 
         let ack = RocePacket::build_ack(101, 1000);
@@ -395,7 +399,7 @@ mod tests {
     fn test_pfc_pause_frame_roundtrip() {
         let pfc = PfcPauseFrame::new(&[3, 4], 65535);
         let raw = pfc.serialize();
-        assert_eq!(raw.len() >= 46, true);
+        assert!(raw.len() >= 46);
 
         let parsed = PfcPauseFrame::parse(&raw).unwrap();
         assert_eq!(parsed.class_enable_vector, 0b00011000); // Bits 3 and 4 enabled

@@ -42,9 +42,18 @@ pub enum Http2Error {
 impl fmt::Display for Http2Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Http2Error::FrameTooShort(len) => write!(f, "HTTP/2 frame too short ({} bytes, min 9)", len),
-            Http2Error::LengthMismatch { header_len, available } => {
-                write!(f, "HTTP/2 frame length {} exceeds available buffer {}", header_len, available)
+            Http2Error::FrameTooShort(len) => {
+                write!(f, "HTTP/2 frame too short ({} bytes, min 9)", len)
+            }
+            Http2Error::LengthMismatch {
+                header_len,
+                available,
+            } => {
+                write!(
+                    f,
+                    "HTTP/2 frame length {} exceeds available buffer {}",
+                    header_len, available
+                )
             }
         }
     }
@@ -68,7 +77,8 @@ impl Http2Frame {
             return Err(Http2Error::FrameTooShort(data.len()));
         }
 
-        let length = (((data[0] as u32) << 16) | ((data[1] as u32) << 8) | (data[2] as u32)) as usize;
+        let length =
+            (((data[0] as u32) << 16) | ((data[1] as u32) << 8) | (data[2] as u32)) as usize;
         let frame_type = data[3];
         let flags = data[4];
         let stream_id = u32::from_be_bytes([data[5], data[6], data[7], data[8]]) & 0x7FFF_FFFF;
@@ -114,10 +124,19 @@ impl Http2Frame {
     }
 
     /// Builds an HTTP/2 HEADERS frame
-    pub fn build_headers(stream_id: u32, end_stream: bool, end_headers: bool, header_block: &[u8]) -> Self {
+    pub fn build_headers(
+        stream_id: u32,
+        end_stream: bool,
+        end_headers: bool,
+        header_block: &[u8],
+    ) -> Self {
         let mut flags = 0;
-        if end_stream { flags |= HTTP2_FLAG_END_STREAM; }
-        if end_headers { flags |= HTTP2_FLAG_END_HEADERS; }
+        if end_stream {
+            flags |= HTTP2_FLAG_END_STREAM;
+        }
+        if end_headers {
+            flags |= HTTP2_FLAG_END_HEADERS;
+        }
         Http2Frame::new(HTTP2_FRAME_HEADERS, flags, stream_id, header_block.to_vec())
     }
 

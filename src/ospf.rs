@@ -5,8 +5,8 @@
 
 use crate::checksum::compute_checksum;
 use crate::ipv4::Ipv4Address;
-use std::collections::{BinaryHeap, HashMap};
 use std::cmp::Ordering;
+use std::collections::{BinaryHeap, HashMap};
 use std::fmt;
 
 pub const IP_PROTO_OSPF: u8 = 89;
@@ -58,8 +58,12 @@ pub enum OspfError {
 impl fmt::Display for OspfError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            OspfError::PacketTooShort(l) => write!(f, "OSPF packet too short ({} bytes, min 24)", l),
-            OspfError::InvalidVersion(v) => write!(f, "Invalid OSPF version: expected 2, found {}", v),
+            OspfError::PacketTooShort(l) => {
+                write!(f, "OSPF packet too short ({} bytes, min 24)", l)
+            }
+            OspfError::InvalidVersion(v) => {
+                write!(f, "Invalid OSPF version: expected 2, found {}", v)
+            }
             OspfError::InvalidChecksum => write!(f, "OSPF checksum verification failed"),
         }
     }
@@ -179,7 +183,12 @@ impl OspfHelloPacket {
         buf
     }
 
-    pub fn build_hello(router_id: Ipv4Address, mask: Ipv4Address, dr: Ipv4Address, neighbors: Vec<Ipv4Address>) -> Self {
+    pub fn build_hello(
+        router_id: Ipv4Address,
+        mask: Ipv4Address,
+        dr: Ipv4Address,
+        neighbors: Vec<Ipv4Address>,
+    ) -> Self {
         let header = OspfHeader {
             version: OSPF_VERSION_2,
             msg_type: OSPF_TYPE_HELLO,
@@ -259,13 +268,19 @@ impl OspfLsdb {
     }
 
     /// Computes shortest path tree from source router using Dijkstra's algorithm
-    pub fn compute_shortest_paths(&self, src: Ipv4Address) -> HashMap<Ipv4Address, (u32, Option<Ipv4Address>)> {
+    pub fn compute_shortest_paths(
+        &self,
+        src: Ipv4Address,
+    ) -> HashMap<Ipv4Address, (u32, Option<Ipv4Address>)> {
         let mut dist: HashMap<Ipv4Address, u32> = HashMap::new();
         let mut next_hop: HashMap<Ipv4Address, Option<Ipv4Address>> = HashMap::new();
         let mut heap = BinaryHeap::new();
 
         dist.insert(src, 0);
-        heap.push(SpfNode { cost: 0, router: src });
+        heap.push(SpfNode {
+            cost: 0,
+            router: src,
+        });
 
         while let Some(SpfNode { cost, router }) = heap.pop() {
             if cost > *dist.get(&router).unwrap_or(&u32::MAX) {
@@ -286,7 +301,10 @@ impl OspfLsdb {
                         };
                         next_hop.insert(next, nh);
 
-                        heap.push(SpfNode { cost: next_cost, router: next });
+                        heap.push(SpfNode {
+                            cost: next_cost,
+                            router: next,
+                        });
                     }
                 }
             }

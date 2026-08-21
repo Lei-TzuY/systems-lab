@@ -1,7 +1,5 @@
 use toy_tcpip::ipv4::Ipv4Address;
-use toy_tcpip::tcp::{
-    SocketAddrV4, TcpConnectionKey, TcpFlags, TcpManager, TcpSegment, TcpState,
-};
+use toy_tcpip::tcp::{SocketAddrV4, TcpConnectionKey, TcpFlags, TcpManager, TcpSegment, TcpState};
 
 #[test]
 fn test_tcp_flags_formatting_and_bits() {
@@ -26,8 +24,14 @@ fn test_tcp_full_lifecycle_handshake_data_fin() {
     let client_port = 60000;
 
     let key = TcpConnectionKey {
-        local: SocketAddrV4 { ip: server_ip, port },
-        remote: SocketAddrV4 { ip: client_ip, port: client_port },
+        local: SocketAddrV4 {
+            ip: server_ip,
+            port,
+        },
+        remote: SocketAddrV4 {
+            ip: client_ip,
+            port: client_port,
+        },
     };
 
     // 1. Client sends SYN (Seq 1000)
@@ -43,7 +47,9 @@ fn test_tcp_full_lifecycle_handshake_data_fin() {
         &[],
     );
     let syn_parsed = TcpSegment::parse(client_ip, server_ip, &syn, true).unwrap();
-    let syn_ack_raw = mgr.process_segment(client_ip, server_ip, &syn_parsed).expect("SYN-ACK");
+    let syn_ack_raw = mgr
+        .process_segment(client_ip, server_ip, &syn_parsed)
+        .expect("SYN-ACK");
     let syn_ack = TcpSegment::parse(server_ip, client_ip, &syn_ack_raw, true).unwrap();
 
     assert!(syn_ack.flags.syn && syn_ack.flags.ack);
@@ -64,7 +70,10 @@ fn test_tcp_full_lifecycle_handshake_data_fin() {
     let ack_parsed = TcpSegment::parse(client_ip, server_ip, &ack, true).unwrap();
     let resp = mgr.process_segment(client_ip, server_ip, &ack_parsed);
     assert!(resp.is_none());
-    assert_eq!(mgr.connections.get(&key).unwrap().state, TcpState::Established);
+    assert_eq!(
+        mgr.connections.get(&key).unwrap().state,
+        TcpState::Established
+    );
 
     // 3. Client sends 10 bytes of Data
     let data_payload = b"0123456789";
@@ -75,12 +84,18 @@ fn test_tcp_full_lifecycle_handshake_data_fin() {
         port,
         1001,
         syn_ack.seq_num + 1,
-        TcpFlags { psh: true, ack: true, ..Default::default() },
+        TcpFlags {
+            psh: true,
+            ack: true,
+            ..Default::default()
+        },
         65535,
         data_payload,
     );
     let data_parsed = TcpSegment::parse(client_ip, server_ip, &data_seg, true).unwrap();
-    let data_ack_raw = mgr.process_segment(client_ip, server_ip, &data_parsed).expect("Data ACK");
+    let data_ack_raw = mgr
+        .process_segment(client_ip, server_ip, &data_parsed)
+        .expect("Data ACK");
     let data_ack = TcpSegment::parse(server_ip, client_ip, &data_ack_raw, true).unwrap();
 
     assert_eq!(data_ack.ack_num, 1001 + 10);
@@ -99,7 +114,9 @@ fn test_tcp_full_lifecycle_handshake_data_fin() {
         &[],
     );
     let fin_parsed = TcpSegment::parse(client_ip, server_ip, &fin_seg, true).unwrap();
-    let fin_ack_raw = mgr.process_segment(client_ip, server_ip, &fin_parsed).expect("FIN-ACK");
+    let fin_ack_raw = mgr
+        .process_segment(client_ip, server_ip, &fin_parsed)
+        .expect("FIN-ACK");
     let fin_ack = TcpSegment::parse(server_ip, client_ip, &fin_ack_raw, true).unwrap();
     assert!(fin_ack.flags.fin && fin_ack.flags.ack);
 }

@@ -1,4 +1,4 @@
-use toy_tcpip::otlp::{OtlpExporter, OtlpMetric, OtlpSpan, OTLP_GRPC_PORT, OTLP_HTTP_PORT};
+use toy_tcpip::otlp::{OTLP_GRPC_PORT, OTLP_HTTP_PORT, OtlpExporter, OtlpMetric, OtlpSpan};
 
 #[test]
 fn test_otlp_exporter_metrics_and_spans() {
@@ -7,9 +7,24 @@ fn test_otlp_exporter_metrics_and_spans() {
 
     let mut exporter = OtlpExporter::new("datacenter-switch-01");
 
-    exporter.record_counter("system.network.in_bytes", "Total ingress octets", "bytes", 102400000);
-    exporter.record_counter("system.network.out_bytes", "Total egress octets", "bytes", 85400000);
-    exporter.record_gauge("system.network.queue_depth", "Current egress buffer queue depth", "packets", 12.0);
+    exporter.record_counter(
+        "system.network.in_bytes",
+        "Total ingress octets",
+        "bytes",
+        102400000,
+    );
+    exporter.record_counter(
+        "system.network.out_bytes",
+        "Total egress octets",
+        "bytes",
+        85400000,
+    );
+    exporter.record_gauge(
+        "system.network.queue_depth",
+        "Current egress buffer queue depth",
+        "packets",
+        12.0,
+    );
 
     let span = OtlpSpan {
         trace_id: [0x01; 16],
@@ -26,11 +41,11 @@ fn test_otlp_exporter_metrics_and_spans() {
     exporter.record_span(span);
 
     let json = exporter.export_json();
-    assert_eq!(json.contains("datacenter-switch-01"), true);
-    assert_eq!(json.contains("system.network.in_bytes"), true);
-    assert_eq!(json.contains("system.network.queue_depth"), true);
-    assert_eq!(json.contains("bgp.session.open"), true);
-    assert_eq!(json.contains("102400000"), true);
+    assert!(json.contains("datacenter-switch-01"));
+    assert!(json.contains("system.network.in_bytes"));
+    assert!(json.contains("system.network.queue_depth"));
+    assert!(json.contains("bgp.session.open"));
+    assert!(json.contains("102400000"));
 }
 
 #[test]
@@ -48,6 +63,6 @@ fn test_otlp_metric_histogram_and_formatting() {
     exporter.metrics.push(hist);
 
     let json = exporter.export_json();
-    assert_eq!(json.contains("net.tcp.rtt"), true);
-    assert_eq!(json.contains("125.5"), true);
+    assert!(json.contains("net.tcp.rtt"));
+    assert!(json.contains("125.5"));
 }

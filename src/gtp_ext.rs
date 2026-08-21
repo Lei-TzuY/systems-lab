@@ -10,9 +10,9 @@ pub const PDU_SESSION_TYPE_UL: u8 = 1;
 /// 5G PDU Session Container (3GPP TS 38.415)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PduSessionContainer {
-    pub pdu_type: u8, // 0 = DL, 1 = UL
-    pub qfi: u8,      // 6-bit QoS Flow Identifier (1..64)
-    pub rqi: bool,    // Reflective QoS Indicator (DL only)
+    pub pdu_type: u8,    // 0 = DL, 1 = UL
+    pub qfi: u8,         // 6-bit QoS Flow Identifier (1..64)
+    pub rqi: bool,       // Reflective QoS Indicator (DL only)
     pub ppi: Option<u8>, // Paging Policy Indicator (optional 3-bit)
 }
 
@@ -39,7 +39,7 @@ impl PduSessionContainer {
     pub fn serialize(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(4);
         buf.push(1); // Extension Header Length in 4-octet units (1 = 4 octets)
-        
+
         let type_and_flags = (self.pdu_type << 4) | (if self.rqi { 0x01 } else { 0x00 });
         buf.push(type_and_flags);
         buf.push(self.qfi & 0x3F);
@@ -68,22 +68,26 @@ impl PduSessionContainer {
 }
 
 /// Helper to serialize a full GTP-U packet containing PDU Session Container extension header
-pub fn build_gtpu_with_pdu_container(teid: u32, container: &PduSessionContainer, payload: &[u8]) -> Vec<u8> {
+pub fn build_gtpu_with_pdu_container(
+    teid: u32,
+    container: &PduSessionContainer,
+    payload: &[u8],
+) -> Vec<u8> {
     let mut buf = Vec::with_capacity(16 + payload.len());
     // GTP-U Flags: Flags=0x34 (v1, ProtocolType=1, E=1 (Extension header present))
     buf.push(0x34);
     buf.push(0xFF); // Message Type: G-PDU (0xFF)
-    
+
     let total_payload_len = 4 + 4 + payload.len(); // 4 (Seq+NPDU+NextExt) + 4 (Ext Hdr) + payload
     buf.extend_from_slice(&(total_payload_len as u16).to_be_bytes());
     buf.extend_from_slice(&teid.to_be_bytes());
-    
+
     // Optional fields (Seq No = 0, N-PDU = 0, Next Ext Hdr = 0x85)
     buf.push(0x00);
     buf.push(0x00);
     buf.push(0x00);
     buf.push(GTP_EXT_HDR_PDU_SESSION_CONTAINER);
-    
+
     // Append Extension Header
     buf.extend_from_slice(&container.serialize());
     // Append Inner IP payload

@@ -42,9 +42,19 @@ pub enum PppoeError {
 impl fmt::Display for PppoeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            PppoeError::PacketTooShort(l) => write!(f, "PPPoE packet too short ({} bytes, min 6)", l),
-            PppoeError::InvalidVersionType(v) => write!(f, "Invalid PPPoE version/type byte: 0x{:02x} (expected 0x11)", v),
-            PppoeError::PayloadLengthMismatch(h, a) => write!(f, "PPPoE length mismatch: header specifies {}, received {}", h, a),
+            PppoeError::PacketTooShort(l) => {
+                write!(f, "PPPoE packet too short ({} bytes, min 6)", l)
+            }
+            PppoeError::InvalidVersionType(v) => write!(
+                f,
+                "Invalid PPPoE version/type byte: 0x{:02x} (expected 0x11)",
+                v
+            ),
+            PppoeError::PayloadLengthMismatch(h, a) => write!(
+                f,
+                "PPPoE length mismatch: header specifies {}, received {}",
+                h, a
+            ),
         }
     }
 }
@@ -67,7 +77,10 @@ impl PppoePacket {
         let length = u16::from_be_bytes([data[4], data[5]]) as usize;
 
         if data.len() < PPPOE_HEADER_LEN + length {
-            return Err(PppoeError::PayloadLengthMismatch(length, data.len() - PPPOE_HEADER_LEN));
+            return Err(PppoeError::PayloadLengthMismatch(
+                length,
+                data.len() - PPPOE_HEADER_LEN,
+            ));
         }
 
         let payload = data[PPPOE_HEADER_LEN..PPPOE_HEADER_LEN + length].to_vec();
@@ -145,7 +158,10 @@ mod tests {
         let parsed = PppoePacket::parse(&raw).unwrap();
         assert_eq!(parsed.code, PPPOE_CODE_SESSION_DATA);
         assert_eq!(parsed.session_id, 0x0042);
-        assert_eq!(u16::from_be_bytes([parsed.payload[0], parsed.payload[1]]), PPP_PROTO_IPV4);
+        assert_eq!(
+            u16::from_be_bytes([parsed.payload[0], parsed.payload[1]]),
+            PPP_PROTO_IPV4
+        );
         assert_eq!(&parsed.payload[2..], ip_payload);
     }
 }

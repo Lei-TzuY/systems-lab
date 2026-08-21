@@ -1,5 +1,5 @@
-use toy_tcpip::fragment::{fragment_payload, IpReassemblyBuffer};
-use toy_tcpip::ipv4::{Ipv4Address, Ipv4Packet, IP_PROTO_ICMP};
+use toy_tcpip::fragment::{IpReassemblyBuffer, fragment_payload};
+use toy_tcpip::ipv4::{IP_PROTO_ICMP, Ipv4Address, Ipv4Packet};
 
 #[test]
 fn test_large_ip_fragmentation_and_reassembly() {

@@ -4,7 +4,7 @@
 //! offline PCAP playback/recording, and virtual OS TAP interfaces.
 
 use crate::ethernet::MacAddress;
-use crate::pcap::{PcapPacket, PcapReader, PcapWriter, LINKTYPE_ETHERNET};
+use crate::pcap::{LINKTYPE_ETHERNET, PcapPacket, PcapReader, PcapWriter};
 use std::collections::VecDeque;
 use std::fs::File;
 
@@ -88,7 +88,9 @@ impl PcapDevice {
     ) -> Result<Self, String> {
         let reader = PcapReader::new(input_file).map_err(|e| e.to_string())?;
         let writer = match output_file {
-            Some(f) => Some(PcapWriter::new(f, 65535, LINKTYPE_ETHERNET).map_err(|e| e.to_string())?),
+            Some(f) => {
+                Some(PcapWriter::new(f, 65535, LINKTYPE_ETHERNET).map_err(|e| e.to_string())?)
+            }
             None => None,
         };
 

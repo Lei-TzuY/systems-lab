@@ -1,5 +1,5 @@
 use toy_tcpip::ipv4::Ipv4Address;
-use toy_tcpip::netflow::{NetflowFlowTable, NetflowPacket, NetflowRecord, NETFLOW_V9_UDP_PORT};
+use toy_tcpip::netflow::{NETFLOW_V9_UDP_PORT, NetflowFlowTable, NetflowPacket, NetflowRecord};
 
 #[test]
 fn test_netflow_v9_template_and_data_flowsets() {

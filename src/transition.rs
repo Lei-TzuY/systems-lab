@@ -30,8 +30,12 @@ pub enum TransitionError {
 impl fmt::Display for TransitionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TransitionError::InvalidProtocol(p) => write!(f, "Invalid transition tunnel protocol: {}", p),
-            TransitionError::PacketTooShort(l) => write!(f, "Transition tunnel packet too short ({} bytes)", l),
+            TransitionError::InvalidProtocol(p) => {
+                write!(f, "Invalid transition tunnel protocol: {}", p)
+            }
+            TransitionError::PacketTooShort(l) => {
+                write!(f, "Transition tunnel packet too short ({} bytes)", l)
+            }
         }
     }
 }
@@ -59,7 +63,9 @@ impl Tunnel6in4 {
 
     pub fn decapsulate<'a>(&self, ip4_packet: &'a Ipv4Packet) -> Result<&'a [u8], TransitionError> {
         if ip4_packet.header.protocol.to_u8() != IP_PROTO_IPV6_IN_IPV4 {
-            return Err(TransitionError::InvalidProtocol(ip4_packet.header.protocol.to_u8()));
+            return Err(TransitionError::InvalidProtocol(
+                ip4_packet.header.protocol.to_u8(),
+            ));
         }
         Ok(ip4_packet.payload)
     }
@@ -85,7 +91,9 @@ impl Tunnel4in6 {
 
     pub fn decapsulate<'a>(&self, ip6_packet: &'a Ipv6Packet) -> Result<&'a [u8], TransitionError> {
         if ip6_packet.header.next_header != NEXT_HEADER_IPV4_IN_IPV6 {
-            return Err(TransitionError::InvalidProtocol(ip6_packet.header.next_header));
+            return Err(TransitionError::InvalidProtocol(
+                ip6_packet.header.next_header,
+            ));
         }
         Ok(ip6_packet.payload)
     }

@@ -1,5 +1,8 @@
 use toy_tcpip::ethernet::MacAddress;
-use toy_tcpip::evpn::{EvpnMacTable, EvpnNlri, RouteDistinguisher, BGP_AFI_L2VPN, BGP_SAFI_EVPN, EVPN_TYPE_INCLUSIVE_MULTICAST, EVPN_TYPE_MAC_IP_ADV};
+use toy_tcpip::evpn::{
+    BGP_AFI_L2VPN, BGP_SAFI_EVPN, EVPN_TYPE_INCLUSIVE_MULTICAST, EVPN_TYPE_MAC_IP_ADV,
+    EvpnMacTable, EvpnNlri, RouteDistinguisher,
+};
 use toy_tcpip::ipv4::Ipv4Address;
 
 #[test]

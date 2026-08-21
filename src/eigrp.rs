@@ -75,8 +75,12 @@ pub enum EigrpError {
 impl fmt::Display for EigrpError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            EigrpError::PacketTooShort(l) => write!(f, "EIGRP packet too short ({} bytes, min 20)", l),
-            EigrpError::InvalidVersion(v) => write!(f, "Invalid EIGRP version: expected 2, found {}", v),
+            EigrpError::PacketTooShort(l) => {
+                write!(f, "EIGRP packet too short ({} bytes, min 20)", l)
+            }
+            EigrpError::InvalidVersion(v) => {
+                write!(f, "Invalid EIGRP version: expected 2, found {}", v)
+            }
             EigrpError::InvalidChecksum => write!(f, "EIGRP checksum verification failed"),
         }
     }
@@ -210,15 +214,21 @@ impl EigrpTopologyTable {
     }
 
     pub fn add_candidate(&mut self, dest: Ipv4Address, neighbor: Ipv4Address, rd: u64, total: u64) {
-        self.routes.entry(dest).or_default().push(EigrpNeighborRoute {
-            neighbor,
-            reported_distance: rd,
-            total_metric: total,
-        });
+        self.routes
+            .entry(dest)
+            .or_default()
+            .push(EigrpNeighborRoute {
+                neighbor,
+                reported_distance: rd,
+                total_metric: total,
+            });
     }
 
     /// Evaluates DUAL Feasibility Condition: Successor (primary) and Feasible Successors (backup)
-    pub fn compute_dual(&self, dest: Ipv4Address) -> Option<(EigrpNeighborRoute, Vec<EigrpNeighborRoute>, u64)> {
+    pub fn compute_dual(
+        &self,
+        dest: Ipv4Address,
+    ) -> Option<(EigrpNeighborRoute, Vec<EigrpNeighborRoute>, u64)> {
         let candidates = self.routes.get(&dest)?;
         if candidates.is_empty() {
             return None;
@@ -273,6 +283,9 @@ mod tests {
 
         // R3 has RD=30000 < FD=30720 -> Qualified as Feasible Successor (Loop-Free Backup)!
         assert_eq!(feasible_successors.len(), 1);
-        assert_eq!(feasible_successors[0].neighbor, Ipv4Address::new(192, 168, 1, 3));
+        assert_eq!(
+            feasible_successors[0].neighbor,
+            Ipv4Address::new(192, 168, 1, 3)
+        );
     }
 }

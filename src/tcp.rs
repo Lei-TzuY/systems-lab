@@ -58,12 +58,24 @@ impl TcpFlags {
 
     pub fn to_u8(&self) -> u8 {
         let mut val = 0u8;
-        if self.fin { val |= TCP_FLAG_FIN; }
-        if self.syn { val |= TCP_FLAG_SYN; }
-        if self.rst { val |= TCP_FLAG_RST; }
-        if self.psh { val |= TCP_FLAG_PSH; }
-        if self.ack { val |= TCP_FLAG_ACK; }
-        if self.urg { val |= TCP_FLAG_URG; }
+        if self.fin {
+            val |= TCP_FLAG_FIN;
+        }
+        if self.syn {
+            val |= TCP_FLAG_SYN;
+        }
+        if self.rst {
+            val |= TCP_FLAG_RST;
+        }
+        if self.psh {
+            val |= TCP_FLAG_PSH;
+        }
+        if self.ack {
+            val |= TCP_FLAG_ACK;
+        }
+        if self.urg {
+            val |= TCP_FLAG_URG;
+        }
         val
     }
 
@@ -108,12 +120,24 @@ impl TcpFlags {
 impl fmt::Display for TcpFlags {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut flags = Vec::new();
-        if self.syn { flags.push("SYN"); }
-        if self.ack { flags.push("ACK"); }
-        if self.fin { flags.push("FIN"); }
-        if self.rst { flags.push("RST"); }
-        if self.psh { flags.push("PSH"); }
-        if self.urg { flags.push("URG"); }
+        if self.syn {
+            flags.push("SYN");
+        }
+        if self.ack {
+            flags.push("ACK");
+        }
+        if self.fin {
+            flags.push("FIN");
+        }
+        if self.rst {
+            flags.push("RST");
+        }
+        if self.psh {
+            flags.push("PSH");
+        }
+        if self.urg {
+            flags.push("URG");
+        }
         if flags.is_empty() {
             write!(f, "[NONE]")
         } else {
@@ -141,20 +165,38 @@ pub struct TcpSegment<'a> {
 pub enum TcpError {
     SegmentTooShort(usize),
     InvalidDataOffset(u8),
-    DataOffsetExceedsLength { offset_bytes: usize, available: usize },
-    InvalidChecksum { found: u16 },
+    DataOffsetExceedsLength {
+        offset_bytes: usize,
+        available: usize,
+    },
+    InvalidChecksum {
+        found: u16,
+    },
 }
 
 impl fmt::Display for TcpError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TcpError::SegmentTooShort(len) => write!(f, "TCP segment too short ({} bytes, min 20)", len),
+            TcpError::SegmentTooShort(len) => {
+                write!(f, "TCP segment too short ({} bytes, min 20)", len)
+            }
             TcpError::InvalidDataOffset(d) => write!(f, "Invalid TCP data offset: {} (min 5)", d),
-            TcpError::DataOffsetExceedsLength { offset_bytes, available } => {
-                write!(f, "TCP header offset {} exceeds segment length {}", offset_bytes, available)
+            TcpError::DataOffsetExceedsLength {
+                offset_bytes,
+                available,
+            } => {
+                write!(
+                    f,
+                    "TCP header offset {} exceeds segment length {}",
+                    offset_bytes, available
+                )
             }
             TcpError::InvalidChecksum { found } => {
-                write!(f, "TCP checksum mismatch with checksum field 0x{:04x}", found)
+                write!(
+                    f,
+                    "TCP checksum mismatch with checksum field 0x{:04x}",
+                    found
+                )
             }
         }
     }
@@ -234,7 +276,10 @@ impl<'a> TcpSegment<'a> {
                 }
                 other => {
                     let opt_data = data[opt_offset + 2..opt_offset + len].to_vec();
-                    options.push(TcpOption::Unknown { kind: other, data: opt_data });
+                    options.push(TcpOption::Unknown {
+                        kind: other,
+                        data: opt_data,
+                    });
                 }
             }
             opt_offset += len;
@@ -431,6 +476,111 @@ impl TcpConnection {
         }
     }
 
+    pub fn new_client(local: SocketAddrV4, remote: SocketAddrV4, isn: u32) -> Self {
+        let mss = 1460;
+        TcpConnection {
+            local,
+            remote,
+            state: TcpState::Closed,
+            snd_una: isn,
+            snd_nxt: isn,
+            snd_wnd: 65535,
+            rcv_nxt: 0,
+            rcv_wnd: 65535,
+            peer_mss: mss,
+            rx_buffer: Vec::new(),
+            ooo_queue: BTreeMap::new(),
+            congestion: CongestionControl::new(mss as u32),
+            rtt: RttEstimator::new(),
+        }
+    }
+
+    /// Client initiates active connection opening (sends SYN)
+    pub fn initiate_syn(&mut self) -> Vec<u8> {
+        self.state = TcpState::SynSent;
+        let syn_seq = self.snd_nxt;
+        self.snd_nxt = self.snd_nxt.wrapping_add(1);
+
+        let options = vec![TcpOption::Mss(1460)];
+        TcpSegment::serialize_with_options(
+            self.local.ip,
+            self.remote.ip,
+            self.local.port,
+            self.remote.port,
+            syn_seq,
+            0,
+            TcpFlags::syn(),
+            self.rcv_wnd,
+            &options,
+            &[],
+        )
+    }
+
+    /// Client or Server sends application data
+    pub fn send_data(&mut self, payload: &[u8]) -> Option<Vec<u8>> {
+        if self.state != TcpState::Established {
+            return None;
+        }
+        let seq = self.snd_nxt;
+        self.snd_nxt = self.snd_nxt.wrapping_add(payload.len() as u32);
+
+        let mut flags = TcpFlags::ack();
+        flags.psh = true;
+
+        Some(TcpSegment::serialize(
+            self.local.ip,
+            self.remote.ip,
+            self.local.port,
+            self.remote.port,
+            seq,
+            self.rcv_nxt,
+            flags,
+            self.rcv_wnd,
+            payload,
+        ))
+    }
+
+    /// Initiates active connection teardown (sends FIN)
+    pub fn initiate_close(&mut self) -> Option<Vec<u8>> {
+        match self.state {
+            TcpState::Established => {
+                self.state = TcpState::FinWait1;
+                let fin_seq = self.snd_nxt;
+                self.snd_nxt = self.snd_nxt.wrapping_add(1);
+
+                Some(TcpSegment::serialize(
+                    self.local.ip,
+                    self.remote.ip,
+                    self.local.port,
+                    self.remote.port,
+                    fin_seq,
+                    self.rcv_nxt,
+                    TcpFlags::fin_ack(),
+                    self.rcv_wnd,
+                    &[],
+                ))
+            }
+            TcpState::CloseWait => {
+                self.state = TcpState::LastAck;
+                let fin_seq = self.snd_nxt;
+                self.snd_nxt = self.snd_nxt.wrapping_add(1);
+
+                Some(TcpSegment::serialize(
+                    self.local.ip,
+                    self.remote.ip,
+                    self.local.port,
+                    self.remote.port,
+                    fin_seq,
+                    self.rcv_nxt,
+                    TcpFlags::fin_ack(),
+                    self.rcv_wnd,
+                    &[],
+                ))
+            }
+            _ => None,
+        }
+    }
+
     /// Handles an incoming TCP segment, updates state machine and reassembly queue, and generates response.
     pub fn handle_segment(&mut self, seg: &TcpSegment<'_>) -> Option<Vec<u8>> {
         // Inspect options for MSS
@@ -461,6 +611,50 @@ impl TcpConnection {
                         TcpFlags::syn_ack(),
                         self.rcv_wnd,
                         &options,
+                        &[],
+                    );
+                    Some(syn_ack)
+                } else {
+                    None
+                }
+            }
+
+            TcpState::SynSent => {
+                if seg.flags.syn && seg.flags.ack {
+                    if seg.ack_num == self.snd_nxt {
+                        self.rcv_nxt = seg.seq_num.wrapping_add(1);
+                        self.snd_una = seg.ack_num;
+                        self.state = TcpState::Established;
+
+                        // Send ACK to complete 3-way handshake
+                        let ack = TcpSegment::serialize(
+                            self.local.ip,
+                            self.remote.ip,
+                            self.local.port,
+                            self.remote.port,
+                            self.snd_nxt,
+                            self.rcv_nxt,
+                            TcpFlags::ack(),
+                            self.rcv_wnd,
+                            &[],
+                        );
+                        Some(ack)
+                    } else {
+                        None
+                    }
+                } else if seg.flags.syn {
+                    // Simultaneous open
+                    self.rcv_nxt = seg.seq_num.wrapping_add(1);
+                    self.state = TcpState::SynReceived;
+                    let syn_ack = TcpSegment::serialize(
+                        self.local.ip,
+                        self.remote.ip,
+                        self.local.port,
+                        self.remote.port,
+                        self.snd_nxt,
+                        self.rcv_nxt,
+                        TcpFlags::syn_ack(),
+                        self.rcv_wnd,
                         &[],
                     );
                     Some(syn_ack)
@@ -505,13 +699,11 @@ impl TcpConnection {
 
                 if seg.flags.fin {
                     self.rcv_nxt = seg.seq_num.wrapping_add(1);
-                    self.state = TcpState::CloseWait;
-
-                    // Send FIN-ACK to complete teardown
                     let fin_seq = self.snd_nxt;
                     self.snd_nxt = self.snd_nxt.wrapping_add(1);
                     self.state = TcpState::LastAck;
 
+                    // Send FIN-ACK to complete passive teardown
                     let fin_ack = TcpSegment::serialize(
                         self.local.ip,
                         self.remote.ip,
@@ -579,15 +771,95 @@ impl TcpConnection {
                 }
             }
 
+            TcpState::FinWait1 => {
+                let acked_our_fin = seg.flags.ack && seg.ack_num == self.snd_nxt;
+                if acked_our_fin {
+                    self.snd_una = seg.ack_num;
+                    if seg.flags.fin {
+                        // Received simultaneous FIN and ACK for our FIN
+                        self.rcv_nxt = seg.seq_num.wrapping_add(1);
+                        self.state = TcpState::TimeWait;
+                        let ack = TcpSegment::serialize(
+                            self.local.ip,
+                            self.remote.ip,
+                            self.local.port,
+                            self.remote.port,
+                            self.snd_nxt,
+                            self.rcv_nxt,
+                            TcpFlags::ack(),
+                            self.rcv_wnd,
+                            &[],
+                        );
+                        Some(ack)
+                    } else {
+                        self.state = TcpState::FinWait2;
+                        None
+                    }
+                } else if seg.flags.fin {
+                    // Simultaneous close
+                    self.rcv_nxt = seg.seq_num.wrapping_add(1);
+                    self.state = TcpState::Closing;
+                    let ack = TcpSegment::serialize(
+                        self.local.ip,
+                        self.remote.ip,
+                        self.local.port,
+                        self.remote.port,
+                        self.snd_nxt,
+                        self.rcv_nxt,
+                        TcpFlags::ack(),
+                        self.rcv_wnd,
+                        &[],
+                    );
+                    Some(ack)
+                } else {
+                    None
+                }
+            }
+
+            TcpState::FinWait2 => {
+                if seg.flags.fin {
+                    self.rcv_nxt = seg.seq_num.wrapping_add(1);
+                    self.state = TcpState::TimeWait;
+
+                    let ack = TcpSegment::serialize(
+                        self.local.ip,
+                        self.remote.ip,
+                        self.local.port,
+                        self.remote.port,
+                        self.snd_nxt,
+                        self.rcv_nxt,
+                        TcpFlags::ack(),
+                        self.rcv_wnd,
+                        &[],
+                    );
+                    Some(ack)
+                } else {
+                    None
+                }
+            }
+
+            TcpState::CloseWait => None,
+
+            TcpState::Closing => {
+                if seg.flags.ack && seg.ack_num == self.snd_nxt {
+                    self.state = TcpState::TimeWait;
+                }
+                None
+            }
+
             TcpState::LastAck => {
-                if seg.flags.ack {
+                if seg.flags.ack && seg.ack_num == self.snd_nxt {
                     self.state = TcpState::Closed;
                 }
                 None
             }
 
+            TcpState::TimeWait => {
+                // In simulated environment, TimeWait can transition to Closed or ignore redundant packets
+                None
+            }
+
             TcpState::Closed => None,
-            _ => None,
         }
     }
 }
@@ -611,6 +883,55 @@ impl TcpManager {
         self.listeners.insert(port, 1000);
     }
 
+    pub fn connect(&mut self, local: SocketAddrV4, remote: SocketAddrV4, isn: u32) -> Vec<u8> {
+        let key = TcpConnectionKey { local, remote };
+        let mut conn = TcpConnection::new_client(local, remote, isn);
+        let syn_packet = conn.initiate_syn();
+        self.connections.insert(key, conn);
+        syn_packet
+    }
+
+    pub fn send_data(
+        &mut self,
+        local: SocketAddrV4,
+        remote: SocketAddrV4,
+        data: &[u8],
+    ) -> Option<Vec<u8>> {
+        let key = TcpConnectionKey { local, remote };
+        if let Some(conn) = self.connections.get_mut(&key) {
+            conn.send_data(data)
+        } else {
+            None
+        }
+    }
+
+    pub fn close(&mut self, local: SocketAddrV4, remote: SocketAddrV4) -> Option<Vec<u8>> {
+        let key = TcpConnectionKey { local, remote };
+        if let Some(conn) = self.connections.get_mut(&key) {
+            conn.initiate_close()
+        } else {
+            None
+        }
+    }
+
+    pub fn get_connection(
+        &self,
+        local: SocketAddrV4,
+        remote: SocketAddrV4,
+    ) -> Option<&TcpConnection> {
+        let key = TcpConnectionKey { local, remote };
+        self.connections.get(&key)
+    }
+
+    pub fn get_connection_mut(
+        &mut self,
+        local: SocketAddrV4,
+        remote: SocketAddrV4,
+    ) -> Option<&mut TcpConnection> {
+        let key = TcpConnectionKey { local, remote };
+        self.connections.get_mut(&key)
+    }
+
     pub fn process_segment(
         &mut self,
         src_ip: Ipv4Address,
@@ -618,8 +939,14 @@ impl TcpManager {
         seg: &TcpSegment<'_>,
     ) -> Option<Vec<u8>> {
         let key = TcpConnectionKey {
-            local: SocketAddrV4 { ip: dst_ip, port: seg.dst_port },
-            remote: SocketAddrV4 { ip: src_ip, port: seg.src_port },
+            local: SocketAddrV4 {
+                ip: dst_ip,
+                port: seg.dst_port,
+            },
+            remote: SocketAddrV4 {
+                ip: src_ip,
+                port: seg.src_port,
+            },
         };
 
         if let Some(conn) = self.connections.get_mut(&key) {
@@ -627,20 +954,24 @@ impl TcpManager {
         }
 
         // Check if port is listening
-        if let Some(isn) = self.listeners.get_mut(&seg.dst_port) {
-            if seg.flags.syn {
-                let mut conn = TcpConnection::new_server(key.local, key.remote, *isn);
-                *isn = isn.wrapping_add(1000);
-                let resp = conn.handle_segment(seg);
-                self.connections.insert(key, conn);
-                return resp;
-            }
+        if let Some(isn) = self.listeners.get_mut(&seg.dst_port)
+            && seg.flags.syn
+        {
+            let mut conn = TcpConnection::new_server(key.local, key.remote, *isn);
+            *isn = isn.wrapping_add(1000);
+            let resp = conn.handle_segment(seg);
+            self.connections.insert(key, conn);
+            return resp;
         }
 
         // Port closed -> send RST
         if !seg.flags.rst {
             let rst_seq = if seg.flags.ack { seg.ack_num } else { 0 };
-            let rst_ack = seg.seq_num.wrapping_add(if seg.flags.syn || seg.flags.fin { 1 } else { seg.payload.len() as u32 });
+            let rst_ack = seg.seq_num.wrapping_add(if seg.flags.syn || seg.flags.fin {
+                1
+            } else {
+                seg.payload.len() as u32
+            });
             let mut flags = TcpFlags::rst();
             if !seg.flags.ack {
                 flags.ack = true;
@@ -695,8 +1026,14 @@ mod tests {
     #[test]
     fn test_tcp_out_of_order_reassembly() {
         let mut conn = TcpConnection::new_server(
-            SocketAddrV4 { ip: Ipv4Address::new(10, 0, 0, 1), port: 80 },
-            SocketAddrV4 { ip: Ipv4Address::new(10, 0, 0, 2), port: 50000 },
+            SocketAddrV4 {
+                ip: Ipv4Address::new(10, 0, 0, 1),
+                port: 80,
+            },
+            SocketAddrV4 {
+                ip: Ipv4Address::new(10, 0, 0, 2),
+                port: 50000,
+            },
             1000,
         );
         conn.state = TcpState::Established;
@@ -739,5 +1076,153 @@ mod tests {
         // Both segment A and buffered segment B should now be assembled
         assert_eq!(conn.rcv_nxt, 100 + 5 + 5);
         assert_eq!(conn.rx_buffer, b"HELLOWORLD");
+    }
+
+    #[test]
+    fn test_tcp_client_server_full_lifecycle() {
+        let client_ip = Ipv4Address::new(192, 168, 1, 10);
+        let server_ip = Ipv4Address::new(192, 168, 1, 20);
+        let client_port = 45000;
+        let server_port = 80;
+
+        let mut client_mgr = TcpManager::new();
+        let mut server_mgr = TcpManager::new();
+        server_mgr.listen(server_port);
+
+        let client_sock = SocketAddrV4 {
+            ip: client_ip,
+            port: client_port,
+        };
+        let server_sock = SocketAddrV4 {
+            ip: server_ip,
+            port: server_port,
+        };
+
+        // 1. Client sends SYN
+        let syn_bytes = client_mgr.connect(client_sock, server_sock, 1000);
+        let syn_seg = TcpSegment::parse(client_ip, server_ip, &syn_bytes, true).unwrap();
+        assert_eq!(syn_seg.flags, TcpFlags::syn());
+        assert_eq!(
+            client_mgr
+                .get_connection(client_sock, server_sock)
+                .unwrap()
+                .state,
+            TcpState::SynSent
+        );
+
+        // 2. Server processes SYN, sends SYN-ACK
+        let syn_ack_bytes = server_mgr
+            .process_segment(client_ip, server_ip, &syn_seg)
+            .unwrap();
+        let syn_ack_seg = TcpSegment::parse(server_ip, client_ip, &syn_ack_bytes, true).unwrap();
+        assert_eq!(syn_ack_seg.flags, TcpFlags::syn_ack());
+        assert_eq!(
+            server_mgr
+                .get_connection(server_sock, client_sock)
+                .unwrap()
+                .state,
+            TcpState::SynReceived
+        );
+
+        // 3. Client processes SYN-ACK, sends ACK -> ESTABLISHED
+        let ack_bytes = client_mgr
+            .process_segment(server_ip, client_ip, &syn_ack_seg)
+            .unwrap();
+        let ack_seg = TcpSegment::parse(client_ip, server_ip, &ack_bytes, true).unwrap();
+        assert_eq!(ack_seg.flags, TcpFlags::ack());
+        assert_eq!(
+            client_mgr
+                .get_connection(client_sock, server_sock)
+                .unwrap()
+                .state,
+            TcpState::Established
+        );
+
+        // 4. Server processes ACK -> ESTABLISHED
+        let server_resp = server_mgr.process_segment(client_ip, server_ip, &ack_seg);
+        assert!(server_resp.is_none());
+        assert_eq!(
+            server_mgr
+                .get_connection(server_sock, client_sock)
+                .unwrap()
+                .state,
+            TcpState::Established
+        );
+
+        // 5. Client sends Data ("HTTP GET")
+        let data_bytes = client_mgr
+            .send_data(client_sock, server_sock, b"GET / HTTP/1.1\r\n\r\n")
+            .unwrap();
+        let data_seg = TcpSegment::parse(client_ip, server_ip, &data_bytes, true).unwrap();
+        assert_eq!(data_seg.payload, b"GET / HTTP/1.1\r\n\r\n");
+
+        // 6. Server receives data and sends ACK
+        let data_ack_bytes = server_mgr
+            .process_segment(client_ip, server_ip, &data_seg)
+            .unwrap();
+        let data_ack_seg = TcpSegment::parse(server_ip, client_ip, &data_ack_bytes, true).unwrap();
+        assert_eq!(data_ack_seg.flags, TcpFlags::ack());
+        assert_eq!(
+            server_mgr
+                .get_connection(server_sock, client_sock)
+                .unwrap()
+                .rx_buffer,
+            b"GET / HTTP/1.1\r\n\r\n"
+        );
+
+        // 7. Client processes data ACK
+        let _ = client_mgr.process_segment(server_ip, client_ip, &data_ack_seg);
+
+        // 8. Client closes connection (FIN-ACK)
+        let fin_bytes = client_mgr.close(client_sock, server_sock).unwrap();
+        let fin_seg = TcpSegment::parse(client_ip, server_ip, &fin_bytes, true).unwrap();
+        assert_eq!(fin_seg.flags, TcpFlags::fin_ack());
+        assert_eq!(
+            client_mgr
+                .get_connection(client_sock, server_sock)
+                .unwrap()
+                .state,
+            TcpState::FinWait1
+        );
+
+        // 9. Server receives FIN, sends FIN-ACK -> LAST_ACK
+        let fin_ack_bytes = server_mgr
+            .process_segment(client_ip, server_ip, &fin_seg)
+            .unwrap();
+        let fin_ack_seg = TcpSegment::parse(server_ip, client_ip, &fin_ack_bytes, true).unwrap();
+        assert_eq!(fin_ack_seg.flags, TcpFlags::fin_ack());
+        assert_eq!(
+            server_mgr
+                .get_connection(server_sock, client_sock)
+                .unwrap()
+                .state,
+            TcpState::LastAck
+        );
+
+        // 10. Client receives FIN-ACK, sends ACK -> TIME_WAIT
+        let final_ack_bytes = client_mgr
+            .process_segment(server_ip, client_ip, &fin_ack_seg)
+            .unwrap();
+        let final_ack_seg =
+            TcpSegment::parse(client_ip, server_ip, &final_ack_bytes, true).unwrap();
+        assert_eq!(final_ack_seg.flags, TcpFlags::ack());
+        assert_eq!(
+            client_mgr
+                .get_connection(client_sock, server_sock)
+                .unwrap()
+                .state,
+            TcpState::TimeWait
+        );
+
+        // 11. Server receives final ACK -> CLOSED
+        let server_closed_resp = server_mgr.process_segment(client_ip, server_ip, &final_ack_seg);
+        assert!(server_closed_resp.is_none());
+        assert_eq!(
+            server_mgr
+                .get_connection(server_sock, client_sock)
+                .unwrap()
+                .state,
+            TcpState::Closed
+        );
     }
 }

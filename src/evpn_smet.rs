@@ -17,7 +17,7 @@ pub struct EvpnSmetRoute {
     pub source_ip: Ipv4Address, // 0.0.0.0 for (*, G)
     pub group_ip: Ipv4Address,  // Multicast group address (e.g. 239.1.1.1)
     pub originator_ip: Ipv4Address,
-    pub flags: u8,              // Bit 0: Include/Exclude mode
+    pub flags: u8, // Bit 0: Include/Exclude mode
 }
 
 impl EvpnSmetRoute {
@@ -111,10 +111,11 @@ impl EvpnSmetEngine {
     ) -> Vec<Ipv4Address> {
         let mut pes = Vec::new();
         for r in &self.smet_routes {
-            if r.ethernet_tag_id == ethernet_tag_id && r.group_ip == group_ip {
-                if !pes.contains(&r.originator_ip) {
-                    pes.push(r.originator_ip);
-                }
+            if r.ethernet_tag_id == ethernet_tag_id
+                && r.group_ip == group_ip
+                && !pes.contains(&r.originator_ip)
+            {
+                pes.push(r.originator_ip);
             }
         }
         pes

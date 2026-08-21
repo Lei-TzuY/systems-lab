@@ -22,9 +22,9 @@ impl StreamId {
 /// TSN Traffic Specification (TSpec)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrafficSpecification {
-    pub max_frame_size: u16,     // Maximum frame size in bytes
+    pub max_frame_size: u16,      // Maximum frame size in bytes
     pub max_interval_frames: u16, // Max frames per transmission interval
-    pub interval_us: u32,        // Transmission interval in microseconds
+    pub interval_us: u32,         // Transmission interval in microseconds
 }
 
 /// User-to-Network Requirements
@@ -74,7 +74,8 @@ impl CentralizedNetworkConfigurator {
         if tspec.interval_us == 0 {
             return 0;
         }
-        let bits_per_interval = (tspec.max_frame_size as u64) * (tspec.max_interval_frames as u64) * 8;
+        let bits_per_interval =
+            (tspec.max_frame_size as u64) * (tspec.max_interval_frames as u64) * 8;
         // bps = (bits / interval_us) * 1,000,000
         (bits_per_interval * 1_000_000) / (tspec.interval_us as u64)
     }
@@ -91,7 +92,10 @@ impl CentralizedNetworkConfigurator {
     /// Registers a TSN Listener subscribing to an existing Talker stream
     /// Returns the calculated worst-case bounded latency in microseconds
     pub fn register_listener(&mut self, listener: TsnListener) -> Result<u32, &'static str> {
-        let talker = self.talkers.get(&listener.stream_id).ok_or("Talker stream not found")?;
+        let talker = self
+            .talkers
+            .get(&listener.stream_id)
+            .ok_or("Talker stream not found")?;
 
         // Calculate bounded hop latency (approximate TSN deterministic delay calculation: 2 * interval + bridge queuing)
         let calculated_latency_us = (talker.tspec.interval_us * 2) + 20; // 2 cycles + 20µs switch transit
@@ -122,7 +126,7 @@ mod tests {
             vlan_id: 100,
             priority: 6,
             tspec: TrafficSpecification {
-                max_frame_size: 500,     // 500 bytes
+                max_frame_size: 500,    // 500 bytes
                 max_interval_frames: 2, // 2 frames per interval
                 interval_us: 1000,      // every 1000µs (1ms)
             },
@@ -162,7 +166,8 @@ mod tests {
                 max_interval_frames: 1,
                 interval_us: 5000, // 5ms interval -> ~10ms calculated latency
             },
-        }).unwrap();
+        })
+        .unwrap();
 
         let listener = TsnListener {
             stream_id,

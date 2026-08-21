@@ -53,7 +53,7 @@ impl CqfDualBufferEngine {
         let new_cycle = now_us / self.cycle_duration_us;
         if new_cycle != self.current_cycle_index {
             self.current_cycle_index = new_cycle;
-            self.phase = if new_cycle % 2 == 0 {
+            self.phase = if new_cycle.is_multiple_of(2) {
                 CqfPhase::Even
             } else {
                 CqfPhase::Odd
@@ -65,12 +65,7 @@ impl CqfDualBufferEngine {
     }
 
     /// Ingress: Enqueues a packet into the current receiving queue
-    pub fn enqueue_frame(
-        &mut self,
-        frame_id: u32,
-        ingress_time_us: u64,
-        payload: Vec<u8>,
-    ) -> bool {
+    pub fn enqueue_frame(&mut self, frame_id: u32, ingress_time_us: u64, payload: Vec<u8>) -> bool {
         self.update_time(ingress_time_us);
         let size_bytes = payload.len();
 

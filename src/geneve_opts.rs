@@ -24,7 +24,7 @@ impl GeneveOptionTlv {
     pub fn new(class: u16, type_code: u8, critical: bool, data: &[u8]) -> Self {
         // Pad data to multiple of 4 bytes as required by RFC 8926
         let mut padded = data.to_vec();
-        while padded.len() % 4 != 0 {
+        while !padded.len().is_multiple_of(4) {
             padded.push(0);
         }
 
@@ -127,11 +127,11 @@ mod tests {
         assert_eq!(parsed.len(), 2);
         assert_eq!(parsed[0].class, GENEVE_CLASS_OVS_LINUX);
         assert_eq!(parsed[0].type_code, GENEVE_TYPE_SECURITY_GROUP);
-        assert_eq!(parsed[0].critical, false);
+        assert!(!parsed[0].critical);
         assert_eq!(parsed[0].data, vec![0x00, 0x00, 0x03, 0xE8]);
 
         assert_eq!(parsed[1].class, GENEVE_CLASS_STANDARD);
         assert_eq!(parsed[1].type_code, GENEVE_TYPE_INBAND_TELEMETRY);
-        assert_eq!(parsed[1].critical, true);
+        assert!(parsed[1].critical);
     }
 }

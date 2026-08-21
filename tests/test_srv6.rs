@@ -1,6 +1,6 @@
 use std::str::FromStr;
 use toy_tcpip::ipv6::{Ipv6Address, Ipv6Header};
-use toy_tcpip::srv6::{Srv6Header, IPV6_EXT_ROUTING, SRV6_ROUTING_TYPE};
+use toy_tcpip::srv6::{IPV6_EXT_ROUTING, SRV6_ROUTING_TYPE, Srv6Header};
 
 #[test]
 fn test_srv6_header_codec_and_srh_attributes() {

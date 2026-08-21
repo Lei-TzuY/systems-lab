@@ -1,9 +1,9 @@
+use std::str::FromStr;
 use toy_tcpip::bgp_ls_srv6::{
-    BgpLsSrv6Database, Srv6EndSidTlv, Srv6LocatorTlv, BGP_LS_TLV_SRV6_END_SID,
-    BGP_LS_TLV_SRV6_LOCATOR,
+    BGP_LS_TLV_SRV6_END_SID, BGP_LS_TLV_SRV6_LOCATOR, BgpLsSrv6Database, Srv6EndSidTlv,
+    Srv6LocatorTlv,
 };
 use toy_tcpip::ipv6::Ipv6Address;
-use std::str::FromStr;
 
 #[test]
 fn test_bgp_ls_srv6_constants() {
@@ -17,12 +17,7 @@ fn test_bgp_ls_srv6_constants() {
 #[test]
 fn test_bgp_ls_srv6_database_longest_prefix_matching() {
     let mut db = BgpLsSrv6Database::new();
-    let loc1 = Srv6LocatorTlv::new(
-        0,
-        10,
-        Ipv6Address::from_str("2001:db8:100::").unwrap(),
-        64,
-    );
+    let loc1 = Srv6LocatorTlv::new(0, 10, Ipv6Address::from_str("2001:db8:100::").unwrap(), 64);
     let loc2 = Srv6LocatorTlv::new(
         128,
         20,

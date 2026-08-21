@@ -1,5 +1,7 @@
 use std::str::FromStr;
-use toy_tcpip::ethernet::{EtherType, EthernetFrame, MacAddress, ETHERTYPE_ARP, ETHERTYPE_IPV4, ETHERTYPE_IPV6};
+use toy_tcpip::ethernet::{
+    ETHERTYPE_ARP, ETHERTYPE_IPV4, ETHERTYPE_IPV6, EtherType, EthernetFrame, MacAddress,
+};
 
 #[test]
 fn test_mac_address_display_and_parsing() {

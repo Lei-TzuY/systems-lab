@@ -43,13 +43,7 @@ impl CfmPacket {
         CfmPacket { header, payload }
     }
 
-    pub fn build_ccm(
-        md_level: u8,
-        mep_id: u16,
-        seq: u32,
-        maid_str: &str,
-        rdi: bool,
-    ) -> Self {
+    pub fn build_ccm(md_level: u8, mep_id: u16, seq: u32, maid_str: &str, rdi: bool) -> Self {
         let flags = if rdi { 0x80 } else { 0x00 } | 0x04; // 0x04 = 1 second interval
         let header = CfmHeader {
             md_level,
@@ -161,7 +155,12 @@ impl CfmEngine {
         match pkt.header.opcode {
             CFM_OPCODE_CCM => {
                 if pkt.payload.len() >= 6 {
-                    let seq = u32::from_be_bytes([pkt.payload[0], pkt.payload[1], pkt.payload[2], pkt.payload[3]]);
+                    let seq = u32::from_be_bytes([
+                        pkt.payload[0],
+                        pkt.payload[1],
+                        pkt.payload[2],
+                        pkt.payload[3],
+                    ]);
                     let mep_id = u16::from_be_bytes([pkt.payload[4], pkt.payload[5]]);
                     let rdi = (pkt.header.flags & 0x80) != 0;
 

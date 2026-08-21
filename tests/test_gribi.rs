@@ -1,6 +1,6 @@
 use toy_tcpip::ethernet::MacAddress;
 use toy_tcpip::gribi::{
-    GribiAftTable, GribiIpv4Entry, GribiNextHop, GribiNextHopGroup, GRIBI_PORT, GRIBI_VERSION,
+    GRIBI_PORT, GRIBI_VERSION, GribiAftTable, GribiIpv4Entry, GribiNextHop, GribiNextHopGroup,
 };
 use toy_tcpip::ipv4::Ipv4Address;
 

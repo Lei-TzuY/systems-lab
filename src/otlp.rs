@@ -83,25 +83,46 @@ impl OtlpExporter {
     pub fn export_json(&self) -> String {
         let mut json = String::new();
         json.push_str("{\n");
-        json.push_str(&format!("  \"resource\": {{ \"service.name\": \"{}\" }},\n", self.service_name));
+        json.push_str(&format!(
+            "  \"resource\": {{ \"service.name\": \"{}\" }},\n",
+            self.service_name
+        ));
         json.push_str("  \"metrics\": [\n");
 
         for (i, m) in self.metrics.iter().enumerate() {
             let comma = if i + 1 < self.metrics.len() { "," } else { "" };
             match m {
-                OtlpMetric::Gauge { name, description, unit, value } => {
+                OtlpMetric::Gauge {
+                    name,
+                    description,
+                    unit,
+                    value,
+                } => {
                     json.push_str(&format!(
                         "    {{ \"name\": \"{}\", \"description\": \"{}\", \"unit\": \"{}\", \"gauge\": {{ \"value\": {} }} }}{}\n",
                         name, description, unit, value, comma
                     ));
                 }
-                OtlpMetric::Sum { name, description, unit, count, is_monotonic } => {
+                OtlpMetric::Sum {
+                    name,
+                    description,
+                    unit,
+                    count,
+                    is_monotonic,
+                } => {
                     json.push_str(&format!(
                         "    {{ \"name\": \"{}\", \"description\": \"{}\", \"unit\": \"{}\", \"sum\": {{ \"count\": {}, \"isMonotonic\": {} }} }}{}\n",
                         name, description, unit, count, is_monotonic, comma
                     ));
                 }
-                OtlpMetric::Histogram { name, description, unit, count, sum, .. } => {
+                OtlpMetric::Histogram {
+                    name,
+                    description,
+                    unit,
+                    count,
+                    sum,
+                    ..
+                } => {
                     json.push_str(&format!(
                         "    {{ \"name\": \"{}\", \"description\": \"{}\", \"unit\": \"{}\", \"histogram\": {{ \"count\": {}, \"sum\": {} }} }}{}\n",
                         name, description, unit, count, sum, comma
@@ -120,7 +141,7 @@ impl OtlpExporter {
             ));
         }
         json.push_str("  ]\n");
-        json.push_str("}");
+        json.push('}');
         json
     }
 }
@@ -133,7 +154,12 @@ mod tests {
     fn test_otlp_metrics_and_trace_export() {
         let mut exporter = OtlpExporter::new("toy-netstack-core");
 
-        exporter.record_counter("net.packets.transmitted", "Total egress packets", "packets", 15420);
+        exporter.record_counter(
+            "net.packets.transmitted",
+            "Total egress packets",
+            "packets",
+            15420,
+        );
         exporter.record_gauge("net.rtt.latency", "Current smoothed RTT", "ms", 1.45);
 
         let span = OtlpSpan {
@@ -148,10 +174,10 @@ mod tests {
         exporter.record_span(span);
 
         let json = exporter.export_json();
-        assert_eq!(json.contains("toy-netstack-core"), true);
-        assert_eq!(json.contains("net.packets.transmitted"), true);
-        assert_eq!(json.contains("15420"), true);
-        assert_eq!(json.contains("tcp.handshake"), true);
+        assert!(json.contains("toy-netstack-core"));
+        assert!(json.contains("net.packets.transmitted"));
+        assert!(json.contains("15420"));
+        assert!(json.contains("tcp.handshake"));
 
         assert_eq!(OTLP_GRPC_PORT, 4317);
         assert_eq!(OTLP_HTTP_PORT, 4318);

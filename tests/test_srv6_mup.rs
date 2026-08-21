@@ -1,5 +1,5 @@
 use std::str::FromStr;
-use toy_tcpip::gtp::{GtpPacket, GTP_U_UDP_PORT};
+use toy_tcpip::gtp::{GTP_U_UDP_PORT, GtpPacket};
 use toy_tcpip::ipv4::{IpProtocol, Ipv4Address, Ipv4Packet};
 use toy_tcpip::ipv6::{Ipv6Address, Ipv6Packet};
 use toy_tcpip::srv6_mup::{Srv6MupEngine, Srv6MupSession};
@@ -26,23 +26,18 @@ fn test_srv6_mup_5g_uplink_and_downlink_translation() {
     let pdu_payload = b"5G PDU Session HTTP/3 Request Body";
 
     // 1. Ingress Uplink GTP-U Packet from gNodeB -> Translated to SRv6
-    let srv6_packet = engine.process_uplink_gtp_to_srv6(
-        gnb_ipv4,
-        teid,
-        pdu_payload,
-        edge_router_v6,
-    ).unwrap();
+    let srv6_packet = engine
+        .process_uplink_gtp_to_srv6(gnb_ipv4, teid, pdu_payload, edge_router_v6)
+        .unwrap();
 
     let parsed_v6 = Ipv6Packet::parse(&srv6_packet).unwrap();
     assert_eq!(parsed_v6.header.src_ip, edge_router_v6);
     assert_eq!(parsed_v6.header.dst_ip, srv6_sid);
 
     // 2. Ingress Downlink SRv6 Packet -> Translated back to GTP-U/UDP/IPv4
-    let gtp_ip_packet = engine.process_downlink_srv6_to_gtp(
-        srv6_sid,
-        pdu_payload,
-        upf_ipv4,
-    ).unwrap();
+    let gtp_ip_packet = engine
+        .process_downlink_srv6_to_gtp(srv6_sid, pdu_payload, upf_ipv4)
+        .unwrap();
 
     let parsed_v4 = Ipv4Packet::parse(&gtp_ip_packet, true).unwrap();
     assert_eq!(parsed_v4.header.src_ip, upf_ipv4);
@@ -54,7 +49,8 @@ fn test_srv6_mup_5g_uplink_and_downlink_translation() {
         parsed_v4.header.dst_ip,
         parsed_v4.payload,
         true,
-    ).unwrap();
+    )
+    .unwrap();
     assert_eq!(parsed_udp.dst_port, GTP_U_UDP_PORT);
 
     let parsed_gtp = GtpPacket::parse(parsed_udp.payload).unwrap();

@@ -39,7 +39,11 @@ impl RadiusAvp {
         }
     }
 
-    pub fn new_user_password(password: &str, secret: &[u8], request_authenticator: &[u8; 16]) -> Self {
+    pub fn new_user_password(
+        password: &str,
+        secret: &[u8],
+        request_authenticator: &[u8; 16],
+    ) -> Self {
         // RFC 2865: Password Obfuscation via XOR with hash(secret + authenticator)
         let mut key_stream = [0u8; 16];
         for i in 0..16 {
@@ -103,9 +107,17 @@ pub enum RadiusError {
 impl fmt::Display for RadiusError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            RadiusError::PacketTooShort(l) => write!(f, "RADIUS packet too short ({} bytes, min 20)", l),
-            RadiusError::LengthMismatch(hdr, act) => write!(f, "RADIUS length mismatch: header specifies {}, received {}", hdr, act),
-            RadiusError::InvalidAvpLength => write!(f, "Invalid RADIUS AVP length field (< 2 or exceeds buffer)"),
+            RadiusError::PacketTooShort(l) => {
+                write!(f, "RADIUS packet too short ({} bytes, min 20)", l)
+            }
+            RadiusError::LengthMismatch(hdr, act) => write!(
+                f,
+                "RADIUS length mismatch: header specifies {}, received {}",
+                hdr, act
+            ),
+            RadiusError::InvalidAvpLength => {
+                write!(f, "Invalid RADIUS AVP length field (< 2 or exceeds buffer)")
+            }
         }
     }
 }
@@ -178,7 +190,14 @@ impl RadiusPacket {
         buf
     }
 
-    pub fn build_access_request(id: u8, auth: [u8; 16], username: &str, password: &str, secret: &[u8], nas_ip: Ipv4Address) -> Self {
+    pub fn build_access_request(
+        id: u8,
+        auth: [u8; 16],
+        username: &str,
+        password: &str,
+        secret: &[u8],
+        nas_ip: Ipv4Address,
+    ) -> Self {
         let attributes = vec![
             RadiusAvp::new_user_name(username),
             RadiusAvp::new_user_password(password, secret, &auth),
@@ -193,7 +212,12 @@ impl RadiusPacket {
         }
     }
 
-    pub fn build_access_accept(id: u8, req_auth: [u8; 16], framed_ip: Ipv4Address, msg: &str) -> Self {
+    pub fn build_access_accept(
+        id: u8,
+        req_auth: [u8; 16],
+        framed_ip: Ipv4Address,
+        msg: &str,
+    ) -> Self {
         let attributes = vec![
             RadiusAvp::new_framed_ip(framed_ip),
             RadiusAvp::new_reply_message(msg),
@@ -216,7 +240,14 @@ mod tests {
     fn test_radius_access_request_roundtrip() {
         let auth = [0x42; 16];
         let nas_ip = Ipv4Address::new(192, 168, 1, 1);
-        let pkt = RadiusPacket::build_access_request(1, auth, "alice", "supersecret", b"radiuskey", nas_ip);
+        let pkt = RadiusPacket::build_access_request(
+            1,
+            auth,
+            "alice",
+            "supersecret",
+            b"radiuskey",
+            nas_ip,
+        );
 
         let raw = pkt.serialize();
         assert!(raw.len() >= RADIUS_HEADER_LEN);
@@ -234,12 +265,16 @@ mod tests {
     fn test_radius_access_accept_attributes() {
         let auth = [0x55; 16];
         let framed_ip = Ipv4Address::new(10, 200, 1, 50);
-        let accept = RadiusPacket::build_access_accept(1, auth, framed_ip, "Welcome to Corporate VPN!");
+        let accept =
+            RadiusPacket::build_access_accept(1, auth, framed_ip, "Welcome to Corporate VPN!");
 
         let raw = accept.serialize();
         let parsed = RadiusPacket::parse(&raw).unwrap();
         assert_eq!(parsed.code, RADIUS_CODE_ACCESS_ACCEPT);
-        assert_eq!(parsed.attributes[0].attr_type, RADIUS_ATTR_FRAMED_IP_ADDRESS);
+        assert_eq!(
+            parsed.attributes[0].attr_type,
+            RADIUS_ATTR_FRAMED_IP_ADDRESS
+        );
         assert_eq!(parsed.attributes[0].value, framed_ip.0);
         assert_eq!(parsed.attributes[1].attr_type, RADIUS_ATTR_REPLY_MESSAGE);
         assert_eq!(parsed.attributes[1].value, b"Welcome to Corporate VPN!");

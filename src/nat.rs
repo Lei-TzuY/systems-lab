@@ -4,7 +4,7 @@
 //! and static Port Forwarding (DNAT) from public ports to private internal servers.
 
 use crate::checksum::{compute_checksum, compute_ipv4_transport_checksum};
-use crate::ipv4::{Ipv4Address, IPV4_MIN_HEADER_LEN, IP_PROTO_ICMP, IP_PROTO_TCP, IP_PROTO_UDP};
+use crate::ipv4::{IP_PROTO_ICMP, IP_PROTO_TCP, IP_PROTO_UDP, IPV4_MIN_HEADER_LEN, Ipv4Address};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -111,8 +111,14 @@ impl NatTable {
                 let dst_port = u16::from_be_bytes([packet[ihl + 2], packet[ihl + 3]]);
 
                 let session_key = NatSessionKey {
-                    src: SocketAddrTuple { ip: src_ip, port: src_port },
-                    dst: SocketAddrTuple { ip: dst_ip, port: dst_port },
+                    src: SocketAddrTuple {
+                        ip: src_ip,
+                        port: src_port,
+                    },
+                    dst: SocketAddrTuple {
+                        ip: dst_ip,
+                        port: dst_port,
+                    },
                     protocol,
                 };
 
@@ -123,7 +129,10 @@ impl NatTable {
                     self.outbound_sessions.insert(session_key, new_p);
                     self.inbound_lookup.insert(
                         (new_p, dst_ip, dst_port, protocol),
-                        SocketAddrTuple { ip: src_ip, port: src_port },
+                        SocketAddrTuple {
+                            ip: src_ip,
+                            port: src_port,
+                        },
                     );
                     new_p
                 };
@@ -142,12 +151,22 @@ impl NatTable {
                 if protocol == IP_PROTO_TCP {
                     if packet.len() >= ihl + 20 {
                         packet[ihl + 16..ihl + 18].copy_from_slice(&[0x00, 0x00]);
-                        let tcp_csum = compute_ipv4_transport_checksum(self.public_ip.0, dst_ip.0, 6, &packet[ihl..]);
+                        let tcp_csum = compute_ipv4_transport_checksum(
+                            self.public_ip.0,
+                            dst_ip.0,
+                            6,
+                            &packet[ihl..],
+                        );
                         packet[ihl + 16..ihl + 18].copy_from_slice(&tcp_csum.to_be_bytes());
                     }
                 } else if protocol == IP_PROTO_UDP && packet.len() >= ihl + 8 {
                     packet[ihl + 6..ihl + 8].copy_from_slice(&[0x00, 0x00]);
-                    let udp_csum = compute_ipv4_transport_checksum(self.public_ip.0, dst_ip.0, 17, &packet[ihl..]);
+                    let udp_csum = compute_ipv4_transport_checksum(
+                        self.public_ip.0,
+                        dst_ip.0,
+                        17,
+                        &packet[ihl..],
+                    );
                     packet[ihl + 6..ihl + 8].copy_from_slice(&udp_csum.to_be_bytes());
                 }
 
@@ -192,7 +211,10 @@ impl NatTable {
                 let dst_port = u16::from_be_bytes([packet[ihl + 2], packet[ihl + 3]]);
 
                 // Check 1: Dynamic SNAT reverse lookup
-                let target = if let Some(&internal) = self.inbound_lookup.get(&(dst_port, src_ip, src_port, protocol)) {
+                let target = if let Some(&internal) = self
+                    .inbound_lookup
+                    .get(&(dst_port, src_ip, src_port, protocol))
+                {
                     Some(internal)
                 } else if let Some(&fwd) = self.port_forwards.get(&(dst_port, protocol)) {
                     // Check 2: Static DNAT Port Forwarding
@@ -216,12 +238,22 @@ impl NatTable {
                     if protocol == IP_PROTO_TCP {
                         if packet.len() >= ihl + 20 {
                             packet[ihl + 16..ihl + 18].copy_from_slice(&[0x00, 0x00]);
-                            let tcp_csum = compute_ipv4_transport_checksum(src_ip.0, target_addr.ip.0, 6, &packet[ihl..]);
+                            let tcp_csum = compute_ipv4_transport_checksum(
+                                src_ip.0,
+                                target_addr.ip.0,
+                                6,
+                                &packet[ihl..],
+                            );
                             packet[ihl + 16..ihl + 18].copy_from_slice(&tcp_csum.to_be_bytes());
                         }
                     } else if protocol == IP_PROTO_UDP && packet.len() >= ihl + 8 {
                         packet[ihl + 6..ihl + 8].copy_from_slice(&[0x00, 0x00]);
-                        let udp_csum = compute_ipv4_transport_checksum(src_ip.0, target_addr.ip.0, 17, &packet[ihl..]);
+                        let udp_csum = compute_ipv4_transport_checksum(
+                            src_ip.0,
+                            target_addr.ip.0,
+                            17,
+                            &packet[ihl..],
+                        );
                         packet[ihl + 6..ihl + 8].copy_from_slice(&udp_csum.to_be_bytes());
                     }
 
@@ -278,7 +310,8 @@ mod tests {
             65535,
             &[],
         );
-        let mut ip_syn = Ipv4Packet::serialize(client_ip, web_server_ip, IP_PROTO_TCP, 100, 64, &tcp_syn);
+        let mut ip_syn =
+            Ipv4Packet::serialize(client_ip, web_server_ip, IP_PROTO_TCP, 100, 64, &tcp_syn);
 
         // 2. Gateway translates outbound SNAT
         let translated = nat.translate_outbound(&mut ip_syn);
@@ -288,7 +321,8 @@ mod tests {
         assert_eq!(parsed_out.header.src_ip, public_ip); // Rewritten to Public IP!
         assert_eq!(parsed_out.header.dst_ip, web_server_ip);
 
-        let parsed_tcp_out = TcpSegment::parse(public_ip, web_server_ip, parsed_out.payload, true).unwrap();
+        let parsed_tcp_out =
+            TcpSegment::parse(public_ip, web_server_ip, parsed_out.payload, true).unwrap();
         assert_eq!(parsed_tcp_out.src_port, 40000); // Rewritten to NAT port 40000!
 
         // 3. Web server replies with SYN-ACK to (203.0.113.1:40000)
@@ -303,7 +337,14 @@ mod tests {
             65535,
             &[],
         );
-        let mut ip_syn_ack = Ipv4Packet::serialize(web_server_ip, public_ip, IP_PROTO_TCP, 200, 64, &tcp_syn_ack);
+        let mut ip_syn_ack = Ipv4Packet::serialize(
+            web_server_ip,
+            public_ip,
+            IP_PROTO_TCP,
+            200,
+            64,
+            &tcp_syn_ack,
+        );
 
         // 4. Gateway translates inbound reply back to client
         let in_translated = nat.translate_inbound(&mut ip_syn_ack);
@@ -312,7 +353,8 @@ mod tests {
         let parsed_in = Ipv4Packet::parse(&ip_syn_ack, true).unwrap();
         assert_eq!(parsed_in.header.dst_ip, client_ip); // Restored to 192.168.1.100!
 
-        let parsed_tcp_in = TcpSegment::parse(web_server_ip, client_ip, parsed_in.payload, true).unwrap();
+        let parsed_tcp_in =
+            TcpSegment::parse(web_server_ip, client_ip, parsed_in.payload, true).unwrap();
         assert_eq!(parsed_tcp_in.dst_port, 54321); // Restored to original client port 54321!
     }
 
@@ -339,7 +381,8 @@ mod tests {
             65535,
             &[],
         );
-        let mut ip_req = Ipv4Packet::serialize(internet_client, public_ip, IP_PROTO_TCP, 1, 64, &tcp_req);
+        let mut ip_req =
+            Ipv4Packet::serialize(internet_client, public_ip, IP_PROTO_TCP, 1, 64, &tcp_req);
 
         let forwarded = nat.translate_inbound(&mut ip_req);
         assert!(forwarded);
@@ -347,7 +390,8 @@ mod tests {
         let parsed = Ipv4Packet::parse(&ip_req, true).unwrap();
         assert_eq!(parsed.header.dst_ip, internal_server);
 
-        let parsed_tcp = TcpSegment::parse(internet_client, internal_server, parsed.payload, true).unwrap();
+        let parsed_tcp =
+            TcpSegment::parse(internet_client, internal_server, parsed.payload, true).unwrap();
         assert_eq!(parsed_tcp.dst_port, 80); // Forwarded to port 80!
     }
 }

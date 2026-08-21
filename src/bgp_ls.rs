@@ -165,8 +165,11 @@ impl BgpLsNlri {
                     if tlv_type == BGP_LS_TLV_LOCAL_NODE_DESCRIPTORS {
                         let mut sub_off = 0;
                         while sub_off + 4 <= tlv_val.len() {
-                            let s_type = u16::from_be_bytes([tlv_val[sub_off], tlv_val[sub_off + 1]]);
-                            let s_len = u16::from_be_bytes([tlv_val[sub_off + 2], tlv_val[sub_off + 3]]) as usize;
+                            let s_type =
+                                u16::from_be_bytes([tlv_val[sub_off], tlv_val[sub_off + 1]]);
+                            let s_len =
+                                u16::from_be_bytes([tlv_val[sub_off + 2], tlv_val[sub_off + 3]])
+                                    as usize;
                             sub_off += 4;
 
                             if sub_off + s_len > tlv_val.len() {
@@ -176,13 +179,17 @@ impl BgpLsNlri {
                             let s_val = &tlv_val[sub_off..sub_off + s_len];
                             match s_type {
                                 BGP_LS_TLV_AUTONOMOUS_SYSTEM if s_val.len() >= 4 => {
-                                    asn = u32::from_be_bytes([s_val[0], s_val[1], s_val[2], s_val[3]]);
+                                    asn = u32::from_be_bytes([
+                                        s_val[0], s_val[1], s_val[2], s_val[3],
+                                    ]);
                                 }
                                 BGP_LS_TLV_IGP_ROUTER_ID if s_val.len() >= 4 => {
-                                    igp_router_id = Ipv4Address([s_val[0], s_val[1], s_val[2], s_val[3]]);
+                                    igp_router_id =
+                                        Ipv4Address([s_val[0], s_val[1], s_val[2], s_val[3]]);
                                 }
                                 BGP_LS_TLV_NODE_NAME => {
-                                    node_name = std::str::from_utf8(s_val).ok().map(|s| s.to_string());
+                                    node_name =
+                                        std::str::from_utf8(s_val).ok().map(|s| s.to_string());
                                 }
                                 _ => {}
                             }
@@ -216,13 +223,17 @@ impl BgpLsNlri {
                     let tlv_val = &body[offset..offset + tlv_len];
                     match tlv_type {
                         BGP_LS_TLV_IPV4_INTERFACE_ADDR if tlv_val.len() >= 4 => {
-                            local_ip = Ipv4Address([tlv_val[0], tlv_val[1], tlv_val[2], tlv_val[3]]);
+                            local_ip =
+                                Ipv4Address([tlv_val[0], tlv_val[1], tlv_val[2], tlv_val[3]]);
                         }
                         BGP_LS_TLV_IPV4_NEIGHBOR_ADDR if tlv_val.len() >= 4 => {
-                            remote_ip = Ipv4Address([tlv_val[0], tlv_val[1], tlv_val[2], tlv_val[3]]);
+                            remote_ip =
+                                Ipv4Address([tlv_val[0], tlv_val[1], tlv_val[2], tlv_val[3]]);
                         }
                         BGP_LS_TLV_TE_DEFAULT_METRIC if tlv_val.len() >= 4 => {
-                            te_metric = u32::from_be_bytes([tlv_val[0], tlv_val[1], tlv_val[2], tlv_val[3]]);
+                            te_metric = u32::from_be_bytes([
+                                tlv_val[0], tlv_val[1], tlv_val[2], tlv_val[3],
+                            ]);
                         }
                         _ => {}
                     }

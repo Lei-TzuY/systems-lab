@@ -1,6 +1,6 @@
 use toy_tcpip::bgp_ls::{
-    BgpLsLinkDescriptor, BgpLsNlri, BgpLsNodeDescriptor, BgpLsTopologyDatabase,
-    BGP_AFI_BGP_LS, BGP_SAFI_BGP_LS,
+    BGP_AFI_BGP_LS, BGP_SAFI_BGP_LS, BgpLsLinkDescriptor, BgpLsNlri, BgpLsNodeDescriptor,
+    BgpLsTopologyDatabase,
 };
 use toy_tcpip::ipv4::Ipv4Address;
 
@@ -62,5 +62,8 @@ fn test_bgp_ls_topology_database_link_ingest() {
     assert_eq!(db.nodes.len(), 2);
     assert_eq!(db.links.len(), 1);
     assert_eq!(db.links[0].te_metric, 50);
-    assert_eq!(db.links[0].local_interface_ip, Ipv4Address::new(10, 0, 0, 1));
+    assert_eq!(
+        db.links[0].local_interface_ip,
+        Ipv4Address::new(10, 0, 0, 1)
+    );
 }

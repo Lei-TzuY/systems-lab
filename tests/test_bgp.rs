@@ -1,4 +1,4 @@
-use toy_tcpip::bgp::{BgpMessage, BgpRib, BGP_HEADER_LEN};
+use toy_tcpip::bgp::{BGP_HEADER_LEN, BgpMessage, BgpRib};
 use toy_tcpip::ipv4::Ipv4Address;
 
 #[test]
@@ -8,7 +8,13 @@ fn test_bgp_open_message_serialization() {
 
     assert_eq!(raw.len(), BGP_HEADER_LEN + 10);
     let parsed = BgpMessage::parse(&raw).unwrap();
-    if let BgpMessage::Open { version, my_as, hold_time, bgp_id } = parsed {
+    if let BgpMessage::Open {
+        version,
+        my_as,
+        hold_time,
+        bgp_id,
+    } = parsed
+    {
         assert_eq!(version, 4);
         assert_eq!(my_as, 64512);
         assert_eq!(hold_time, 90);
@@ -32,7 +38,13 @@ fn test_bgp_update_and_rib_insertion() {
     let raw = update.serialize();
     let parsed = BgpMessage::parse(&raw).unwrap();
 
-    if let BgpMessage::Update { as_path: p, next_hop: nh, nlri_prefix: pr, nlri_mask: m } = parsed {
+    if let BgpMessage::Update {
+        as_path: p,
+        next_hop: nh,
+        nlri_prefix: pr,
+        nlri_mask: m,
+    } = parsed
+    {
         assert_eq!(p, as_path);
         assert_eq!(nh, next_hop);
         assert_eq!(pr, prefix);

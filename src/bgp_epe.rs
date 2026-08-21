@@ -46,7 +46,13 @@ impl BgpEpeDatabase {
     }
 
     /// Registers a PeerAdj-SID (steers traffic over a specific link to a peer)
-    pub fn add_peer_adj_sid(&mut self, label: u32, peer_asn: u32, peer_ip: Ipv4Address, iface_id: u32) {
+    pub fn add_peer_adj_sid(
+        &mut self,
+        label: u32,
+        peer_asn: u32,
+        peer_ip: Ipv4Address,
+        iface_id: u32,
+    ) {
         self.peering_sids.push(PeerSid {
             sid_type: BGP_EPE_PEER_ADJ_SID,
             label,
@@ -58,7 +64,14 @@ impl BgpEpeDatabase {
     }
 
     /// Registers a PeerSet-SID entry (part of an ECMP / weighted group across peers)
-    pub fn add_peer_set_member(&mut self, label: u32, peer_asn: u32, peer_ip: Ipv4Address, iface_id: Option<u32>, weight: u8) {
+    pub fn add_peer_set_member(
+        &mut self,
+        label: u32,
+        peer_asn: u32,
+        peer_ip: Ipv4Address,
+        iface_id: Option<u32>,
+        weight: u8,
+    ) {
         self.peering_sids.push(PeerSid {
             sid_type: BGP_EPE_PEER_SET_SID,
             label,
@@ -71,7 +84,10 @@ impl BgpEpeDatabase {
 
     /// Resolves an incoming EPE Label to its candidate egress paths
     pub fn resolve_egress_path(&self, label: u32) -> Vec<&PeerSid> {
-        self.peering_sids.iter().filter(|s| s.label == label).collect()
+        self.peering_sids
+            .iter()
+            .filter(|s| s.label == label)
+            .collect()
     }
 }
 

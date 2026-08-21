@@ -29,7 +29,9 @@ pub enum GreIpv6Error {
 impl fmt::Display for GreIpv6Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            GreIpv6Error::PacketTooShort(l) => write!(f, "GRE-over-IPv6 packet too short ({} bytes)", l),
+            GreIpv6Error::PacketTooShort(l) => {
+                write!(f, "GRE-over-IPv6 packet too short ({} bytes)", l)
+            }
             GreIpv6Error::InvalidNextHeader => write!(f, "Invalid Next Header (expected GRE 47)"),
         }
     }
@@ -82,7 +84,8 @@ impl GreIpv6Packet {
     }
 
     pub fn parse(ipv6_raw: &[u8]) -> Result<Self, GreIpv6Error> {
-        let ip6 = Ipv6Packet::parse(ipv6_raw).map_err(|_| GreIpv6Error::PacketTooShort(ipv6_raw.len()))?;
+        let ip6 = Ipv6Packet::parse(ipv6_raw)
+            .map_err(|_| GreIpv6Error::PacketTooShort(ipv6_raw.len()))?;
         if ip6.header.next_header != NEXT_HEADER_GRE {
             return Err(GreIpv6Error::InvalidNextHeader);
         }
@@ -109,7 +112,10 @@ impl GreIpv6Packet {
                 return Err(GreIpv6Error::PacketTooShort(gre_data.len()));
             }
             let k = u32::from_be_bytes([
-                gre_data[offset], gre_data[offset + 1], gre_data[offset + 2], gre_data[offset + 3],
+                gre_data[offset],
+                gre_data[offset + 1],
+                gre_data[offset + 2],
+                gre_data[offset + 3],
             ]);
             offset += 4;
             Some(k)
@@ -122,7 +128,10 @@ impl GreIpv6Packet {
                 return Err(GreIpv6Error::PacketTooShort(gre_data.len()));
             }
             let s = u32::from_be_bytes([
-                gre_data[offset], gre_data[offset + 1], gre_data[offset + 2], gre_data[offset + 3],
+                gre_data[offset],
+                gre_data[offset + 1],
+                gre_data[offset + 2],
+                gre_data[offset + 3],
             ]);
             offset += 4;
             Some(s)
@@ -154,10 +163,17 @@ mod tests {
         let dst6 = Ipv6Address::from_str("2001:db8:2::2").unwrap();
 
         let inner_payload = b"Multi-Protocol Overlay Packet inside GRE-over-IPv6";
-        let gre_pkt = GreIpv6Packet::new(src6, dst6, ETHERTYPE_IPV4_IN_GRE, Some(0x00AABBCC), Some(1), inner_payload);
+        let gre_pkt = GreIpv6Packet::new(
+            src6,
+            dst6,
+            ETHERTYPE_IPV4_IN_GRE,
+            Some(0x00AABBCC),
+            Some(1),
+            inner_payload,
+        );
 
         let raw = gre_pkt.serialize();
-        assert_eq!(raw.len() >= 40 + 12 + inner_payload.len(), true);
+        assert!(raw.len() >= 40 + 12 + inner_payload.len());
 
         let parsed = GreIpv6Packet::parse(&raw).unwrap();
         assert_eq!(parsed.src_ip6, src6);

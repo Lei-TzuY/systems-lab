@@ -1,14 +1,19 @@
 use std::io::Cursor;
-use toy_tcpip::pcap::{PcapError, PcapReader, PcapWriter, LINKTYPE_ETHERNET, PCAP_MAGIC_LE};
+use toy_tcpip::pcap::{LINKTYPE_ETHERNET, PCAP_MAGIC_LE, PcapError, PcapReader, PcapWriter};
 
 #[test]
 fn test_pcap_write_and_read_multiple_packets() {
     let mut buffer = Vec::new();
 
     {
-        let mut writer = PcapWriter::new(&mut buffer, 65535, LINKTYPE_ETHERNET).expect("writer init");
-        writer.write_packet(1000, 100, b"Packet #1 content").unwrap();
-        writer.write_packet(1000, 200, b"Packet #2 content - longer payload").unwrap();
+        let mut writer =
+            PcapWriter::new(&mut buffer, 65535, LINKTYPE_ETHERNET).expect("writer init");
+        writer
+            .write_packet(1000, 100, b"Packet #1 content")
+            .unwrap();
+        writer
+            .write_packet(1000, 200, b"Packet #2 content - longer payload")
+            .unwrap();
         writer.write_packet(1000, 300, b"").unwrap();
     }
 

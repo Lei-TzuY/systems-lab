@@ -88,7 +88,10 @@ impl EvpnAliasingEngine {
 
     /// Returns active ECMP Next-Hops for aliasing load-balancing across multi-homed PEs
     pub fn get_aliasing_nexthops(&self, esi: &[u8; 10]) -> &[Ipv4Address] {
-        self.active_es_nexthops.get(esi).map(|v| v.as_slice()).unwrap_or(&[])
+        self.active_es_nexthops
+            .get(esi)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
     }
 }
 

@@ -1,4 +1,4 @@
-use toy_tcpip::sbfd::{SbfdPacket, SbfdReflector, SbfdState, SBFD_REFLECTOR_PORT};
+use toy_tcpip::sbfd::{SBFD_REFLECTOR_PORT, SbfdPacket, SbfdReflector, SbfdState};
 
 #[test]
 fn test_sbfd_probe_and_reflection() {
@@ -8,7 +8,7 @@ fn test_sbfd_probe_and_reflection() {
     let probe = SbfdPacket::build_initiator_probe(0x55443322, 0xAA112233, 20_000);
     assert_eq!(probe.my_discriminator, 0x55443322);
     assert_eq!(probe.your_discriminator, 0xAA112233);
-    assert_eq!(probe.poll, true);
+    assert!(probe.poll);
 
     let raw = probe.serialize();
     let parsed_probe = SbfdPacket::parse(&raw).unwrap();
@@ -17,7 +17,7 @@ fn test_sbfd_probe_and_reflection() {
     assert_eq!(response.state, SbfdState::Up);
     assert_eq!(response.my_discriminator, 0xAA112233);
     assert_eq!(response.your_discriminator, 0x55443322);
-    assert_eq!(response.final_bit, true);
+    assert!(response.final_bit);
 }
 
 #[test]

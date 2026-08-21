@@ -20,8 +20,8 @@ pub struct SbaEventSubscription {
     pub sub_id: u32,
     pub subscriber_nf_id: String,
     pub event_type: SbaEventType,
-    pub target_supi: String,        // "imsi-208950000000001" or "*" for any UE
-    pub notification_uri: String,   // Webhook target URI (e.g., "https://nef.5gcore.local/events/notify")
+    pub target_supi: String,      // "imsi-208950000000001" or "*" for any UE
+    pub notification_uri: String, // Webhook target URI (e.g., "https://nef.5gcore.local/events/notify")
 }
 
 /// 5G SBA Event Notification Dispatch Record
@@ -117,7 +117,7 @@ mod tests {
     #[test]
     fn test_sba_event_subscription_and_dispatch() {
         let mut engine = SbaEventExposureEngine::new();
-        
+
         let sub1 = engine.subscribe(
             "nef-gateway-01",
             SbaEventType::LocationReport,

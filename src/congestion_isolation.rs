@@ -99,12 +99,12 @@ impl CongestionIsolationEngine {
     /// Periodic aging: restores flows to normal queue if no CE marks observed
     pub fn age_flows(&mut self, current_time_us: u64, silence_timeout_us: u64) {
         for flow in &mut self.flows {
-            if flow.state == FlowIsolationState::Isolated {
-                if current_time_us.saturating_sub(flow.last_seen_us) > silence_timeout_us {
-                    flow.state = FlowIsolationState::Restoring;
-                    flow.assigned_queue_id = self.standard_queue_id;
-                    flow.ecn_ce_count = 0;
-                }
+            if flow.state == FlowIsolationState::Isolated
+                && current_time_us.saturating_sub(flow.last_seen_us) > silence_timeout_us
+            {
+                flow.state = FlowIsolationState::Restoring;
+                flow.assigned_queue_id = self.standard_queue_id;
+                flow.ecn_ce_count = 0;
             }
         }
     }

@@ -193,7 +193,10 @@ impl EvpnNlri {
 
                 let ip_len = body[29];
                 let (ip, offset) = if ip_len == 32 && body.len() >= 34 {
-                    (Some(Ipv4Address([body[30], body[31], body[32], body[33]])), 34)
+                    (
+                        Some(Ipv4Address([body[30], body[31], body[32], body[33]])),
+                        34,
+                    )
                 } else {
                     (None, 30)
                 };
@@ -242,7 +245,8 @@ impl EvpnMacTable {
     }
 
     pub fn learn_route(&mut self, adv: &EvpnMacIpAdv, next_hop_vtep: Ipv4Address) {
-        self.entries.insert((adv.vni, adv.mac), (next_hop_vtep, adv.ip));
+        self.entries
+            .insert((adv.vni, adv.mac), (next_hop_vtep, adv.ip));
     }
 
     pub fn lookup(&self, vni: u32, mac: &MacAddress) -> Option<(Ipv4Address, Option<Ipv4Address>)> {

@@ -50,7 +50,8 @@ impl SrPolicy {
     pub fn add_candidate_path(&mut self, path: SrCandidatePath) {
         self.candidate_paths.push(path);
         // Sort descending by preference
-        self.candidate_paths.sort_by(|a, b| b.preference.cmp(&a.preference));
+        self.candidate_paths
+            .sort_by(|a, b| b.preference.cmp(&a.preference));
     }
 
     /// Selects active candidate path (highest preference)
@@ -72,7 +73,8 @@ impl SrPolicyDatabase {
     }
 
     pub fn insert_policy(&mut self, policy: SrPolicy) {
-        self.policies.insert((policy.color, policy.endpoint), policy);
+        self.policies
+            .insert((policy.color, policy.endpoint), policy);
     }
 
     /// Steers traffic matching (color, endpoint) to the active SRv6 Segment List
@@ -113,9 +115,7 @@ mod tests {
             protocol_origin: SrProtocolOrigin::BgpSrTe,
             segment_lists: vec![SrSegmentList {
                 weight: 1,
-                segments: vec![
-                    Ipv6Address::new([0xfc00, 0, 0, 2, 0, 0, 0, 0x0001]),
-                ],
+                segments: vec![Ipv6Address::new([0xfc00, 0, 0, 2, 0, 0, 0, 0x0001])],
             }],
         });
 
@@ -123,6 +123,9 @@ mod tests {
 
         let active_sl = db.steer_traffic(100, endpoint).unwrap();
         assert_eq!(active_sl.segments.len(), 1);
-        assert_eq!(active_sl.segments[0], Ipv6Address::new([0xfc00, 0, 0, 2, 0, 0, 0, 0x0001]));
+        assert_eq!(
+            active_sl.segments[0],
+            Ipv6Address::new([0xfc00, 0, 0, 2, 0, 0, 0, 0x0001])
+        );
     }
 }

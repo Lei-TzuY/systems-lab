@@ -1,6 +1,6 @@
 use toy_tcpip::p4runtime::{
-    P4MatchField, P4MatchKind, P4PacketOut, P4RuntimeServer, P4TableEntry, P4RUNTIME_PORT,
-    P4RUNTIME_VERSION,
+    P4MatchField, P4MatchKind, P4PacketOut, P4RUNTIME_PORT, P4RUNTIME_VERSION, P4RuntimeServer,
+    P4TableEntry,
 };
 
 #[test]

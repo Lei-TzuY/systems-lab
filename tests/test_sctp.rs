@@ -1,4 +1,4 @@
-use toy_tcpip::sctp::{SctpPacket, IP_PROTO_SCTP, SCTP_CHUNK_DATA, SCTP_CHUNK_INIT};
+use toy_tcpip::sctp::{IP_PROTO_SCTP, SCTP_CHUNK_DATA, SCTP_CHUNK_INIT, SctpPacket};
 
 #[test]
 fn test_sctp_init_chunk_structure() {

@@ -1,5 +1,5 @@
 use toy_tcpip::firewall::{Firewall, FirewallAction, FirewallChain, FirewallRule, IpCidr};
-use toy_tcpip::ipv4::{Ipv4Address, Ipv4Packet, IP_PROTO_TCP};
+use toy_tcpip::ipv4::{IP_PROTO_TCP, Ipv4Address, Ipv4Packet};
 use toy_tcpip::tcp::{TcpFlags, TcpSegment};
 
 #[test]
@@ -55,7 +55,10 @@ fn test_firewall_port_and_cidr_filtering() {
         &tcp_seg1,
     );
     let pkt1 = Ipv4Packet::parse(&ip1, false).unwrap();
-    assert_eq!(fw.evaluate(FirewallChain::Input, &pkt1), FirewallAction::Drop);
+    assert_eq!(
+        fw.evaluate(FirewallChain::Input, &pkt1),
+        FirewallAction::Drop
+    );
 
     // 2. Trusted subnet to port 443 -> ACCEPT
     let tcp_seg2 = TcpSegment::serialize(
@@ -78,7 +81,10 @@ fn test_firewall_port_and_cidr_filtering() {
         &tcp_seg2,
     );
     let pkt2 = Ipv4Packet::parse(&ip2, false).unwrap();
-    assert_eq!(fw.evaluate(FirewallChain::Input, &pkt2), FirewallAction::Accept);
+    assert_eq!(
+        fw.evaluate(FirewallChain::Input, &pkt2),
+        FirewallAction::Accept
+    );
 
     // 3. Trusted subnet to unallowed port 22 (SSH) -> Default DROP
     let tcp_seg3 = TcpSegment::serialize(
@@ -101,5 +107,8 @@ fn test_firewall_port_and_cidr_filtering() {
         &tcp_seg3,
     );
     let pkt3 = Ipv4Packet::parse(&ip3, false).unwrap();
-    assert_eq!(fw.evaluate(FirewallChain::Input, &pkt3), FirewallAction::Drop);
+    assert_eq!(
+        fw.evaluate(FirewallChain::Input, &pkt3),
+        FirewallAction::Drop
+    );
 }

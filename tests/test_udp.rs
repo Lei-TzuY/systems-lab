@@ -31,15 +31,7 @@ fn test_udp_socket_dispatch() {
         Some(resp)
     });
 
-    let resp = table.dispatch(
-        Ipv4Address::new(10, 0, 0, 1),
-        44321,
-        53,
-        b"example.com",
-    );
+    let resp = table.dispatch(Ipv4Address::new(10, 0, 0, 1), 44321, 53, b"example.com");
 
-    assert_eq!(
-        resp,
-        Some(b"DNS Response for: example.com".to_vec())
-    );
+    assert_eq!(resp, Some(b"DNS Response for: example.com".to_vec()));
 }

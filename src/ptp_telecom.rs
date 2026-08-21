@@ -18,20 +18,20 @@ pub enum TelecomClockType {
 /// Telecom BMCA (Best Master Clock Algorithm) Dataset Attributes
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TelecomBmcaAttributes {
-    pub clock_class: u8,               // 6 = PRTC Traceable, 7, 140, 150, 160 = Holdover
-    pub clock_accuracy: u8,            // 0x20 = Within 25ns, 0x21 = 100ns
+    pub clock_class: u8,    // 6 = PRTC Traceable, 7, 140, 150, 160 = Holdover
+    pub clock_accuracy: u8, // 0x20 = Within 25ns, 0x21 = 100ns
     pub offset_scaled_log_variance: u16,
-    pub priority1: u8,                 // Static Override Priority 1
-    pub priority2: u8,                 // Static Override Priority 2
-    pub local_priority: u8,            // Telecom Profile Specific Priority (1..255)
-    pub clock_identity: [u8; 8],       // EUI-64 Clock Identity
-    pub steps_removed: u16,            // Number of boundary hops from GM
+    pub priority1: u8,           // Static Override Priority 1
+    pub priority2: u8,           // Static Override Priority 2
+    pub local_priority: u8,      // Telecom Profile Specific Priority (1..255)
+    pub clock_identity: [u8; 8], // EUI-64 Clock Identity
+    pub steps_removed: u16,      // Number of boundary hops from GM
 }
 
 impl TelecomBmcaAttributes {
     pub fn new_prtc_grandmaster(clock_id: [u8; 8]) -> Self {
         TelecomBmcaAttributes {
-            clock_class: 6, // PRTC locked
+            clock_class: 6,       // PRTC locked
             clock_accuracy: 0x20, // <25ns accuracy
             offset_scaled_log_variance: 0x4000,
             priority1: 128,
@@ -44,7 +44,7 @@ impl TelecomBmcaAttributes {
 
     pub fn new_slave_clock(clock_id: [u8; 8]) -> Self {
         TelecomBmcaAttributes {
-            clock_class: 248, // Slave default
+            clock_class: 248,     // Slave default
             clock_accuracy: 0xFE, // Unknown
             offset_scaled_log_variance: 0xFFFF,
             priority1: 128,
@@ -69,7 +69,9 @@ impl TelecomBmcaAttributes {
 
         // 3. Compare offsetScaledLogVariance (lower is better)
         if self.offset_scaled_log_variance != other.offset_scaled_log_variance {
-            return self.offset_scaled_log_variance.cmp(&other.offset_scaled_log_variance);
+            return self
+                .offset_scaled_log_variance
+                .cmp(&other.offset_scaled_log_variance);
         }
 
         // 4. Compare priority2 (lower is better)
@@ -114,7 +116,9 @@ impl TelecomProfileEngine {
     /// Processes an incoming Announce message dataset and updates BMCA Master selection
     pub fn process_announce(&mut self, master_candidate: TelecomBmcaAttributes) -> bool {
         let is_better = match &self.best_master {
-            Some(current_best) => master_candidate.compare_telecom_bmca(current_best) == Ordering::Less,
+            Some(current_best) => {
+                master_candidate.compare_telecom_bmca(current_best) == Ordering::Less
+            }
             None => master_candidate.compare_telecom_bmca(&self.own_attributes) == Ordering::Less,
         };
 
@@ -161,7 +165,8 @@ mod tests {
     #[test]
     fn test_telecom_profile_engine_state() {
         let slave_attr = TelecomBmcaAttributes::new_slave_clock([0xAA; 8]);
-        let mut engine = TelecomProfileEngine::new(TelecomClockType::TelecomTimeSlaveClock, slave_attr);
+        let mut engine =
+            TelecomProfileEngine::new(TelecomClockType::TelecomTimeSlaveClock, slave_attr);
 
         let gm = TelecomBmcaAttributes::new_prtc_grandmaster([0x11; 8]);
         let updated = engine.process_announce(gm.clone());

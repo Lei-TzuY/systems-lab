@@ -40,9 +40,18 @@ pub enum TlsError {
 impl fmt::Display for TlsError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TlsError::RecordTooShort(len) => write!(f, "TLS record too short ({} bytes, min 5)", len),
-            TlsError::InvalidRecordLength { header_len, available } => {
-                write!(f, "TLS record length {} exceeds available buffer {}", header_len, available)
+            TlsError::RecordTooShort(len) => {
+                write!(f, "TLS record too short ({} bytes, min 5)", len)
+            }
+            TlsError::InvalidRecordLength {
+                header_len,
+                available,
+            } => {
+                write!(
+                    f,
+                    "TLS record length {} exceeds available buffer {}",
+                    header_len, available
+                )
             }
             TlsError::InvalidHandshake => write!(f, "Invalid TLS handshake message format"),
         }
@@ -187,7 +196,10 @@ mod tests {
 
     #[test]
     fn test_tls_record_roundtrip() {
-        let rec = TlsRecord::new(TLS_CONTENT_APPLICATION_DATA, b"GET / HTTP/1.1\r\n\r\n".to_vec());
+        let rec = TlsRecord::new(
+            TLS_CONTENT_APPLICATION_DATA,
+            b"GET / HTTP/1.1\r\n\r\n".to_vec(),
+        );
         let raw = rec.serialize();
         let parsed = TlsRecord::parse(&raw).unwrap();
 

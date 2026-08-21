@@ -19,9 +19,9 @@ pub struct AtsFrame {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AtsStreamShaper {
     pub stream_id: u32,
-    pub committed_info_rate_bps: u64,       // CIR in bits per second
-    pub committed_burst_size_bytes: u32,    // CBS in bytes
-    pub last_eligibility_time_us: u64,      // Eligibility Time (ET) of previous frame
+    pub committed_info_rate_bps: u64,    // CIR in bits per second
+    pub committed_burst_size_bytes: u32, // CBS in bytes
+    pub last_eligibility_time_us: u64,   // Eligibility Time (ET) of previous frame
 }
 
 impl AtsStreamShaper {
@@ -36,14 +36,19 @@ impl AtsStreamShaper {
 
     /// Computes the Eligibility Time (ET) for a newly arrived frame
     /// ET = max(ET_prev + frame_transmission_time, arrival_time)
-    pub fn compute_eligibility_time(&mut self, frame_length_bytes: usize, arrival_time_us: u64) -> u64 {
+    pub fn compute_eligibility_time(
+        &mut self,
+        frame_length_bytes: usize,
+        arrival_time_us: u64,
+    ) -> u64 {
         if self.committed_info_rate_bps == 0 {
             return arrival_time_us;
         }
 
         // Frame transmission time in microseconds = (bytes * 8 * 1,000,000) / CIR
-        let tx_time_us = ((frame_length_bytes as u64) * 8 * 1_000_000) / self.committed_info_rate_bps;
-        
+        let tx_time_us =
+            ((frame_length_bytes as u64) * 8 * 1_000_000) / self.committed_info_rate_bps;
+
         let et = if arrival_time_us > self.last_eligibility_time_us {
             arrival_time_us + tx_time_us
         } else {
@@ -85,7 +90,10 @@ impl UrgencyBasedScheduler {
         payload: Vec<u8>,
     ) -> Result<u64, &'static str> {
         let frame_len = payload.len();
-        let shaper = self.shapers.get_mut(&stream_id).ok_or("Stream shaper not found")?;
+        let shaper = self
+            .shapers
+            .get_mut(&stream_id)
+            .ok_or("Stream shaper not found")?;
         let et = shaper.compute_eligibility_time(frame_len, arrival_time_us);
 
         let frame = AtsFrame {
@@ -102,7 +110,11 @@ impl UrgencyBasedScheduler {
 
     /// Selects and transmits the next eligible frame whose Eligibility Time <= current_time_us
     pub fn dequeue_eligible_frame(&mut self, current_time_us: u64) -> Option<AtsFrame> {
-        if let Some(idx) = self.scheduled_queue.iter().position(|f| f.eligibility_time_us <= current_time_us) {
+        if let Some(idx) = self
+            .scheduled_queue
+            .iter()
+            .position(|f| f.eligibility_time_us <= current_time_us)
+        {
             let frame = self.scheduled_queue.remove(idx)?;
             self.transmitted_frames_count += 1;
             Some(frame)
@@ -119,7 +131,7 @@ mod tests {
     #[test]
     fn test_ats_eligibility_time_calculation() {
         let mut shaper = AtsStreamShaper::new(1, 8_000_000, 1500); // 8 Mbps (1000 bytes/ms = 1 byte/µs)
-        
+
         // 1000 bytes at 8 Mbps takes 1000µs
         let et1 = shaper.compute_eligibility_time(1000, 100);
         assert_eq!(et1, 100 + 1000); // 1100µs

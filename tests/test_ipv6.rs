@@ -1,5 +1,5 @@
 use std::str::FromStr;
-use toy_tcpip::ipv6::{compute_ipv6_transport_checksum, Ipv6Address, Ipv6Packet, NEXT_HEADER_UDP};
+use toy_tcpip::ipv6::{Ipv6Address, Ipv6Packet, NEXT_HEADER_UDP, compute_ipv6_transport_checksum};
 
 #[test]
 fn test_ipv6_address_parsing_and_rfc5952_display() {

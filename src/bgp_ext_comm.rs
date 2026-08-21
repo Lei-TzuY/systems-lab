@@ -156,8 +156,13 @@ mod tests {
 
     #[test]
     fn test_bgp_ext_community_color_and_tunnel_encap() {
-        let color_comm = BgpExtendedCommunity::Color { flags: 0, color: 100 };
-        let encap_comm = BgpExtendedCommunity::TunnelEncapsulation { tunnel_type: TUNNEL_TYPE_VXLAN };
+        let color_comm = BgpExtendedCommunity::Color {
+            flags: 0,
+            color: 100,
+        };
+        let encap_comm = BgpExtendedCommunity::TunnelEncapsulation {
+            tunnel_type: TUNNEL_TYPE_VXLAN,
+        };
 
         let raw_color = color_comm.serialize();
         let parsed_color = BgpExtendedCommunity::parse(&raw_color).unwrap();

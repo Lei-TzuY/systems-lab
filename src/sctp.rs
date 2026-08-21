@@ -59,7 +59,15 @@ impl fmt::Display for SctpError {
 impl std::error::Error for SctpError {}
 
 impl SctpPacket {
-    pub fn build_init(src_p: u16, dst_p: u16, init_tag: u32, a_rwnd: u32, num_out: u16, num_in: u16, isn: u32) -> Self {
+    pub fn build_init(
+        src_p: u16,
+        dst_p: u16,
+        init_tag: u32,
+        a_rwnd: u32,
+        num_out: u16,
+        num_in: u16,
+        isn: u32,
+    ) -> Self {
         let mut val = Vec::new();
         val.extend_from_slice(&init_tag.to_be_bytes());
         val.extend_from_slice(&a_rwnd.to_be_bytes());
@@ -84,7 +92,16 @@ impl SctpPacket {
         }
     }
 
-    pub fn build_data(src_p: u16, dst_p: u16, v_tag: u32, tsn: u32, stream_id: u16, stream_seq: u16, payload_proto: u32, user_data: &[u8]) -> Self {
+    pub fn build_data(
+        src_p: u16,
+        dst_p: u16,
+        v_tag: u32,
+        tsn: u32,
+        stream_id: u16,
+        stream_seq: u16,
+        payload_proto: u32,
+        user_data: &[u8],
+    ) -> Self {
         let mut val = Vec::new();
         val.extend_from_slice(&tsn.to_be_bytes());
         val.extend_from_slice(&stream_id.to_be_bytes());

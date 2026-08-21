@@ -1,6 +1,6 @@
 use toy_tcpip::snmp::{
-    encode_ber_integer, encode_ber_string, SnmpMessage, SnmpMib, SnmpValue, SnmpVarbind,
-    SNMP_PDU_GET_REQUEST, SNMP_PDU_RESPONSE, SNMP_VERSION_2C,
+    SNMP_PDU_GET_REQUEST, SNMP_PDU_RESPONSE, SNMP_VERSION_2C, SnmpMessage, SnmpMib, SnmpValue,
+    SnmpVarbind, encode_ber_integer, encode_ber_string,
 };
 
 #[test]
@@ -15,7 +15,8 @@ fn test_snmp_ber_primitives() {
 
 #[test]
 fn test_snmp_end_to_end_query_and_response() {
-    let req = SnmpMessage::build_get_request("public", 999, &["1.3.6.1.2.1.1.1.0", "1.3.6.1.2.1.1.3.0"]);
+    let req =
+        SnmpMessage::build_get_request("public", 999, &["1.3.6.1.2.1.1.1.0", "1.3.6.1.2.1.1.3.0"]);
     let raw_req = req.serialize();
 
     let parsed_req = SnmpMessage::parse(&raw_req).unwrap();

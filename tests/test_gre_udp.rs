@@ -1,4 +1,4 @@
-use toy_tcpip::gre_udp::{GreUdpPacket, GRE_IN_UDP_PORT};
+use toy_tcpip::gre_udp::{GRE_IN_UDP_PORT, GreUdpPacket};
 
 #[test]
 fn test_gre_in_udp_constants_and_framing() {

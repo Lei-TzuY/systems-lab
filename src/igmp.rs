@@ -36,9 +36,15 @@ pub enum IgmpError {
 impl fmt::Display for IgmpError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            IgmpError::PacketTooShort(len) => write!(f, "IGMP packet too short ({} bytes, min 8)", len),
+            IgmpError::PacketTooShort(len) => {
+                write!(f, "IGMP packet too short ({} bytes, min 8)", len)
+            }
             IgmpError::InvalidChecksum { computed, expected } => {
-                write!(f, "IGMP checksum error: computed 0x{:04x}, expected 0x{:04x}", computed, expected)
+                write!(
+                    f,
+                    "IGMP checksum error: computed 0x{:04x}, expected 0x{:04x}",
+                    computed, expected
+                )
             }
         }
     }
@@ -135,14 +141,7 @@ impl IgmpPacket {
 /// Format: 01:00:5E:[low 23 bits of IPv4 address]
 pub fn multicast_ip_to_mac(ip: Ipv4Address) -> MacAddress {
     let bytes = ip.0;
-    MacAddress([
-        0x01,
-        0x00,
-        0x5e,
-        bytes[1] & 0x7F,
-        bytes[2],
-        bytes[3],
-    ])
+    MacAddress([0x01, 0x00, 0x5e, bytes[1] & 0x7F, bytes[2], bytes[3]])
 }
 
 /// Dynamic in-memory Multicast Group Subscription Manager

@@ -1,7 +1,9 @@
 use std::str::FromStr;
 use toy_tcpip::ipv4::{Ipv4Address, Ipv4Packet};
 use toy_tcpip::ipv6::{Ipv6Address, Ipv6Packet};
-use toy_tcpip::transition::{Tunnel4in6, Tunnel6in4, IP_PROTO_IPV6_IN_IPV4, NEXT_HEADER_IPV4_IN_IPV6};
+use toy_tcpip::transition::{
+    IP_PROTO_IPV6_IN_IPV4, NEXT_HEADER_IPV4_IN_IPV6, Tunnel4in6, Tunnel6in4,
+};
 
 #[test]
 fn test_6in4_tunnel_rfc4213() {
@@ -35,7 +37,8 @@ fn test_4in6_tunnel_rfc2473() {
 
     let src_v4 = Ipv4Address::new(10, 10, 1, 1);
     let dst_v4 = Ipv4Address::new(10, 20, 2, 2);
-    let inner_ip4 = Ipv4Packet::serialize(src_v4, dst_v4, 0, 77, 64, b"Dual-stack 4in6 encapsulation");
+    let inner_ip4 =
+        Ipv4Packet::serialize(src_v4, dst_v4, 0, 77, 64, b"Dual-stack 4in6 encapsulation");
 
     let encap = tunnel.encapsulate(&inner_ip4);
     let outer_ip6 = Ipv6Packet::parse(&encap).unwrap();

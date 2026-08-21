@@ -120,7 +120,8 @@ impl BgpMessage {
                     let withdrawn_len = u16::from_be_bytes([body[0], body[1]]) as usize;
                     let attr_offset = 2 + withdrawn_len;
                     if body.len() >= attr_offset + 2 {
-                        let total_attr_len = u16::from_be_bytes([body[attr_offset], body[attr_offset + 1]]) as usize;
+                        let total_attr_len =
+                            u16::from_be_bytes([body[attr_offset], body[attr_offset + 1]]) as usize;
                         let mut curr = attr_offset + 2;
                         let attr_end = curr + total_attr_len;
 
@@ -140,15 +141,21 @@ impl BgpMessage {
                                             for i in 0..seg_len {
                                                 let offset = val_start + 2 + i * 2;
                                                 if offset + 2 <= val_end {
-                                                    as_path.push(u16::from_be_bytes([body[offset], body[offset + 1]]));
+                                                    as_path.push(u16::from_be_bytes([
+                                                        body[offset],
+                                                        body[offset + 1],
+                                                    ]));
                                                 }
                                             }
                                         }
                                     }
-                                    BGP_ATTR_NEXT_HOP => {
-                                        if attr_len == 4 {
-                                            next_hop = Ipv4Address([body[val_start], body[val_start + 1], body[val_start + 2], body[val_start + 3]]);
-                                        }
+                                    BGP_ATTR_NEXT_HOP if attr_len == 4 => {
+                                        next_hop = Ipv4Address([
+                                            body[val_start],
+                                            body[val_start + 1],
+                                            body[val_start + 2],
+                                            body[val_start + 3],
+                                        ]);
                                     }
                                     _ => {}
                                 }
@@ -160,7 +167,12 @@ impl BgpMessage {
                         if attr_end < body.len() {
                             nlri_mask = body[attr_end];
                             if attr_end + 4 < body.len() {
-                                nlri_prefix = Ipv4Address([body[attr_end + 1], body[attr_end + 2], body[attr_end + 3], body[attr_end + 4]]);
+                                nlri_prefix = Ipv4Address([
+                                    body[attr_end + 1],
+                                    body[attr_end + 2],
+                                    body[attr_end + 3],
+                                    body[attr_end + 4],
+                                ]);
                             }
                         }
                     }
@@ -261,7 +273,12 @@ impl BgpMessage {
         }
     }
 
-    pub fn build_update(prefix: Ipv4Address, mask: u8, next_hop: Ipv4Address, as_path: Vec<u16>) -> Self {
+    pub fn build_update(
+        prefix: Ipv4Address,
+        mask: u8,
+        next_hop: Ipv4Address,
+        as_path: Vec<u16>,
+    ) -> Self {
         BgpMessage::Update {
             as_path,
             next_hop,
@@ -287,12 +304,28 @@ impl BgpRib {
         let mut rib = BgpRib {
             routes: HashMap::new(),
         };
-        rib.insert(Ipv4Address::new(8, 8, 8, 0), 24, Ipv4Address::new(198, 51, 100, 1), vec![65001, 15169]);
-        rib.insert(Ipv4Address::new(1, 1, 1, 0), 24, Ipv4Address::new(203, 0, 113, 1), vec![65001, 13335]);
+        rib.insert(
+            Ipv4Address::new(8, 8, 8, 0),
+            24,
+            Ipv4Address::new(198, 51, 100, 1),
+            vec![65001, 15169],
+        );
+        rib.insert(
+            Ipv4Address::new(1, 1, 1, 0),
+            24,
+            Ipv4Address::new(203, 0, 113, 1),
+            vec![65001, 13335],
+        );
         rib
     }
 
-    pub fn insert(&mut self, prefix: Ipv4Address, mask: u8, next_hop: Ipv4Address, as_path: Vec<u16>) {
+    pub fn insert(
+        &mut self,
+        prefix: Ipv4Address,
+        mask: u8,
+        next_hop: Ipv4Address,
+        as_path: Vec<u16>,
+    ) {
         self.routes.insert((prefix, mask), (next_hop, as_path));
     }
 
@@ -311,7 +344,13 @@ mod tests {
         let raw_open = open.serialize();
 
         let parsed = BgpMessage::parse(&raw_open).unwrap();
-        if let BgpMessage::Open { my_as, hold_time, bgp_id, .. } = parsed {
+        if let BgpMessage::Open {
+            my_as,
+            hold_time,
+            bgp_id,
+            ..
+        } = parsed
+        {
             assert_eq!(my_as, 65001);
             assert_eq!(hold_time, 180);
             assert_eq!(bgp_id, Ipv4Address::new(10, 0, 0, 1));
@@ -336,7 +375,13 @@ mod tests {
         let raw = update.serialize();
         let parsed = BgpMessage::parse(&raw).unwrap();
 
-        if let BgpMessage::Update { as_path, next_hop, nlri_prefix, nlri_mask } = parsed {
+        if let BgpMessage::Update {
+            as_path,
+            next_hop,
+            nlri_prefix,
+            nlri_mask,
+        } = parsed
+        {
             assert_eq!(as_path, vec![65001, 65002, 65003]);
             assert_eq!(next_hop, Ipv4Address::new(192, 168, 1, 1));
             assert_eq!(nlri_prefix, Ipv4Address::new(172, 16, 0, 0));

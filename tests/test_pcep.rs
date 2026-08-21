@@ -1,5 +1,7 @@
 use toy_tcpip::ipv4::Ipv4Address;
-use toy_tcpip::pcep::{PcepMessage, PcepObject, PcepSession, PCEP_MSG_OPEN, PCEP_MSG_PCREP, PCEP_MSG_PCREQ, PCEP_PORT};
+use toy_tcpip::pcep::{
+    PCEP_MSG_OPEN, PCEP_MSG_PCREP, PCEP_MSG_PCREQ, PCEP_PORT, PcepMessage, PcepObject, PcepSession,
+};
 
 #[test]
 fn test_pcep_open_and_sr_path_computation() {
@@ -8,7 +10,13 @@ fn test_pcep_open_and_sr_path_computation() {
 
     let parsed_open = PcepMessage::parse(&raw_open).unwrap();
     assert_eq!(parsed_open.header.msg_type, PCEP_MSG_OPEN);
-    if let PcepObject::Open { version, keepalive_s, deadtimer_s, sid } = parsed_open.objects[0] {
+    if let PcepObject::Open {
+        version,
+        keepalive_s,
+        deadtimer_s,
+        sid,
+    } = parsed_open.objects[0]
+    {
         assert_eq!(version, 1);
         assert_eq!(keepalive_s, 30);
         assert_eq!(deadtimer_s, 120);

@@ -30,6 +30,21 @@ impl Ipv4Address {
         u32::from_be_bytes(self.0)
     }
 
+    pub fn from_u32(val: u32) -> Self {
+        Ipv4Address(val.to_be_bytes())
+    }
+
+    pub fn mask(&self, prefix_len: u8) -> Self {
+        if prefix_len == 0 {
+            Ipv4Address::UNSPECIFIED
+        } else if prefix_len >= 32 {
+            *self
+        } else {
+            let netmask = !((1u32 << (32 - prefix_len)) - 1);
+            Ipv4Address::from_u32(self.to_u32() & netmask)
+        }
+    }
+
     pub fn is_loopback(&self) -> bool {
         self.0[0] == 127
     }
@@ -61,11 +76,15 @@ impl FromStr for Ipv4Address {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let parts: Vec<&str> = s.split('.').collect();
         if parts.len() != 4 {
-            return Err("Invalid IPv4 address format (expected 4 dot-separated octets)".to_string());
+            return Err(
+                "Invalid IPv4 address format (expected 4 dot-separated octets)".to_string(),
+            );
         }
         let mut bytes = [0u8; 4];
         for (i, p) in parts.iter().enumerate() {
-            bytes[i] = p.parse::<u8>().map_err(|e| format!("Invalid octet '{}': {}", p, e))?;
+            bytes[i] = p
+                .parse::<u8>()
+                .map_err(|e| format!("Invalid octet '{}': {}", p, e))?;
         }
         Ok(Ipv4Address(bytes))
     }
@@ -151,14 +170,27 @@ pub enum Ipv4Error {
 impl fmt::Display for Ipv4Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Ipv4Error::PacketTooShort(len) => write!(f, "IPv4 packet too short ({} bytes, min 20)", len),
+            Ipv4Error::PacketTooShort(len) => {
+                write!(f, "IPv4 packet too short ({} bytes, min 20)", len)
+            }
             Ipv4Error::InvalidVersion(v) => write!(f, "Invalid IP version: {} (expected 4)", v),
             Ipv4Error::InvalidIhl(ihl) => write!(f, "Invalid IHL: {} (min 5)", ihl),
-            Ipv4Error::TotalLengthMismatch { declared, available } => {
-                write!(f, "IPv4 total length {} exceeds available data {}", declared, available)
+            Ipv4Error::TotalLengthMismatch {
+                declared,
+                available,
+            } => {
+                write!(
+                    f,
+                    "IPv4 total length {} exceeds available data {}",
+                    declared, available
+                )
             }
             Ipv4Error::InvalidChecksum { computed, found } => {
-                write!(f, "IPv4 checksum mismatch: computed 0x{:04x}, found 0x{:04x}", computed, found)
+                write!(
+                    f,
+                    "IPv4 checksum mismatch: computed 0x{:04x}, found 0x{:04x}",
+                    computed, found
+                )
             }
         }
     }

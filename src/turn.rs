@@ -3,7 +3,7 @@
 //! Relay protocol extending STUN for media and data relaying behind Symmetric NATs.
 
 use crate::ipv4::Ipv4Address;
-use crate::stun::{StunAttribute, StunError, STUN_HEADER_LEN, STUN_MAGIC_COOKIE};
+use crate::stun::{STUN_HEADER_LEN, STUN_MAGIC_COOKIE, StunAttribute, StunError};
 use std::collections::BTreeMap;
 
 pub const TURN_ALLOCATE_REQUEST: u16 = 0x0003;
@@ -314,7 +314,8 @@ impl TurnAllocationTable {
             relayed_port,
             lifetime_sec,
         };
-        self.allocations.insert((client_ip, client_port), alloc.clone());
+        self.allocations
+            .insert((client_ip, client_port), alloc.clone());
         alloc
     }
 }
@@ -325,7 +326,9 @@ mod tests {
 
     #[test]
     fn test_turn_allocate_and_relayed_address() {
-        let tid = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC];
+        let tid = [
+            0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC,
+        ];
         let req = TurnPacket::build_allocate_request(tid, 600);
         let raw_req = req.serialize();
 
@@ -356,7 +359,10 @@ mod tests {
 
         let parsed_send = TurnPacket::parse(&raw_send).unwrap();
         assert_eq!(parsed_send.msg_type, TURN_SEND_INDICATION);
-        assert_eq!(parsed_send.get_xor_peer_address(), Some((peer_ip, peer_port)));
+        assert_eq!(
+            parsed_send.get_xor_peer_address(),
+            Some((peer_ip, peer_port))
+        );
         assert_eq!(parsed_send.get_data_payload(), Some(payload.as_ref()));
     }
 }

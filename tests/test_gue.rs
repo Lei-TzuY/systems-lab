@@ -1,4 +1,6 @@
-use toy_tcpip::gue::{FouPacket, GuePacket, FOU_UDP_PORT, GUE_PROTO_GRE, GUE_PROTO_IPV4, GUE_PROTO_IPV6, GUE_UDP_PORT};
+use toy_tcpip::gue::{
+    FOU_UDP_PORT, FouPacket, GUE_PROTO_GRE, GUE_PROTO_IPV4, GUE_PROTO_IPV6, GUE_UDP_PORT, GuePacket,
+};
 
 #[test]
 fn test_gue_encapsulation_protocols() {

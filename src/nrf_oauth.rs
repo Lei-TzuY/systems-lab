@@ -18,8 +18,8 @@ pub struct NrfAccessTokenRequest {
 /// Minted 5G Access Token Claims
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NrfAccessTokenClaims {
-    pub issuer: String, // NRF instance ID
-    pub subject: String, // Consumer NF instance ID
+    pub issuer: String,   // NRF instance ID
+    pub subject: String,  // Consumer NF instance ID
     pub audience: NfType, // Target Producer NF Type
     pub scope: String,
     pub issued_at_sec: u64,
@@ -135,30 +135,18 @@ mod tests {
         assert_eq!(resp.expires_in_sec, 3600);
 
         // Verification at UDM: Valid
-        let is_valid = authority.verify_token(
-            &resp.access_token,
-            NfType::Udm,
-            "nudm-sdm",
-            1700000500,
-        );
+        let is_valid =
+            authority.verify_token(&resp.access_token, NfType::Udm, "nudm-sdm", 1700000500);
         assert!(is_valid);
 
         // Verification at PCF: Rejected (wrong audience)
-        let is_valid_pcf = authority.verify_token(
-            &resp.access_token,
-            NfType::Pcf,
-            "nudm-sdm",
-            1700000500,
-        );
+        let is_valid_pcf =
+            authority.verify_token(&resp.access_token, NfType::Pcf, "nudm-sdm", 1700000500);
         assert!(!is_valid_pcf);
 
         // Verification after expiration: Rejected
-        let is_expired = authority.verify_token(
-            &resp.access_token,
-            NfType::Udm,
-            "nudm-sdm",
-            1700005000,
-        );
+        let is_expired =
+            authority.verify_token(&resp.access_token, NfType::Udm, "nudm-sdm", 1700005000);
         assert!(!is_expired);
     }
 }

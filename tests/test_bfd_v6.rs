@@ -1,6 +1,6 @@
 use std::str::FromStr;
 use toy_tcpip::bfd::{BfdControlPacket, BfdState};
-use toy_tcpip::bfd_v6::{BfdV6Manager, BfdV6Session, BFD_MULTIHOP_PORT};
+use toy_tcpip::bfd_v6::{BFD_MULTIHOP_PORT, BfdV6Manager, BfdV6Session};
 use toy_tcpip::ipv6::Ipv6Address;
 
 #[test]
@@ -10,7 +10,7 @@ fn test_bfd_v6_multi_hop_session_lifecycle() {
 
     let session = BfdV6Session::new(peer_ip, 0xABCDEF01, true);
     assert_eq!(session.state, BfdState::Down);
-    assert_eq!(session.is_multihop, true);
+    assert!(session.is_multihop);
 
     mgr.add_session(session);
 
@@ -19,7 +19,7 @@ fn test_bfd_v6_multi_hop_session_lifecycle() {
     // Step 1: Transmit initial Down packet with Poll bit
     let initial_pkt = sess.build_outbound_packet(true);
     assert_eq!(initial_pkt.state, BfdState::Down);
-    assert_eq!(initial_pkt.poll, true);
+    assert!(initial_pkt.poll);
     assert_eq!(initial_pkt.my_discriminator, 0xABCDEF01);
 
     // Step 2: Receive peer Down packet -> Transition to Init

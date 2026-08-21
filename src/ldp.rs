@@ -125,7 +125,7 @@ impl LdpPdu {
         fec_val.push(0x02); // Prefix FEC Element
         fec_val.extend_from_slice(&1u16.to_be_bytes()); // Address Family: IPv4 (1)
         fec_val.push(prefix_len);
-        let prefix_bytes_len = ((prefix_len as usize) + 7) / 8;
+        let prefix_bytes_len = (prefix_len as usize).div_ceil(8);
         fec_val.extend_from_slice(&prefix.0[..prefix_bytes_len.min(4)]);
         tlvs.push(LdpTlv {
             tlv_type: LDP_TLV_FEC,
@@ -224,7 +224,8 @@ impl LdpPdu {
 
             while tlv_offset + 4 <= msg_end {
                 let tlv_type = u16::from_be_bytes([data[tlv_offset], data[tlv_offset + 1]]);
-                let tlv_len = u16::from_be_bytes([data[tlv_offset + 2], data[tlv_offset + 3]]) as usize;
+                let tlv_len =
+                    u16::from_be_bytes([data[tlv_offset + 2], data[tlv_offset + 3]]) as usize;
 
                 if tlv_offset + 4 + tlv_len > msg_end {
                     return Err(LdpError::InvalidLength);
@@ -305,7 +306,7 @@ mod tests {
         let pdu = LdpPdu::build_hello(lsr, 15);
         let raw = pdu.serialize();
 
-        assert_eq!(raw.len() >= LDP_HEADER_LEN, true);
+        assert!(raw.len() >= LDP_HEADER_LEN);
         let parsed = LdpPdu::parse(&raw).unwrap();
         assert_eq!(parsed.version, 1);
         assert_eq!(parsed.lsr_id, lsr);
@@ -316,7 +317,8 @@ mod tests {
     #[test]
     fn test_ldp_label_mapping_and_binding_extraction() {
         let lsr = Ipv4Address::new(10, 0, 0, 1);
-        let pdu = LdpPdu::build_label_mapping(lsr, 101, Ipv4Address::new(192, 168, 10, 0), 24, 1001);
+        let pdu =
+            LdpPdu::build_label_mapping(lsr, 101, Ipv4Address::new(192, 168, 10, 0), 24, 1001);
         let raw = pdu.serialize();
 
         let parsed = LdpPdu::parse(&raw).unwrap();

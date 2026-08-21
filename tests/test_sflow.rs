@@ -1,5 +1,8 @@
 use toy_tcpip::ipv4::Ipv4Address;
-use toy_tcpip::sflow::{SflowCounterSample, SflowDatagram, SflowFlowSample, SflowSample, SFLOW_FORMAT_COUNTER_SAMPLE, SFLOW_FORMAT_FLOW_SAMPLE, SFLOW_UDP_PORT, SFLOW_VERSION_5};
+use toy_tcpip::sflow::{
+    SFLOW_FORMAT_COUNTER_SAMPLE, SFLOW_FORMAT_FLOW_SAMPLE, SFLOW_UDP_PORT, SFLOW_VERSION_5,
+    SflowCounterSample, SflowDatagram, SflowFlowSample, SflowSample,
+};
 
 #[test]
 fn test_sflow_datagram_encoding_and_parsing() {
@@ -15,7 +18,9 @@ fn test_sflow_datagram_encoding_and_parsing() {
         input_if: 10,
         output_if: 20,
         orig_packet_len: 256,
-        sampled_header: vec![0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x08, 0x00],
+        sampled_header: vec![
+            0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x08, 0x00,
+        ],
     };
     dgram.samples.push(SflowSample::Flow(flow));
 

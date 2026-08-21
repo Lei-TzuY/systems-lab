@@ -53,8 +53,12 @@ pub enum WireguardError {
 impl fmt::Display for WireguardError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            WireguardError::PacketTooShort(l) => write!(f, "WireGuard packet too short ({} bytes)", l),
-            WireguardError::InvalidMessageType(t) => write!(f, "Unknown WireGuard message type: {}", t),
+            WireguardError::PacketTooShort(l) => {
+                write!(f, "WireGuard packet too short ({} bytes)", l)
+            }
+            WireguardError::InvalidMessageType(t) => {
+                write!(f, "Unknown WireGuard message type: {}", t)
+            }
             WireguardError::InvalidLength => write!(f, "Invalid WireGuard message length"),
         }
     }
@@ -133,14 +137,22 @@ impl WireguardMessage {
                 buf.extend_from_slice(mac1);
                 buf.extend_from_slice(mac2);
             }
-            WireguardMessage::CookieReply { receiver_index, nonce, encrypted_cookie } => {
+            WireguardMessage::CookieReply {
+                receiver_index,
+                nonce,
+                encrypted_cookie,
+            } => {
                 buf.push(WG_MSG_COOKIE);
                 buf.extend_from_slice(&[0, 0, 0]);
                 buf.extend_from_slice(&receiver_index.to_le_bytes());
                 buf.extend_from_slice(nonce);
                 buf.extend_from_slice(encrypted_cookie);
             }
-            WireguardMessage::Data { receiver_index, counter, encrypted_payload } => {
+            WireguardMessage::Data {
+                receiver_index,
+                counter,
+                encrypted_payload,
+            } => {
                 buf.push(WG_MSG_DATA);
                 buf.extend_from_slice(&[0, 0, 0]); // Reserved
                 buf.extend_from_slice(&receiver_index.to_le_bytes());
@@ -259,7 +271,12 @@ pub struct WireguardPeer {
 }
 
 impl WireguardPeer {
-    pub fn new(public_key: [u8; 32], endpoint_ip: Ipv4Address, endpoint_port: u16, tunnel_ip: Ipv4Address) -> Self {
+    pub fn new(
+        public_key: [u8; 32],
+        endpoint_ip: Ipv4Address,
+        endpoint_port: u16,
+        tunnel_ip: Ipv4Address,
+    ) -> Self {
         WireguardPeer {
             public_key,
             endpoint_ip,
@@ -314,7 +331,12 @@ mod tests {
         assert_eq!(raw_resp.len(), 92);
 
         let parsed_resp = WireguardMessage::parse(&raw_resp).unwrap();
-        if let WireguardMessage::HandshakeResponse { sender_index, receiver_index, .. } = parsed_resp {
+        if let WireguardMessage::HandshakeResponse {
+            sender_index,
+            receiver_index,
+            ..
+        } = parsed_resp
+        {
             assert_eq!(sender_index, 0x55667788);
             assert_eq!(receiver_index, 0x11223344);
         } else {
@@ -323,10 +345,15 @@ mod tests {
 
         let data = WireguardMessage::build_data(0x55667788, 1, b"Ping through WireGuard Tunnel");
         let raw_data = data.serialize();
-        assert_eq!(raw_data.len() >= 32, true);
+        assert!(raw_data.len() >= 32);
 
         let parsed_data = WireguardMessage::parse(&raw_data).unwrap();
-        if let WireguardMessage::Data { receiver_index, counter, encrypted_payload } = parsed_data {
+        if let WireguardMessage::Data {
+            receiver_index,
+            counter,
+            encrypted_payload,
+        } = parsed_data
+        {
             assert_eq!(receiver_index, 0x55667788);
             assert_eq!(counter, 1);
             assert_eq!(&encrypted_payload[..29], b"Ping through WireGuard Tunnel");

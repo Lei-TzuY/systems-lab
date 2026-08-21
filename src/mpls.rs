@@ -16,10 +16,10 @@ pub const MPLS_LABEL_IMPLICIT_NULL: u32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MplsHeader {
-    pub label: u32, // 20 bits (0..1048575)
-    pub tc: u8,     // 3 bits Traffic Class / EXP
+    pub label: u32,            // 20 bits (0..1048575)
+    pub tc: u8,                // 3 bits Traffic Class / EXP
     pub bottom_of_stack: bool, // 1 bit S flag
-    pub ttl: u8,    // 8 bits TTL
+    pub ttl: u8,               // 8 bits TTL
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,7 +31,9 @@ pub enum MplsError {
 impl fmt::Display for MplsError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            MplsError::HeaderTooShort(len) => write!(f, "MPLS header too short ({} bytes, min 4)", len),
+            MplsError::HeaderTooShort(len) => {
+                write!(f, "MPLS header too short ({} bytes, min 4)", len)
+            }
             MplsError::InvalidLabel(l) => write!(f, "MPLS label out of 20-bit range: {}", l),
         }
     }
@@ -127,9 +129,9 @@ impl MplsPacket {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LfibAction {
-    Push(u32),       // Ingress LER: Encapsulate with new Label
+    Push(u32),               // Ingress LER: Encapsulate with new Label
     Swap(u32, &'static str), // Core LSR: Replace incoming label with outgoing label + interface
-    Pop,             // Egress LER / PHP: Strip outer label
+    Pop,                     // Egress LER / PHP: Strip outer label
 }
 
 impl fmt::Display for LfibAction {

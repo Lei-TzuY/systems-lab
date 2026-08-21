@@ -1,5 +1,8 @@
 use toy_tcpip::ipv4::Ipv4Address;
-use toy_tcpip::wireguard::{WireguardMessage, WireguardPeer, WG_MSG_DATA, WG_MSG_INITIATION, WG_MSG_RESPONSE, WIREGUARD_PORT};
+use toy_tcpip::wireguard::{
+    WG_MSG_DATA, WG_MSG_INITIATION, WG_MSG_RESPONSE, WIREGUARD_PORT, WireguardMessage,
+    WireguardPeer,
+};
 
 #[test]
 fn test_wireguard_handshake_flow_and_data_packet() {
@@ -22,21 +25,36 @@ fn test_wireguard_handshake_flow_and_data_packet() {
     assert_eq!(raw_resp.len(), 92);
 
     let parsed_resp = WireguardMessage::parse(&raw_resp).unwrap();
-    if let WireguardMessage::HandshakeResponse { sender_index, receiver_index, .. } = parsed_resp {
+    if let WireguardMessage::HandshakeResponse {
+        sender_index,
+        receiver_index,
+        ..
+    } = parsed_resp
+    {
         assert_eq!(sender_index, 0x2000);
         assert_eq!(receiver_index, 0x1000);
     } else {
         panic!("Expected HandshakeResponse");
     }
 
-    let mut peer = WireguardPeer::new([0x33; 32], Ipv4Address::new(192, 168, 1, 10), WIREGUARD_PORT, Ipv4Address::new(10, 99, 0, 2));
+    let mut peer = WireguardPeer::new(
+        [0x33; 32],
+        Ipv4Address::new(192, 168, 1, 10),
+        WIREGUARD_PORT,
+        Ipv4Address::new(10, 99, 0, 2),
+    );
     peer.local_index = 0x1000;
     peer.handle_response(0x2000, 0x1000);
-    assert_eq!(peer.is_established, true);
+    assert!(peer.is_established);
 
     let data_bytes = peer.encapsulate_packet(b"GET / HTTP/1.1\r\n\r\n").unwrap();
     let parsed_data = WireguardMessage::parse(&data_bytes).unwrap();
-    if let WireguardMessage::Data { receiver_index, counter, encrypted_payload } = parsed_data {
+    if let WireguardMessage::Data {
+        receiver_index,
+        counter,
+        encrypted_payload,
+    } = parsed_data
+    {
         assert_eq!(receiver_index, 0x2000);
         assert_eq!(counter, 0);
         assert_eq!(&encrypted_payload[..18], b"GET / HTTP/1.1\r\n\r\n");

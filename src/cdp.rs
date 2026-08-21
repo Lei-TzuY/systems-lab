@@ -197,10 +197,13 @@ impl CdpNeighborTable {
                 CDP_TLV_DEVICE_ID => device_id = String::from_utf8_lossy(&tlv.value).to_string(),
                 CDP_TLV_PORT_ID => port_id = String::from_utf8_lossy(&tlv.value).to_string(),
                 CDP_TLV_PLATFORM => platform = String::from_utf8_lossy(&tlv.value).to_string(),
-                CDP_TLV_ADDRESSES => {
-                    if tlv.value.len() >= 13 && tlv.value[6] == 0xCC {
-                        ip_address = Some(Ipv4Address([tlv.value[9], tlv.value[10], tlv.value[11], tlv.value[12]]));
-                    }
+                CDP_TLV_ADDRESSES if tlv.value.len() >= 13 && tlv.value[6] == 0xCC => {
+                    ip_address = Some(Ipv4Address([
+                        tlv.value[9],
+                        tlv.value[10],
+                        tlv.value[11],
+                        tlv.value[12],
+                    ]));
                 }
                 _ => {}
             }
@@ -227,7 +230,12 @@ mod tests {
 
     #[test]
     fn test_cdp_packet_roundtrip_and_neighbor_table() {
-        let pkt = CdpPacket::build("Switch-Core-01", "GigabitEthernet0/1", "cisco WS-C2960", Ipv4Address::new(10, 0, 0, 1));
+        let pkt = CdpPacket::build(
+            "Switch-Core-01",
+            "GigabitEthernet0/1",
+            "cisco WS-C2960",
+            Ipv4Address::new(10, 0, 0, 1),
+        );
         let raw = pkt.serialize();
 
         let parsed = CdpPacket::parse(&raw).unwrap();

@@ -80,8 +80,7 @@ impl OpticalDiagnostics {
     pub fn dbm_to_mw(dbm: f32) -> f32 {
         // P(mW) = 10^(P(dBm)/10)
         // Approximate 10^(x) via exp(x * ln(10))
-        let ln10 = 2.3025851;
-        (dbm / 10.0 * ln10).exp()
+        (dbm / 10.0 * std::f32::consts::LN_10).exp()
     }
 
     /// Calculates link optical attenuation (path loss) in dB

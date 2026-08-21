@@ -1,5 +1,5 @@
 use toy_tcpip::evpn::RouteDistinguisher;
-use toy_tcpip::evpn_type5::{EvpnType5Rib, EvpnType5Route, EVPN_ROUTE_TYPE_IP_PREFIX};
+use toy_tcpip::evpn_type5::{EVPN_ROUTE_TYPE_IP_PREFIX, EvpnType5Rib, EvpnType5Route};
 use toy_tcpip::ipv4::Ipv4Address;
 
 #[test]

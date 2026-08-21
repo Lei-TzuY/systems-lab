@@ -24,8 +24,8 @@ pub struct ErspanPacket {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NvgrePacket {
-    pub vsid: u32,    // 24-bit Virtual Subnet ID
-    pub flow_id: u8,  // 8-bit Flow ID
+    pub vsid: u32,   // 24-bit Virtual Subnet ID
+    pub flow_id: u8, // 8-bit Flow ID
     pub inner_frame: Vec<u8>,
 }
 

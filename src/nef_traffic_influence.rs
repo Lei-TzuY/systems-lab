@@ -29,7 +29,7 @@ pub struct NefTrafficInfluenceSub {
     pub dnn: String,
     pub snssai: SliceId,
     pub filter: TrafficFilter,
-    pub target_dnai: String,         // Data Network Access Identifier (e.g., "DNAI-Edge-01")
+    pub target_dnai: String, // Data Network Access Identifier (e.g., "DNAI-Edge-01")
     pub edge_server_ip: Ipv4Address, // Local MEC breakout EAS IP
 }
 
@@ -128,7 +128,10 @@ mod tests {
     #[test]
     fn test_nef_traffic_influence_edge_breakout() {
         let mut engine = NefTrafficInfluenceEngine::new();
-        let slice = SliceId { sst: 1, sd: 0x000001 };
+        let slice = SliceId {
+            sst: 1,
+            sd: 0x000001,
+        };
         let filter = TrafficFilter {
             dst_ip: Ipv4Address::new(198, 51, 100, 10),
             dst_port: 8080,
@@ -163,13 +166,8 @@ mod tests {
         assert_eq!(engine.total_steered_packets, 1);
 
         // Non-matching evaluation
-        let no_match = engine.evaluate_packet(
-            "internet",
-            &slice,
-            Ipv4Address::new(8, 8, 8, 8),
-            53,
-            17,
-        );
+        let no_match =
+            engine.evaluate_packet("internet", &slice, Ipv4Address::new(8, 8, 8, 8), 53, 17);
         assert!(no_match.is_none());
     }
 }

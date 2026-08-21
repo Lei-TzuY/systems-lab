@@ -1,5 +1,5 @@
 use std::str::FromStr;
-use toy_tcpip::ipv4::{IpProtocol, Ipv4Address, Ipv4Packet, IP_PROTO_UDP};
+use toy_tcpip::ipv4::{IP_PROTO_UDP, IpProtocol, Ipv4Address, Ipv4Packet};
 
 #[test]
 fn test_ipv4_address_basics() {
