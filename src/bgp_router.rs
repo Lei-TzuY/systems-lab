@@ -21,9 +21,10 @@
 use crate::bgp::{
     BGP_DEFAULT_LOCAL_PREF, BGP_ERR_CEASE, BGP_ERR_FSM, BGP_ERR_HOLD_TIMER_EXPIRED,
     BGP_ERR_UPDATE_MESSAGE, BGP_MIN_HOLD_TIME, BGP_PORT, BGP_SUB_BAD_BGP_IDENTIFIER,
-    BGP_SUB_BAD_PEER_AS, BGP_SUB_INVALID_NEXT_HOP, BGP_SUB_UNACCEPTABLE_HOLD_TIME,
-    BGP_SUB_UNSUPPORTED_VERSION, BGP_VERSION, BgpFramer, BgpNotificationMessage, BgpOpenMessage,
-    BgpParseError, BgpPathAttributes, BgpPdu, BgpUpdateMessage, Ipv4Prefix,
+    BGP_SUB_BAD_PEER_AS, BGP_SUB_INVALID_NEXT_HOP, BGP_SUB_MALFORMED_AS_PATH,
+    BGP_SUB_UNACCEPTABLE_HOLD_TIME, BGP_SUB_UNSUPPORTED_VERSION, BGP_VERSION, BgpFramer,
+    BgpNotificationMessage, BgpOpenMessage, BgpParseError, BgpPathAttributes, BgpPdu,
+    BgpUpdateMessage, Ipv4Prefix,
 };
 use crate::bgp_rib::{
     AdjRibIn, AdjRibOut, AdvertisedRoute, BgpPath, LocRib, PathSource, PolicyOutcome, RoutePolicy,
@@ -112,6 +113,8 @@ pub struct BgpPeerCounters {
     pub policy_rejected: u64,
     /// NLRI discarded because the NEXT_HOP was unusable.
     pub next_hop_rejected: u64,
+    /// UPDATEs refused because the AS_PATH was not acceptable on this session.
+    pub as_path_rejected: u64,
 }
 
 /// One configured BGP neighbour and the session state that belongs to it.
@@ -140,6 +143,9 @@ pub struct BgpPeer {
     pub next_hop_self: bool,
     /// Largest number of prefixes this neighbour may hold in the Adj-RIB-In.
     pub max_prefixes: usize,
+    /// Require an eBGP UPDATE to lead with this neighbour's own ASN (RFC 4271
+    /// section 6.3). On by default, as it is on modern production routers.
+    pub enforce_first_as: bool,
     pub counters: BgpPeerCounters,
     pub last_error: Option<String>,
     /// How many times this peer has reached ESTABLISHED.
@@ -168,6 +174,7 @@ impl BgpPeer {
             export_policy: RoutePolicy::new(),
             next_hop_self: false,
             max_prefixes: DEFAULT_MAX_PREFIXES,
+            enforce_first_as: true,
             counters: BgpPeerCounters::default(),
             last_error: None,
             establishment_count: 0,
@@ -366,6 +373,15 @@ impl BgpRouter {
     pub fn set_max_prefixes(&mut self, addr: Ipv4Address, limit: usize) {
         if let Some(p) = self.peer_mut(addr) {
             p.max_prefixes = limit;
+        }
+    }
+
+    /// Turns the eBGP leading-AS check on or off for `addr`. Turning it off still
+    /// leaves an empty AS_PATH from an external peer refused, because that is not a
+    /// policy preference: a zero-length path would beat every real route.
+    pub fn set_enforce_first_as(&mut self, addr: Ipv4Address, on: bool) {
+        if let Some(p) = self.peer_mut(addr) {
+            p.enforce_first_as = on;
         }
     }
 
@@ -1062,6 +1078,50 @@ impl BgpRouter {
             ));
         }
 
+        let is_ebgp = self.peers[idx].remote_as != self.local_as;
+        let peer_as = self.peers[idx].remote_as;
+
+        // An UPDATE from an external peer has to say something truthful about where it
+        // came from (RFC 4271 sections 6.3 and 9.1.2). Two separate rules:
+        //
+        //  * The AS_PATH must not be empty. This one is unconditional. A zero-length
+        //    path wins step 2 of the decision process against every legitimate route,
+        //    so a neighbour able to send one could take over any prefix it liked.
+        //  * The path must lead with the neighbour's own ASN. This is the check
+        //    vendors call "enforce-first-as"; it stops a peer disowning a path it is
+        //    in fact carrying. It can be turned off per peer, the empty test cannot.
+        //
+        // Neither rule applies to an internal peer: an iBGP neighbour legitimately
+        // passes on a path it did not originate, and a route originated inside this AS
+        // carries an empty AS_PATH until it leaves.
+        if is_ebgp {
+            let refusal = if attrs.as_path.is_empty() {
+                Some("AS_PATH is empty".to_string())
+            } else if !self.peers[idx].enforce_first_as {
+                None
+            } else {
+                match attrs.as_path.leading_as() {
+                    Some(a) if a == peer_as => None,
+                    Some(a) => Some(format!(
+                        "AS_PATH [{}] leads with AS {}, not the neighbour's AS {}",
+                        attrs.as_path, a, peer_as
+                    )),
+                    None => Some(format!(
+                        "AS_PATH [{}] does not begin with an AS_SEQUENCE",
+                        attrs.as_path
+                    )),
+                }
+            };
+            if let Some(reason) = refusal {
+                self.peers[idx].counters.as_path_rejected += 1;
+                self.log(now_ms, addr, format!("UPDATE refused: {}", reason));
+                return Err(BgpNotificationMessage::new(
+                    BGP_ERR_UPDATE_MESSAGE,
+                    BGP_SUB_MALFORMED_AS_PATH,
+                ));
+            }
+        }
+
         // AS loop: our own ASN already appears in the path, so the route has been
         // through this AS and must not be re-accepted (RFC 4271 section 9.1.2).
         if attrs.as_path.contains(self.local_as) {
@@ -1079,7 +1139,6 @@ impl BgpRouter {
             return Ok(());
         }
 
-        let is_ebgp = self.peers[idx].remote_as != self.local_as;
         let source = if is_ebgp {
             PathSource::Ebgp
         } else {
@@ -1088,7 +1147,6 @@ impl BgpRouter {
         // A route learned over eBGP whose NEXT_HOP is our own session address would
         // point straight back at us; refuse it rather than build a forwarding loop.
         let own_addr = self.peers[idx].local_addr;
-        let peer_as = self.peers[idx].remote_as;
         let peer_router_id = self.peers[idx].remote_router_id.unwrap_or(addr);
 
         for prefix in update.nlri {
@@ -1567,10 +1625,11 @@ impl BgpRouter {
                 p.counters.notifications_sent
             ));
             s.push_str(&format!(
-                "  discarded: as-loop {}  policy {}  next-hop {}\n",
+                "  discarded: as-loop {}  policy {}  next-hop {}  as-path {}\n",
                 p.counters.as_loops_rejected,
                 p.counters.policy_rejected,
-                p.counters.next_hop_rejected
+                p.counters.next_hop_rejected,
+                p.counters.as_path_rejected
             ));
             s.push_str(&format!(
                 "  last error: {}\n",

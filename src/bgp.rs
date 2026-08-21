@@ -608,6 +608,19 @@ impl AsPath {
             .and_then(|s| s.asns.first().copied())
     }
 
+    /// Leftmost ASN, but only when the path genuinely *begins* with an AS_SEQUENCE.
+    ///
+    /// This is the stricter reading needed to police an eBGP UPDATE, which has to lead
+    /// with the advertising peer's own ASN. [`AsPath::first_as`] deliberately skips a
+    /// leading AS_SET to find something MED-comparable; that would be the wrong answer
+    /// here, because a path that leads with an AS_SET has no leading AS at all.
+    pub fn leading_as(&self) -> Option<u16> {
+        match self.segments.first() {
+            Some(seg) if seg.kind == AsPathSegmentKind::Sequence => seg.asns.first().copied(),
+            _ => None,
+        }
+    }
+
     /// Prepends the local ASN, as an eBGP speaker must do before re-advertising.
     /// A leading SEQUENCE is extended; anything else gets a fresh SEQUENCE in front.
     pub fn prepend(&mut self, asn: u16) {
@@ -1508,5 +1521,31 @@ mod tests {
         } else {
             panic!("Expected Update message");
         }
+    }
+
+    #[test]
+    fn test_leading_as_is_stricter_than_first_as() {
+        let seq = AsPath::sequence(vec![65002, 65003]);
+        assert_eq!(seq.leading_as(), Some(65002));
+        assert_eq!(seq.first_as(), Some(65002));
+
+        // A path that opens with an AS_SET has no leading AS at all, even though
+        // first_as happily skips ahead to the sequence behind it to compare MEDs.
+        let set_first = AsPath {
+            segments: vec![
+                AsPathSegment {
+                    kind: AsPathSegmentKind::Set,
+                    asns: vec![65010, 65011],
+                },
+                AsPathSegment {
+                    kind: AsPathSegmentKind::Sequence,
+                    asns: vec![65002],
+                },
+            ],
+        };
+        assert_eq!(set_first.leading_as(), None);
+        assert_eq!(set_first.first_as(), Some(65002));
+
+        assert_eq!(AsPath::empty().leading_as(), None);
     }
 }

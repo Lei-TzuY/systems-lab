@@ -564,6 +564,13 @@ winner never depends on arrival order.
 
 * Advertising over eBGP prepends the local ASN; advertising over iBGP does not.
 * An UPDATE whose `AS_PATH` already contains the local ASN is discarded.
+* An UPDATE from an **external** peer must carry a non-empty `AS_PATH` that leads with
+  that neighbour's own ASN, or the session is reset with a Malformed AS_PATH
+  NOTIFICATION (RFC 4271 sections 6.3 and 9.1.2). The leading-AS half is the check
+  vendors call *enforce-first-as* and can be relaxed per peer with
+  `set_enforce_first_as`; the non-empty half cannot, because a zero-length `AS_PATH`
+  wins the shortest-path step against every legitimate route. Neither rule applies to
+  an internal peer, which legitimately relays paths it did not originate.
 * A route is never advertised back to the peer it was learned from, nor into an AS already
   on its path, nor from one iBGP peer to another.
 * eBGP advertisements rewrite `NEXT_HOP` to the session's own address; iBGP sessions can

@@ -9,12 +9,12 @@ mod common;
 
 use common::bgp_lab::{AS1, AS2, AS3, RawBgpPeer, ip, prefix};
 use toy_tcpip::bgp::{
-    AsPath, BGP_ATTR_AS_PATH, BGP_ATTR_FLAG_EXT_LEN, BGP_ATTR_FLAG_OPTIONAL,
-    BGP_ATTR_FLAG_TRANSITIVE, BGP_ATTR_NEXT_HOP, BGP_ATTR_ORIGIN, BGP_ERR_MESSAGE_HEADER,
-    BGP_ERR_UPDATE_MESSAGE, BGP_HEADER_LEN, BGP_MARKER, BGP_MAX_MESSAGE_LEN, BGP_MSG_KEEPALIVE,
-    BGP_MSG_OPEN, BGP_MSG_UPDATE, BGP_SUB_ATTRIBUTE_LENGTH_ERROR,
-    BGP_SUB_CONNECTION_NOT_SYNCHRONIZED, BGP_SUB_INVALID_NEXT_HOP, BGP_SUB_MALFORMED_AS_PATH,
-    BGP_SUB_MALFORMED_ATTRIBUTE_LIST, BGP_SUB_MISSING_WELL_KNOWN_ATTR,
+    AsPath, AsPathSegment, AsPathSegmentKind, BGP_ATTR_AS_PATH, BGP_ATTR_FLAG_EXT_LEN,
+    BGP_ATTR_FLAG_OPTIONAL, BGP_ATTR_FLAG_TRANSITIVE, BGP_ATTR_NEXT_HOP, BGP_ATTR_ORIGIN,
+    BGP_ERR_MESSAGE_HEADER, BGP_ERR_UPDATE_MESSAGE, BGP_HEADER_LEN, BGP_MARKER,
+    BGP_MAX_MESSAGE_LEN, BGP_MSG_KEEPALIVE, BGP_MSG_OPEN, BGP_MSG_UPDATE,
+    BGP_SUB_ATTRIBUTE_LENGTH_ERROR, BGP_SUB_CONNECTION_NOT_SYNCHRONIZED, BGP_SUB_INVALID_NEXT_HOP,
+    BGP_SUB_MALFORMED_AS_PATH, BGP_SUB_MALFORMED_ATTRIBUTE_LIST, BGP_SUB_MISSING_WELL_KNOWN_ATTR,
     BGP_SUB_UNRECOGNIZED_WELL_KNOWN_ATTR, BgpFramer, BgpOrigin, BgpPathAttributes, BgpPdu,
     BgpUpdateMessage, Ipv4Prefix,
 };
@@ -576,4 +576,141 @@ fn test_unsupported_message_types_are_rejected_by_type_not_by_accident() {
     frame.push(BGP_MSG_OPEN);
     frame.push(4);
     assert!(BgpPdu::parse(&frame).is_err());
+}
+
+// ============================================================================
+// AS_PATH provenance on an external session
+// ============================================================================
+
+/// Sends one announcement with a chosen AS_PATH and reports what the speaker did with
+/// it: the NOTIFICATION subcode if the session was reset, and how many prefixes ended
+/// up in the Adj-RIB-In.
+fn announce_with_as_path(peer: &mut RawBgpPeer, as_path: AsPath) -> (Option<u8>, usize) {
+    let attrs = BgpPathAttributes::new(BgpOrigin::Igp, as_path, ip(10, 50, 0, 2));
+    let p = Ipv4Prefix::new(ip(10, 99, 0, 0), 24);
+    peer.write(&BgpPdu::Update(BgpUpdateMessage::announce(attrs, vec![p])).serialize());
+    let held = peer.victim_bgp().adj_rib_in.prefix_count(peer.peer);
+    (peer.notification().map(|n| n.error_subcode), held)
+}
+
+#[test]
+fn test_an_ebgp_peer_cannot_advertise_an_empty_as_path() {
+    let mut peer = RawBgpPeer::connect(AS1, AS2, ip(9, 9, 9, 9));
+    peer.establish();
+
+    // A zero-length AS_PATH is the strongest possible route: it wins the shortest
+    // AS_PATH step against every legitimate path, for every prefix at once. Accepting
+    // one would hand a single neighbour the whole table.
+    let (subcode, held) = announce_with_as_path(&mut peer, AsPath::empty());
+
+    assert_eq!(held, 0, "an empty AS_PATH reached the Adj-RIB-In");
+    assert_eq!(subcode, Some(BGP_SUB_MALFORMED_AS_PATH));
+    assert_eq!(peer.state(), BgpState::Idle);
+    assert!(peer.victim_bgp().loc_rib.is_empty());
+}
+
+#[test]
+fn test_an_ebgp_peer_cannot_disown_the_leading_as() {
+    let mut peer = RawBgpPeer::connect(AS1, AS2, ip(9, 9, 9, 9));
+    peer.establish();
+
+    // The harness speaks for AS65002, so a path claiming to arrive straight from
+    // AS65099 is a peer misrepresenting the route it is carrying.
+    let (subcode, held) = announce_with_as_path(&mut peer, AsPath::sequence(vec![65099, AS3]));
+
+    assert_eq!(
+        held, 0,
+        "a path that disowns its first AS reached the Adj-RIB-In"
+    );
+    assert_eq!(subcode, Some(BGP_SUB_MALFORMED_AS_PATH));
+    assert_eq!(peer.state(), BgpState::Idle);
+    assert_eq!(
+        peer.victim_bgp()
+            .peer(peer.peer)
+            .unwrap()
+            .counters
+            .as_path_rejected,
+        1
+    );
+}
+
+#[test]
+fn test_a_path_leading_with_an_as_set_is_refused_on_an_external_session() {
+    let mut peer = RawBgpPeer::connect(AS1, AS2, ip(9, 9, 9, 9));
+    peer.establish();
+
+    // An AS_SET in front hides which AS actually handed the route over, so there is
+    // nothing to check the neighbour against.
+    let path = AsPath {
+        segments: vec![
+            AsPathSegment {
+                kind: AsPathSegmentKind::Set,
+                asns: vec![AS2, AS3],
+            },
+            AsPathSegment {
+                kind: AsPathSegmentKind::Sequence,
+                asns: vec![AS2],
+            },
+        ],
+    };
+    let (subcode, held) = announce_with_as_path(&mut peer, path);
+
+    assert_eq!(held, 0);
+    assert_eq!(subcode, Some(BGP_SUB_MALFORMED_AS_PATH));
+}
+
+#[test]
+fn test_turning_off_enforce_first_as_relaxes_the_check_but_not_the_empty_path_rule() {
+    // With the check disabled a third-party leading AS is tolerated, the way an
+    // operator peering through a route server needs it to be.
+    let mut peer = RawBgpPeer::connect(AS1, AS2, ip(9, 9, 9, 9));
+    peer.establish();
+    let addr = peer.peer;
+    peer.lab
+        .router_mut("victim")
+        .unwrap()
+        .bgp_mut()
+        .unwrap()
+        .set_enforce_first_as(addr, false);
+
+    let (subcode, held) = announce_with_as_path(&mut peer, AsPath::sequence(vec![65099, AS3]));
+    assert_eq!(subcode, None, "the session should have survived");
+    assert_eq!(held, 1);
+    assert_eq!(peer.state(), BgpState::Established);
+
+    // The empty path is a different matter: it is refused whatever the knob says,
+    // because no configuration makes a zero-length AS_PATH meaningful.
+    let mut peer = RawBgpPeer::connect(AS1, AS2, ip(9, 9, 9, 9));
+    peer.establish();
+    let addr = peer.peer;
+    peer.lab
+        .router_mut("victim")
+        .unwrap()
+        .bgp_mut()
+        .unwrap()
+        .set_enforce_first_as(addr, false);
+
+    let (subcode, held) = announce_with_as_path(&mut peer, AsPath::empty());
+    assert_eq!(subcode, Some(BGP_SUB_MALFORMED_AS_PATH));
+    assert_eq!(held, 0);
+}
+
+#[test]
+fn test_an_internal_peer_is_not_subject_to_the_leading_as_rule() {
+    // Same ASN on both ends, so this is an iBGP session. An internal neighbour passes
+    // on paths it did not originate, and a route originated inside the AS has no
+    // AS_PATH at all until it leaves - applying the external rule here would break
+    // ordinary iBGP.
+    let mut peer = RawBgpPeer::connect(AS1, AS1, ip(9, 9, 9, 9));
+    peer.establish();
+
+    let (subcode, held) = announce_with_as_path(&mut peer, AsPath::sequence(vec![65099, AS3]));
+    assert_eq!(subcode, None);
+    assert_eq!(held, 1);
+    assert_eq!(peer.state(), BgpState::Established);
+
+    let (subcode, held) = announce_with_as_path(&mut peer, AsPath::empty());
+    assert_eq!(subcode, None, "an empty AS_PATH is normal inside one AS");
+    assert_eq!(held, 1);
+    assert_eq!(peer.state(), BgpState::Established);
 }
