@@ -8,6 +8,9 @@
 //! The fabric is built by `build_evpn_fabric`, which configures each leaf with
 //! nothing but its own VNI, RD, Route Targets and access port.
 
+mod common;
+
+use common::bgp_lab::RawBgpPeer;
 use toy_tcpip::bgp_caps::AfiSafi;
 use toy_tcpip::ethernet::{ETHERTYPE_IPV4, EtherType, EthernetFrame, MacAddress};
 use toy_tcpip::evpn::EvpnNlri;
@@ -330,6 +333,73 @@ fn test_a_leaf_with_no_type_3_route_has_nowhere_to_flood() {
     assert_eq!(
         vtep.forward("eth0", MacAddress::BROADCAST),
         OverlayDecision::Drop
+    );
+}
+
+// ============================================================================
+// What this speaker puts on the wire
+// ============================================================================
+
+#[test]
+fn test_routes_with_different_next_hops_are_never_merged_into_one_update() {
+    use toy_tcpip::bgp::BgpPdu;
+    use toy_tcpip::bgp_evpn::{EvpnRoute, RouteTarget, decode_evpn_nlri_list};
+    use toy_tcpip::evpn::RouteDistinguisher;
+
+    // Several EVPN routes may share an UPDATE, but only if everything outside
+    // the NLRI list is identical - and the next hop is part of that. It lives
+    // inside MP_REACH_NLRI beside the NLRI, so merging on "the attributes minus
+    // MP_REACH" silently drops it out of the comparison and every route in the
+    // group goes out with whichever VTEP happened to be first.
+    //
+    // Two routes with the same Route Target and the same AS_PATH, differing
+    // only in next hop, are exactly the case that would collapse.
+    let mut peer = RawBgpPeer::connect_configured(65001, 65002, ip(9, 9, 9, 9), |r| {
+        // The family has to be offered before the OPEN goes out, so it is
+        // enabled here rather than after the session is up.
+        r.bgp_mut().unwrap().enable_family(AfiSafi::L2VPN_EVPN);
+    });
+    peer.establish();
+    assert!(peer.victim_bgp().peers()[0].carries_evpn());
+
+    let rt = RouteTarget::as2(65001, VNI);
+    let far = Ipv4Address::new(10, 0, 0, 9);
+    for (m, next_hop, rd_ip) in [(MAC_A, VTEP1, VTEP1), (MAC_B, far, far)] {
+        peer.lab
+            .router_mut("victim")
+            .unwrap()
+            .bgp_mut()
+            .unwrap()
+            .originate_evpn(EvpnRoute::new(
+                EvpnNlri::build_mac_ip(RouteDistinguisher::new(rd_ip, VNI as u16), m, None, VNI),
+                next_hop,
+                vec![rt],
+            ));
+    }
+    peer.run_until(30_000, |_| false);
+
+    // Collect what each MAC was actually advertised with.
+    let mut seen: Vec<(MacAddress, Ipv4Address)> = Vec::new();
+    for m in peer.drain() {
+        let BgpPdu::Update(u) = m else { continue };
+        let Some(mp) = u.mp_reach() else { continue };
+        let next_hop = mp.ipv4_next_hop().expect("an IPv4 VTEP next hop");
+        for nlri in decode_evpn_nlri_list(&mp.nlri).unwrap() {
+            if let EvpnNlri::MacIpAdv(adv) = nlri {
+                seen.push((adv.mac, next_hop));
+            }
+        }
+    }
+
+    assert!(
+        seen.contains(&(MAC_A, VTEP1)),
+        "MAC A was not advertised with its own VTEP; saw {:?}",
+        seen
+    );
+    assert!(
+        seen.contains(&(MAC_B, far)),
+        "MAC B was advertised with the wrong VTEP; saw {:?}",
+        seen
     );
 }
 

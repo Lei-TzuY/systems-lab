@@ -1442,12 +1442,28 @@ impl BgpRouter {
         }
     }
 
+    /// Stops importing a Route Target.
+    ///
+    /// Routes already in the Adj-RIB-In that no longer match any import target
+    /// are dropped at the same time. Leaving them would keep a table populated
+    /// with routes nothing can ever use, and a neighbour could grow that table
+    /// against a limit the operator thought they had removed.
     pub fn remove_import_route_target(&mut self, rt: &RouteTarget) -> bool {
-        let removed = self.import_rts.remove(rt);
-        if removed {
-            self.evpn_dirty = true;
+        if !self.import_rts.remove(rt) {
+            return false;
         }
-        removed
+        self.evpn_dirty = true;
+
+        let stale: Vec<(Ipv4Address, EvpnRouteKey)> = self
+            .evpn_adj_rib_in
+            .iter_paths()
+            .filter(|p| !p.route.matches_import(&self.import_rts))
+            .map(|p| (p.peer_addr, p.key()))
+            .collect();
+        for (peer, key) in stale {
+            self.evpn_adj_rib_in.remove(peer, &key);
+        }
+        true
     }
 
     /// Originates an EVPN route for a host attached to this speaker.
@@ -1588,12 +1604,49 @@ impl BgpRouter {
             )
         })?;
 
-        let attrs = update
-            .attributes
-            .as_ref()
-            .expect("an UPDATE carrying MP_REACH always decodes with attributes");
+        // The decoder only produces MP_REACH alongside an attribute set, but an
+        // UPDATE from a hostile peer is not the place to rely on that.
+        let Some(attrs) = update.attributes.as_ref() else {
+            return Ok(());
+        };
         let route_targets = route_targets_from_communities(&attrs.ext_communities);
         let mobility_seq = mac_mobility_from_communities(&attrs.ext_communities);
+
+        // The same AS_PATH policing an IPv4 UPDATE gets. It has to be repeated
+        // here rather than inherited: `import_update` returns as soon as it sees
+        // no IPv4 NLRI, so an EVPN-only UPDATE never reaches those checks. An
+        // empty AS_PATH from an external peer is the dangerous one - AS_PATH
+        // length is a tie-break in the EVPN decision process too, so a
+        // zero-length path would win against every legitimate advertisement of
+        // the same MAC and quietly steal the host.
+        let is_ebgp = self.peers[idx].remote_as != self.local_as;
+        if is_ebgp {
+            let peer_as = self.peers[idx].remote_as;
+            let refusal = if attrs.as_path.is_empty() {
+                Some("AS_PATH is empty".to_string())
+            } else if !self.peers[idx].enforce_first_as {
+                None
+            } else {
+                match attrs.as_path.leading_as() {
+                    Some(a) if a == peer_as => None,
+                    Some(a) => Some(format!(
+                        "AS_PATH [{}] leads with AS {}, not the neighbour's AS {}",
+                        attrs.as_path, a, peer_as
+                    )),
+                    None => Some(format!(
+                        "AS_PATH [{}] does not begin with an AS_SEQUENCE",
+                        attrs.as_path
+                    )),
+                }
+            };
+            if let Some(reason) = refusal {
+                self.peers[idx].counters.as_path_rejected += 1;
+                return Err(Teardown::Protocol(
+                    BgpNotificationMessage::new(BGP_ERR_UPDATE_MESSAGE, BGP_SUB_MALFORMED_AS_PATH),
+                    format!("EVPN UPDATE refused: {}", reason),
+                ));
+            }
+        }
 
         // The AS loop check applies to EVPN exactly as it does to IPv4: a route
         // that has already been through this AS must not come back in.
@@ -1612,7 +1665,6 @@ impl BgpRouter {
             return Ok(());
         }
 
-        let is_ebgp = self.peers[idx].remote_as != self.local_as;
         let peer_as = self.peers[idx].remote_as;
         let peer_router_id = self.peers[idx].remote_router_id.unwrap_or(addr);
         let mut accepted = 0usize;
@@ -1648,7 +1700,6 @@ impl BgpRouter {
                 received_at_ms: now_ms,
                 local: false,
             };
-            let _ = is_ebgp;
 
             let previous = self.evpn_adj_rib_in.insert(addr, path.clone());
             if previous.is_none_or(|prev| !prev.same_route_as(&path)) {
@@ -1760,41 +1811,42 @@ impl BgpRouter {
             }
         }
 
-        // Announcements are grouped by identical attribute set, so one UPDATE
-        // carries every route that shares a next hop, AS_PATH and RT list.
+        // Announcements are grouped so one UPDATE can carry several NLRI, which
+        // is what a real speaker does and what keeps a large fabric from sending
+        // one message per MAC.
+        //
+        // Two routes may share an UPDATE only if *everything* outside the NLRI
+        // list is identical, and the next hop is part of that. It lives inside
+        // MP_REACH_NLRI alongside the NLRI, so the grouping key is built from
+        // the attributes with MP_REACH removed and the next hop appended
+        // explicitly. Deriving the key by trimming the encoded MP_REACH would
+        // take the next hop out with it, and routes for different VTEPs would
+        // merge into one UPDATE and all be advertised with whichever VTEP
+        // happened to be first.
         let four_octet = self.peers[idx].negotiated.four_octet_as;
-        let mut groups: BTreeMap<Vec<u8>, (BgpPathAttributes, Vec<EvpnRouteKey>)> = BTreeMap::new();
+        let mut groups: BTreeMap<(Ipv4Address, Vec<u8>), (BgpPathAttributes, Vec<EvpnRouteKey>)> =
+            BTreeMap::new();
         for (key, route) in &desired {
             if self.evpn_adj_rib_out.get(addr, key) == Some(route) {
                 continue;
             }
-            let attrs = self.evpn_attributes_for(idx, route, four_octet);
-            // The MP_REACH NLRI itself is excluded from the grouping key: it is
-            // what differs between the routes being merged.
-            let mut key_bytes = attrs.encode_for(false);
-            if let Some(mp) = &attrs.mp_reach {
-                let n = mp.encode_value().len();
-                key_bytes.truncate(key_bytes.len().saturating_sub(n));
-            }
+            let mut attrs = self.evpn_attributes_for(idx, route, four_octet);
+            attrs.mp_reach = None;
             groups
-                .entry(key_bytes)
+                .entry((route.next_hop, attrs.encode_for(false)))
                 .or_insert_with(|| (attrs, Vec::new()))
                 .1
                 .push(key.clone());
         }
 
-        for (_, (mut attrs, keys)) in groups {
+        for ((next_hop, _), (mut attrs, keys)) in groups {
             let nlri: Vec<crate::evpn::EvpnNlri> = keys
                 .iter()
                 .filter_map(|k| desired.get(k).map(|r| r.nlri.clone()))
                 .collect();
             attrs.mp_reach = Some(MpReachNlri::with_ipv4_next_hop(
                 AfiSafi::L2VPN_EVPN,
-                attrs
-                    .mp_reach
-                    .as_ref()
-                    .and_then(|m| m.ipv4_next_hop())
-                    .unwrap_or(self.peers[idx].local_addr),
+                next_hop,
                 encode_evpn_nlri_list(&nlri),
             ));
             let pdu = BgpPdu::Update(BgpUpdateMessage::mp_announce(attrs));
@@ -1837,6 +1889,8 @@ impl BgpRouter {
         if !is_ebgp {
             attrs.local_pref = Some(best.map(|p| p.local_pref).unwrap_or(BGP_DEFAULT_LOCAL_PREF));
         }
+        // The NLRI list is filled in by the caller once it knows which routes
+        // share this attribute set; the next hop is what identifies the group.
         attrs.mp_reach = Some(MpReachNlri::with_ipv4_next_hop(
             AfiSafi::L2VPN_EVPN,
             route.next_hop,

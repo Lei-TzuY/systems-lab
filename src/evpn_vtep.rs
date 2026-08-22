@@ -33,6 +33,16 @@ use std::fmt;
 /// flood the control plane with advertisements.
 pub const MAX_LOCAL_MACS_PER_INSTANCE: usize = 1_024;
 
+/// How many times a MAC may move before this VTEP stops chasing it
+/// (RFC 7432 section 15.1, "duplicate MAC address" detection).
+///
+/// A MAC that is genuinely active in two places at once makes the two VTEPs
+/// bid against each other: each learns it locally, sees a higher sequence
+/// number from the other, and advertises a higher one still. That is an UPDATE
+/// per move, forever, from a misconfiguration the control plane cannot fix.
+/// Past this many moves the MAC is declared duplicate and left alone.
+pub const MAX_MAC_MOVES: u32 = 5;
+
 /// A MAC learned on one of this VTEP's own access ports.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalMac {
@@ -85,6 +95,9 @@ pub struct EvpnInstance {
     pub remote_vteps: BTreeSet<Ipv4Address>,
     /// Local MACs dropped because the instance hit its learning limit.
     pub learn_limit_hits: u64,
+    /// MACs that moved too many times and are no longer chased. Held so the
+    /// condition is visible in diagnostics rather than only in a log line.
+    pub duplicate_macs: BTreeSet<MacAddress>,
 }
 
 impl EvpnInstance {
@@ -99,6 +112,7 @@ impl EvpnInstance {
             remote_macs: BTreeMap::new(),
             remote_vteps: BTreeSet::new(),
             learn_limit_hits: 0,
+            duplicate_macs: BTreeSet::new(),
         }
     }
 
@@ -221,6 +235,11 @@ impl Vtep {
         if mac.is_broadcast() || mac.is_multicast() {
             return false;
         }
+        // A MAC already declared duplicate is left where it is. Re-learning it
+        // is what starts the bidding war again.
+        if inst.duplicate_macs.contains(&mac) {
+            return false;
+        }
 
         let remote_seq = inst.remote_macs.get(&mac).map(|r| r.sequence);
         let existing = inst.local_macs.get(&mac);
@@ -235,6 +254,15 @@ impl Vtep {
             (None, Some(r)) => r.saturating_add(1),
             (None, None) => 0,
         };
+
+        // Past the move limit the two locations are both real and neither is
+        // going to yield. Stop advertising rather than emit an UPDATE per move
+        // for the rest of the session.
+        if sequence > MAX_MAC_MOVES {
+            inst.duplicate_macs.insert(mac);
+            inst.local_macs.remove(&mac);
+            return false;
+        }
 
         let binding = LocalMac {
             mac,
@@ -434,9 +462,14 @@ impl Vtep {
             return self.flood(inst, Some(interface));
         }
 
-        if let Some(local) = inst.local_macs.get(&dst)
-            && local.access_interface != interface
-        {
+        if let Some(local) = inst.local_macs.get(&dst) {
+            // The destination is on the segment the frame arrived from, so it
+            // has already been delivered. Falling through to the flood list
+            // would replicate a frame across the whole fabric that nothing is
+            // waiting for.
+            if local.access_interface == interface {
+                return OverlayDecision::Drop;
+            }
             return OverlayDecision::Local {
                 access_interface: local.access_interface.clone(),
             };
