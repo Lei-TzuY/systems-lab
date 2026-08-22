@@ -302,7 +302,7 @@ impl LabRouter {
 
     /// Starts a BGP-4 speaker on this router. It listens on TCP port 179 across every
     /// interface and installs its selected routes into this router's real routing table.
-    pub fn enable_bgp(&mut self, local_as: u16, router_id: Ipv4Address) -> &mut BgpRouter {
+    pub fn enable_bgp(&mut self, local_as: u32, router_id: Ipv4Address) -> &mut BgpRouter {
         self.enable_sockets();
         self.bgp = Some(BgpRouter::new(local_as, router_id));
         self.bgp.as_mut().unwrap()
@@ -313,7 +313,7 @@ impl LabRouter {
     pub fn add_bgp_peer(
         &mut self,
         peer_ip: Ipv4Address,
-        peer_as: u16,
+        peer_as: u32,
         local_addr: Ipv4Address,
         mode: BgpPeerMode,
     ) {

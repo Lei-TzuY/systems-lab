@@ -16,10 +16,10 @@ use toy_tcpip::lab::{LabRouter, VirtualLab};
 use toy_tcpip::router::RouteSource;
 use toy_tcpip::stack::NetStackConfig;
 
-pub const AS1: u16 = 65001;
-pub const AS2: u16 = 65002;
-pub const AS3: u16 = 65003;
-pub const AS4: u16 = 65004;
+pub const AS1: u32 = 65001;
+pub const AS2: u32 = 65002;
+pub const AS3: u32 = 65003;
+pub const AS4: u32 = 65004;
 
 /// Hold time used across the labs, in seconds. Short enough that a hold-timer
 /// expiry is a handful of simulated ticks, long enough to be a legal BGP value.
@@ -402,7 +402,7 @@ pub fn bgp_fib_next_hop(lab: &VirtualLab, router: &str, p: Ipv4Prefix) -> Option
 }
 
 /// AS_PATH of `router`'s best path to `p`, flattened left to right.
-pub fn best_as_path(lab: &VirtualLab, router: &str, p: Ipv4Prefix) -> Option<Vec<u16>> {
+pub fn best_as_path(lab: &VirtualLab, router: &str, p: Ipv4Prefix) -> Option<Vec<u32>> {
     lab.router(router)
         .and_then(|r| r.bgp())
         .and_then(|b| b.loc_rib.get(&p))
@@ -502,13 +502,17 @@ pub struct RawBgpPeer {
     /// Address this harness speaks from.
     pub peer: Ipv4Address,
     /// ASN the router expects this harness to claim.
-    pub peer_as: u16,
+    pub peer_as: u32,
+    /// Whether the OPEN this harness sent advertised 4-octet ASN support. The
+    /// router encodes AS_PATH accordingly, so the harness has to decode the same
+    /// way or it would read the router's own UPDATEs wrong.
+    pub four_octet_as: bool,
 }
 
 impl RawBgpPeer {
     /// Builds the lab and completes the TCP three-way handshake to port 179.
     /// The router is passive, so it waits for this connection.
-    pub fn connect(victim_as: u16, expected_peer_as: u16, victim_router_id: Ipv4Address) -> Self {
+    pub fn connect(victim_as: u32, expected_peer_as: u32, victim_router_id: Ipv4Address) -> Self {
         use toy_tcpip::tcp::{SocketAddrV4, TcpState};
 
         let victim = ip(10, 50, 0, 1);
@@ -561,6 +565,7 @@ impl RawBgpPeer {
             victim,
             peer,
             peer_as: expected_peer_as,
+            four_octet_as: false,
         };
         let s = harness.stream;
         assert!(
@@ -587,6 +592,35 @@ impl RawBgpPeer {
     pub fn write(&mut self, bytes: &[u8]) {
         self.write_only(bytes);
         self.pump();
+    }
+
+    /// Serializes and writes a PDU using the ASN width this session negotiated.
+    ///
+    /// A test that builds an UPDATE by hand has no way to know which width the
+    /// handshake settled on, and encoding a 2-octet AS_PATH onto a session the
+    /// router reads as 4-octet would fail for a reason the test is not about.
+    pub fn write_pdu(&mut self, pdu: toy_tcpip::bgp::BgpPdu) {
+        let bytes = self.encode_pdu(pdu);
+        self.write(&bytes);
+    }
+
+    /// [`RawBgpPeer::write_pdu`] without running the lab afterwards.
+    pub fn write_pdu_only(&mut self, pdu: toy_tcpip::bgp::BgpPdu) {
+        let bytes = self.encode_pdu(pdu);
+        self.write_only(&bytes);
+    }
+
+    fn encode_pdu(&self, pdu: toy_tcpip::bgp::BgpPdu) -> Vec<u8> {
+        use toy_tcpip::bgp::BgpPdu;
+        match (pdu, self.four_octet_as) {
+            (BgpPdu::Update(mut u), true) => {
+                if let Some(attrs) = u.attributes.as_mut() {
+                    attrs.four_octet_as = true;
+                }
+                BgpPdu::Update(u).serialize()
+            }
+            (other, _) => other.serialize(),
+        }
     }
 
     /// Writes bytes without running the lab, so several writes can be batched into
@@ -640,8 +674,9 @@ impl RawBgpPeer {
             }
         }
         let mut out = Vec::new();
+        let four_octet = self.four_octet_as;
         while let Ok(Some(frame)) = framer.next_frame() {
-            if let Ok(pdu) = BgpPdu::parse(&frame) {
+            if let Ok(pdu) = BgpPdu::parse_width(&frame, four_octet) {
                 out.push(pdu);
             }
         }
@@ -671,15 +706,44 @@ impl RawBgpPeer {
         self.lab.router("victim").unwrap().bgp().unwrap()
     }
 
-    /// Completes a valid OPEN / KEEPALIVE handshake so later writes arrive in
-    /// ESTABLISHED.
+    /// The capability set a modern neighbour offers: both families and AS4.
+    pub fn modern_capabilities() -> toy_tcpip::bgp_caps::BgpCapabilitySet {
+        use toy_tcpip::bgp_caps::{AfiSafi, BgpCapability, BgpCapabilitySet};
+        let mut caps = BgpCapabilitySet::new();
+        caps.advertise(AfiSafi::IPV4_UNICAST);
+        caps.advertise(AfiSafi::L2VPN_EVPN);
+        caps.push(BgpCapability::FourOctetAs(0));
+        caps
+    }
+
+    /// Completes a valid OPEN / KEEPALIVE handshake advertising both address
+    /// families and 4-octet ASN support, so later writes arrive in ESTABLISHED on
+    /// a session that will accept EVPN NLRI.
     pub fn establish(&mut self) {
+        use toy_tcpip::bgp_caps::BgpCapability;
+        let mut caps = Self::modern_capabilities();
+        caps.capabilities
+            .retain(|c| !matches!(c, BgpCapability::FourOctetAs(_)));
+        caps.push(BgpCapability::FourOctetAs(self.peer_as));
+        self.establish_with(&caps);
+    }
+
+    /// Completes the handshake as a plain RFC 4271 speaker: no capabilities at
+    /// all, which must still negotiate IPv4 Unicast and nothing more.
+    pub fn establish_legacy(&mut self) {
+        self.establish_with(&toy_tcpip::bgp_caps::BgpCapabilitySet::new());
+    }
+
+    /// Completes the handshake offering exactly `caps`.
+    pub fn establish_with(&mut self, caps: &toy_tcpip::bgp_caps::BgpCapabilitySet) {
         use toy_tcpip::bgp::{BgpOpenMessage, BgpPdu};
+        self.four_octet_as = caps.supports_four_octet_as();
         self.write(
-            &BgpPdu::Open(BgpOpenMessage::new(
+            &BgpPdu::Open(BgpOpenMessage::with_capabilities(
                 self.peer_as,
                 LAB_HOLD_TIME,
                 ip(5, 5, 5, 5),
+                caps,
             ))
             .serialize(),
         );

@@ -45,7 +45,7 @@ pub struct BgpPath {
     pub source: PathSource,
     /// Address of the peer that advertised it; unspecified for locally originated paths.
     pub peer_addr: Ipv4Address,
-    pub peer_as: u16,
+    pub peer_as: u32,
     pub peer_router_id: Ipv4Address,
     pub origin: BgpOrigin,
     pub as_path: AsPath,
@@ -522,12 +522,12 @@ impl RoutePolicy {
 mod tests {
     use super::*;
 
-    fn path(peer: u8, local_pref: u32, as_path: Vec<u16>, origin: BgpOrigin) -> BgpPath {
+    fn path(peer: u8, local_pref: u32, as_path: Vec<u32>, origin: BgpOrigin) -> BgpPath {
         BgpPath {
             prefix: Ipv4Prefix::new(Ipv4Address::new(10, 30, 0, 0), 24),
             source: PathSource::Ebgp,
             peer_addr: Ipv4Address::new(10, 0, 0, peer),
-            peer_as: 65000 + peer as u16,
+            peer_as: 65000 + peer as u32,
             peer_router_id: Ipv4Address::new(1, 1, 1, peer),
             origin,
             as_path: AsPath::sequence(as_path),

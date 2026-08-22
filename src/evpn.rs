@@ -85,6 +85,10 @@ pub enum EvpnNlri {
 pub enum EvpnError {
     PacketTooShort(usize),
     InvalidRouteType(u8),
+    /// MAC Address Length was not the 48 bits RFC 7432 requires.
+    InvalidMacLength(u8),
+    /// IP Address Length was neither 0, 32, nor 128 bits.
+    InvalidIpLength(u8),
 }
 
 impl fmt::Display for EvpnError {
@@ -92,6 +96,16 @@ impl fmt::Display for EvpnError {
         match self {
             EvpnError::PacketTooShort(l) => write!(f, "EVPN NLRI too short ({} bytes)", l),
             EvpnError::InvalidRouteType(t) => write!(f, "Unknown EVPN Route Type: {}", t),
+            EvpnError::InvalidMacLength(l) => {
+                write!(f, "EVPN MAC Address Length is {} bits, must be 48", l)
+            }
+            EvpnError::InvalidIpLength(l) => {
+                write!(
+                    f,
+                    "EVPN IP Address Length is {} bits, must be 0, 32 or 128",
+                    l
+                )
+            }
         }
     }
 }
@@ -182,26 +196,55 @@ impl EvpnNlri {
 
         match route_type {
             EVPN_TYPE_MAC_IP_ADV => {
-                if body.len() < 8 + 10 + 4 + 1 + 6 + 1 + 3 {
+                // RD(8) ESI(10) EthTag(4) MacLen(1) MAC(6) IpLen(1) [IP] Label(3).
+                // Every one of those offsets is derived from a length field the
+                // sender chose, so each is checked against what actually remains
+                // before it is used. The variable-length IP in the middle is what
+                // makes that necessary: a route claiming a 32-bit IP inside a body
+                // too short to hold one would otherwise index past the end.
+                const FIXED_HEAD: usize = 8 + 10 + 4 + 1 + 6 + 1;
+                if body.len() < FIXED_HEAD + 3 {
                     return Err(EvpnError::PacketTooShort(body.len()));
                 }
                 let rd = RouteDistinguisher::parse(&body[0..8])?;
                 let mut esi = [0u8; 10];
                 esi.copy_from_slice(&body[8..18]);
                 let eth_tag = u32::from_be_bytes([body[18], body[19], body[20], body[21]]);
+
+                // RFC 7432 fixes the MAC address length at 48 bits. Anything else
+                // would shift every field after it, so it is refused rather than
+                // read as if it had been 48.
+                if body[22] != 48 {
+                    return Err(EvpnError::InvalidMacLength(body[22]));
+                }
                 let mac = MacAddress([body[23], body[24], body[25], body[26], body[27], body[28]]);
 
                 let ip_len = body[29];
-                let (ip, offset) = if ip_len == 32 && body.len() >= 34 {
-                    (
-                        Some(Ipv4Address([body[30], body[31], body[32], body[33]])),
-                        34,
-                    )
+                let ip_octets = match ip_len {
+                    0 => 0usize,
+                    32 => 4usize,
+                    128 => 16usize,
+                    other => return Err(EvpnError::InvalidIpLength(other)),
+                };
+                let ip_end = FIXED_HEAD + ip_octets;
+                if body.len() < ip_end + 3 {
+                    return Err(EvpnError::PacketTooShort(body.len()));
+                }
+                // An IPv6 host address has nowhere to live in this IPv4 overlay,
+                // so the route is kept as a MAC-only advertisement rather than
+                // being dropped: the MAC is still usable for bridging.
+                let ip = if ip_octets == 4 {
+                    Some(Ipv4Address([
+                        body[FIXED_HEAD],
+                        body[FIXED_HEAD + 1],
+                        body[FIXED_HEAD + 2],
+                        body[FIXED_HEAD + 3],
+                    ]))
                 } else {
-                    (None, 30)
+                    None
                 };
 
-                let vni = u32::from_be_bytes([0, body[offset], body[offset + 1], body[offset + 2]]);
+                let vni = u32::from_be_bytes([0, body[ip_end], body[ip_end + 1], body[ip_end + 2]]);
 
                 Ok(EvpnNlri::MacIpAdv(EvpnMacIpAdv {
                     rd,
@@ -213,11 +256,25 @@ impl EvpnNlri {
                 }))
             }
             EVPN_TYPE_INCLUSIVE_MULTICAST => {
+                // RD(8) EthTag(4) IpLen(1) OriginatingRouterIp(4 or 16).
                 if body.len() < 8 + 4 + 1 + 4 {
                     return Err(EvpnError::PacketTooShort(body.len()));
                 }
                 let rd = RouteDistinguisher::parse(&body[0..8])?;
                 let eth_tag = u32::from_be_bytes([body[8], body[9], body[10], body[11]]);
+                let ip_octets = match body[12] {
+                    32 => 4usize,
+                    128 => 16usize,
+                    other => return Err(EvpnError::InvalidIpLength(other)),
+                };
+                if body.len() < 13 + ip_octets {
+                    return Err(EvpnError::PacketTooShort(body.len()));
+                }
+                if ip_octets != 4 {
+                    // A Type 3 route whose originating router is an IPv6 address
+                    // names a VTEP this IPv4 underlay cannot reach.
+                    return Err(EvpnError::InvalidIpLength(body[12]));
+                }
                 let orig_ip = Ipv4Address([body[13], body[14], body[15], body[16]]);
 
                 Ok(EvpnNlri::InclusiveMulticast(EvpnInclusiveMulticast {

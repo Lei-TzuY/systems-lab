@@ -8,11 +8,18 @@ use crate::ipv4::Ipv4Address;
 pub const BGP_EXT_COMM_TYPE_2OCTET_AS: u8 = 0x00;
 pub const BGP_EXT_COMM_TYPE_IPV4_ADDR: u8 = 0x01;
 pub const BGP_EXT_COMM_TYPE_OPAQUE: u8 = 0x03;
+/// EVPN-specific extended communities (RFC 7432 section 7).
+pub const BGP_EXT_COMM_TYPE_EVPN: u8 = 0x06;
 
 pub const BGP_EXT_COMM_SUBTYPE_ROUTE_TARGET: u8 = 0x02;
 pub const BGP_EXT_COMM_SUBTYPE_ROUTE_ORIGIN: u8 = 0x03;
 pub const BGP_EXT_COMM_SUBTYPE_COLOR: u8 = 0x0B;
 pub const BGP_EXT_COMM_SUBTYPE_TUNNEL_ENCAP: u8 = 0x0C;
+/// MAC Mobility (RFC 7432 section 7.7).
+pub const BGP_EXT_COMM_SUBTYPE_MAC_MOBILITY: u8 = 0x00;
+
+/// Flag bit in the MAC Mobility community marking a static, non-movable MAC.
+pub const MAC_MOBILITY_FLAG_STICKY: u8 = 0x01;
 
 pub const TUNNEL_TYPE_VXLAN: u16 = 8;
 pub const TUNNEL_TYPE_NVGRE: u16 = 9;
@@ -22,11 +29,31 @@ pub const TUNNEL_TYPE_SRV6: u16 = 27;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BgpExtendedCommunity {
-    RouteTarget2Octet { asn: u16, value: u32 },
-    RouteTargetIpv4 { ip: Ipv4Address, value: u16 },
-    RouteOrigin2Octet { asn: u16, value: u32 },
-    Color { flags: u16, color: u32 },
-    TunnelEncapsulation { tunnel_type: u16 },
+    RouteTarget2Octet {
+        asn: u16,
+        value: u32,
+    },
+    RouteTargetIpv4 {
+        ip: Ipv4Address,
+        value: u16,
+    },
+    RouteOrigin2Octet {
+        asn: u16,
+        value: u32,
+    },
+    Color {
+        flags: u16,
+        color: u32,
+    },
+    TunnelEncapsulation {
+        tunnel_type: u16,
+    },
+    /// EVPN MAC Mobility: the sequence number that orders successive
+    /// advertisements of the same MAC as a host moves between VTEPs.
+    MacMobility {
+        sticky: bool,
+        sequence: u32,
+    },
     Raw([u8; 8]),
 }
 
@@ -62,6 +89,12 @@ impl BgpExtendedCommunity {
                 buf[0] = BGP_EXT_COMM_TYPE_OPAQUE;
                 buf[1] = BGP_EXT_COMM_SUBTYPE_TUNNEL_ENCAP;
                 buf[6..8].copy_from_slice(&tunnel_type.to_be_bytes());
+            }
+            BgpExtendedCommunity::MacMobility { sticky, sequence } => {
+                buf[0] = BGP_EXT_COMM_TYPE_EVPN;
+                buf[1] = BGP_EXT_COMM_SUBTYPE_MAC_MOBILITY;
+                buf[2] = if *sticky { MAC_MOBILITY_FLAG_STICKY } else { 0 };
+                buf[4..8].copy_from_slice(&sequence.to_be_bytes());
             }
             BgpExtendedCommunity::Raw(raw) => {
                 buf.copy_from_slice(raw);
@@ -102,6 +135,12 @@ impl BgpExtendedCommunity {
             (BGP_EXT_COMM_TYPE_OPAQUE, BGP_EXT_COMM_SUBTYPE_TUNNEL_ENCAP) => {
                 let tunnel_type = u16::from_be_bytes([buf[6], buf[7]]);
                 Some(BgpExtendedCommunity::TunnelEncapsulation { tunnel_type })
+            }
+            (BGP_EXT_COMM_TYPE_EVPN, BGP_EXT_COMM_SUBTYPE_MAC_MOBILITY) => {
+                Some(BgpExtendedCommunity::MacMobility {
+                    sticky: buf[2] & MAC_MOBILITY_FLAG_STICKY != 0,
+                    sequence: u32::from_be_bytes([buf[4], buf[5], buf[6], buf[7]]),
+                })
             }
             _ => {
                 let mut raw = [0u8; 8];

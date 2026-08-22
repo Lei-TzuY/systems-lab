@@ -76,7 +76,7 @@ fn test_two_candidate_paths_arrive_and_local_pref_decides_which_enters_the_fib()
         "expected one path from each neighbour, got {}",
         candidates.len()
     );
-    let mut seen: Vec<Vec<u16>> = candidates.iter().map(|p| p.as_path.flatten()).collect();
+    let mut seen: Vec<Vec<u32>> = candidates.iter().map(|p| p.as_path.flatten()).collect();
     seen.sort();
     assert_eq!(seen, vec![vec![AS2, AS4], vec![AS3, AS4]]);
     // Both are the same length, so nothing but LOCAL_PREF can separate them.

@@ -637,13 +637,10 @@ fn test_an_update_delivered_with_the_fin_still_reaches_the_rib_before_the_sessio
         AsPath::sequence(vec![AS2]),
         ip(10, 50, 0, 2),
     );
-    peer.write_only(
-        &BgpPdu::Update(BgpUpdateMessage::announce(
-            attrs,
-            vec![prefix(10, 77, 0, 0, 24)],
-        ))
-        .serialize(),
-    );
+    peer.write_pdu_only(BgpPdu::Update(BgpUpdateMessage::announce(
+        attrs,
+        vec![prefix(10, 77, 0, 0, 24)],
+    )));
     peer.disconnect();
     peer.pump();
 

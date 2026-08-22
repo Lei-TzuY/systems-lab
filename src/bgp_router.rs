@@ -22,10 +22,20 @@ use crate::bgp::{
     BGP_DEFAULT_LOCAL_PREF, BGP_ERR_CEASE, BGP_ERR_FSM, BGP_ERR_HOLD_TIMER_EXPIRED,
     BGP_ERR_UPDATE_MESSAGE, BGP_MIN_HOLD_TIME, BGP_PORT, BGP_SUB_BAD_BGP_IDENTIFIER,
     BGP_SUB_BAD_PEER_AS, BGP_SUB_INVALID_NEXT_HOP, BGP_SUB_MALFORMED_AS_PATH,
-    BGP_SUB_UNACCEPTABLE_HOLD_TIME, BGP_SUB_UNSUPPORTED_VERSION, BGP_VERSION, BgpFramer,
-    BgpNotificationMessage, BgpOpenMessage, BgpParseError, BgpPathAttributes, BgpPdu,
-    BgpUpdateMessage, Ipv4Prefix,
+    BGP_SUB_OPTIONAL_ATTRIBUTE_ERROR, BGP_SUB_UNACCEPTABLE_HOLD_TIME, BGP_SUB_UNSUPPORTED_VERSION,
+    BGP_VERSION, BgpFramer, BgpNotificationMessage, BgpOpenMessage, BgpOrigin, BgpParseError,
+    BgpPathAttributes, BgpPdu, BgpUpdateMessage, Ipv4Prefix,
 };
+use crate::bgp_caps::{
+    AfiSafi, BGP_SUB_UNSUPPORTED_CAPABILITY, BgpCapability, BgpCapabilitySet,
+    NegotiatedCapabilities, negotiate,
+};
+use crate::bgp_evpn::{
+    EvpnAdjRibIn, EvpnAdjRibOut, EvpnLocRib, EvpnPath, EvpnRoute, EvpnRouteKey, MAX_EVPN_ROUTES,
+    RouteTarget, decode_evpn_nlri_list, encode_evpn_nlri_list, mac_mobility_from_communities,
+    route_targets_from_communities, select_best_evpn,
+};
+use crate::bgp_mp::{MpReachNlri, MpUnreachNlri};
 use crate::bgp_rib::{
     AdjRibIn, AdjRibOut, AdvertisedRoute, BgpPath, LocRib, PathSource, PolicyOutcome, RoutePolicy,
     select_best,
@@ -115,12 +125,18 @@ pub struct BgpPeerCounters {
     pub next_hop_rejected: u64,
     /// UPDATEs refused because the AS_PATH was not acceptable on this session.
     pub as_path_rejected: u64,
+    /// EVPN routes received from this peer.
+    pub evpn_received: u64,
+    /// EVPN routes advertised to this peer.
+    pub evpn_advertised: u64,
+    /// EVPN NLRI discarded because no configured import Route Target matched.
+    pub evpn_rt_rejected: u64,
 }
 
 /// One configured BGP neighbour and the session state that belongs to it.
 pub struct BgpPeer {
     pub addr: Ipv4Address,
-    pub remote_as: u16,
+    pub remote_as: u32,
     /// Local address used as the source of the session (the "update source").
     pub local_addr: Ipv4Address,
     pub mode: BgpPeerMode,
@@ -133,6 +149,9 @@ pub struct BgpPeer {
     keepalive_deadline: Option<u64>,
     pub negotiated_hold_ms: u64,
     pub keepalive_interval_ms: u64,
+    /// What the two OPENs agreed to carry. Empty until the peer's OPEN arrives,
+    /// which is what stops an EVPN route being advertised before negotiation.
+    pub negotiated: NegotiatedCapabilities,
     pub remote_router_id: Option<Ipv4Address>,
     pub established_since_ms: Option<u64>,
     pub import_policy: RoutePolicy,
@@ -157,7 +176,7 @@ pub struct BgpPeer {
 }
 
 impl BgpPeer {
-    fn new(addr: Ipv4Address, remote_as: u16, local_addr: Ipv4Address, mode: BgpPeerMode) -> Self {
+    fn new(addr: Ipv4Address, remote_as: u32, local_addr: Ipv4Address, mode: BgpPeerMode) -> Self {
         BgpPeer {
             addr,
             remote_as,
@@ -172,6 +191,7 @@ impl BgpPeer {
             keepalive_deadline: None,
             negotiated_hold_ms: 0,
             keepalive_interval_ms: 0,
+            negotiated: NegotiatedCapabilities::default(),
             remote_router_id: None,
             established_since_ms: None,
             import_policy: RoutePolicy::new(),
@@ -188,6 +208,22 @@ impl BgpPeer {
 
     pub fn is_established(&self) -> bool {
         self.state == BgpState::Established
+    }
+
+    /// True when this session negotiated `family` and is up. Both halves matter:
+    /// a family agreed on a session that has since dropped must not be used.
+    pub fn carries(&self, family: AfiSafi) -> bool {
+        self.is_established() && self.negotiated.supports(family)
+    }
+
+    /// True when EVPN NLRI may travel on this session.
+    pub fn carries_evpn(&self) -> bool {
+        self.carries(AfiSafi::L2VPN_EVPN)
+    }
+
+    /// The address families this session agreed to carry.
+    pub fn negotiated_families(&self) -> Vec<AfiSafi> {
+        self.negotiated.families.iter().copied().collect()
     }
 
     /// Simulated milliseconds since the session came up.
@@ -229,7 +265,7 @@ impl fmt::Display for BgpEvent {
 #[derive(Debug, Clone)]
 pub struct BgpPeerSummary {
     pub addr: Ipv4Address,
-    pub remote_as: u16,
+    pub remote_as: u32,
     pub local_addr: Ipv4Address,
     pub state: BgpState,
     pub router_id: Option<Ipv4Address>,
@@ -258,7 +294,7 @@ enum Teardown {
 /// A BGP-4 speaker: one local AS, one BGP identifier, a set of peers, three RIBs,
 /// and the decision process that connects them to the forwarding table.
 pub struct BgpRouter {
-    pub local_as: u16,
+    pub local_as: u32,
     pub router_id: Ipv4Address,
     /// Hold time proposed in our OPEN, in seconds.
     pub hold_time: u16,
@@ -268,6 +304,22 @@ pub struct BgpRouter {
     pub adj_rib_in: AdjRibIn,
     pub loc_rib: LocRib,
     pub adj_rib_out: AdjRibOut,
+    /// Address families offered in OPEN.
+    families: BTreeSet<AfiSafi>,
+    /// EVPN routes received from every peer, before Route Target import.
+    pub evpn_adj_rib_in: EvpnAdjRibIn,
+    /// The best EVPN path per route, and the only thing the VTEP is programmed from.
+    pub evpn_loc_rib: EvpnLocRib,
+    /// EVPN routes advertised to each peer.
+    pub evpn_adj_rib_out: EvpnAdjRibOut,
+    /// EVPN routes this speaker originates for its own local hosts.
+    evpn_originated: BTreeMap<EvpnRouteKey, EvpnRoute>,
+    /// Route Targets this speaker will import an EVPN route on. A route whose
+    /// Extended Communities match none of these is not accepted into the Loc-RIB.
+    import_rts: BTreeSet<RouteTarget>,
+    /// Set when the EVPN RIBs changed, so the EVPN decision process runs once per
+    /// poll rather than once per route.
+    evpn_dirty: bool,
     originated: BTreeMap<Ipv4Prefix, Ipv4Address>,
     /// Prefixes this speaker currently has installed in the FIB.
     installed: BTreeSet<Ipv4Prefix>,
@@ -281,7 +333,7 @@ pub struct BgpRouter {
 }
 
 impl BgpRouter {
-    pub fn new(local_as: u16, router_id: Ipv4Address) -> Self {
+    pub fn new(local_as: u32, router_id: Ipv4Address) -> Self {
         BgpRouter {
             local_as,
             router_id,
@@ -292,6 +344,13 @@ impl BgpRouter {
             adj_rib_in: AdjRibIn::new(),
             loc_rib: LocRib::new(),
             adj_rib_out: AdjRibOut::new(),
+            families: BTreeSet::from([AfiSafi::IPV4_UNICAST]),
+            evpn_adj_rib_in: EvpnAdjRibIn::new(),
+            evpn_loc_rib: EvpnLocRib::new(),
+            evpn_adj_rib_out: EvpnAdjRibOut::new(),
+            evpn_originated: BTreeMap::new(),
+            import_rts: BTreeSet::new(),
+            evpn_dirty: true,
             originated: BTreeMap::new(),
             installed: BTreeSet::new(),
             unresolved: BTreeSet::new(),
@@ -320,7 +379,7 @@ impl BgpRouter {
     pub fn add_peer(
         &mut self,
         addr: Ipv4Address,
-        remote_as: u16,
+        remote_as: u32,
         local_addr: Ipv4Address,
         mode: BgpPeerMode,
     ) {
@@ -477,6 +536,11 @@ impl BgpRouter {
             self.dirty = false;
         }
 
+        if self.evpn_dirty {
+            self.run_evpn_decision_process(now_ms);
+            self.evpn_dirty = false;
+        }
+
         // The FIB is reconciled every poll, not only when the RIB changed. A NEXT_HOP
         // that was unresolvable earlier can become resolvable later, and reconciling
         // unconditionally also repairs the table if anything else disturbs it. Entries
@@ -487,6 +551,7 @@ impl BgpRouter {
         // needs the full Loc-RIB even when nothing about the RIB itself changed.
         for idx in 0..self.peers.len() {
             self.advertise_to_peer(idx, now_ms, sockets);
+            self.advertise_evpn_to_peer(idx, now_ms, sockets);
         }
     }
 
@@ -707,7 +772,9 @@ impl BgpRouter {
     }
 
     fn send_open(&mut self, idx: usize, now_ms: u64, sockets: &mut SocketRuntime) {
-        let open = BgpOpenMessage::new(self.local_as, self.hold_time, self.router_id);
+        let caps = self.local_capabilities();
+        let open =
+            BgpOpenMessage::with_capabilities(self.local_as, self.hold_time, self.router_id, &caps);
         if !self.send_pdu(idx, sockets, &BgpPdu::Open(open)) {
             return;
         }
@@ -716,7 +783,43 @@ impl BgpRouter {
         self.peers[idx].connect_retry_deadline = None;
         self.peers[idx].hold_deadline = Some(now_ms + INITIAL_HOLD_MS);
         let addr = self.peers[idx].addr;
-        self.log(now_ms, addr, "TCP established -> OPEN sent (OpenSent)");
+        self.log(
+            now_ms,
+            addr,
+            format!(
+                "TCP established -> OPEN sent (AS {}, capabilities: {}) (OpenSent)",
+                self.local_as, caps
+            ),
+        );
+    }
+
+    /// The capability set this speaker puts in every OPEN.
+    ///
+    /// The Four-Octet AS capability is unconditional: a speaker that supports
+    /// 32-bit ASNs advertises so even when its own ASN happens to be small, which
+    /// is what lets the *session* use the wide AS_PATH encoding for a path that
+    /// transited a 32-bit AS elsewhere.
+    pub fn local_capabilities(&self) -> BgpCapabilitySet {
+        let mut caps = BgpCapabilitySet::new();
+        for family in &self.families {
+            caps.advertise(*family);
+        }
+        caps.push(BgpCapability::FourOctetAs(self.local_as));
+        caps
+    }
+
+    /// Address families this speaker will advertise in OPEN. IPv4 Unicast is
+    /// always present; EVPN is added by [`BgpRouter::enable_family`].
+    pub fn families(&self) -> Vec<AfiSafi> {
+        self.families.iter().copied().collect()
+    }
+
+    /// Adds an address family to what this speaker offers in OPEN.
+    ///
+    /// This only changes what is *offered*. Whether a given session actually
+    /// carries the family still depends on the neighbour offering it too.
+    pub fn enable_family(&mut self, family: AfiSafi) {
+        self.families.insert(family);
     }
 
     /// OpenSent / OpenConfirm / Established: read the stream, decode complete
@@ -760,7 +863,10 @@ impl BgpRouter {
                 }
             };
 
-            let pdu = match BgpPdu::parse(&frame) {
+            // The AS_PATH ASN width is not visible in the message; it is whatever
+            // the two OPENs agreed to, so the session state has to supply it.
+            let four_octet = self.peers[idx].negotiated.four_octet_as;
+            let pdu = match BgpPdu::parse_width(&frame, four_octet) {
                 Ok(p) => p,
                 Err(e) => {
                     let note = BgpNotificationMessage::new(e.code, e.subcode);
@@ -835,13 +941,42 @@ impl BgpRouter {
         match (state, pdu) {
             (BgpState::OpenSent, BgpPdu::Open(open)) => {
                 self.peers[idx].counters.opens_received += 1;
-                if let Err(note) = self.validate_open(idx, &open) {
+                let peer_caps = match open.capabilities() {
+                    Ok(c) => c,
+                    Err(e) => {
+                        return Some(Teardown::Protocol(
+                            BgpNotificationMessage::new(
+                                crate::bgp::BGP_ERR_OPEN_MESSAGE,
+                                e.subcode,
+                            ),
+                            format!("malformed OPEN capabilities: {}", e),
+                        ));
+                    }
+                };
+                if let Err(note) = self.validate_open(idx, &open, &peer_caps) {
                     let reason = format!(
                         "rejected OPEN: code {}/{}",
                         note.error_code, note.error_subcode
                     );
                     return Some(Teardown::Protocol(note, reason));
                 }
+                let capabilities = negotiate(&self.local_capabilities(), &peer_caps);
+                let families: Vec<String> =
+                    capabilities.families.iter().map(|f| f.name()).collect();
+                self.log(
+                    now_ms,
+                    addr,
+                    format!(
+                        "capability negotiation: families [{}], 4-octet ASN {}",
+                        families.join(", "),
+                        if capabilities.four_octet_as {
+                            "yes"
+                        } else {
+                            "no"
+                        }
+                    ),
+                );
+                self.peers[idx].negotiated = capabilities;
                 let negotiated = self.hold_time.min(open.hold_time);
                 self.peers[idx].remote_router_id = Some(open.bgp_id);
                 self.peers[idx].negotiated_hold_ms = negotiated as u64 * 1_000;
@@ -888,6 +1023,9 @@ impl BgpRouter {
 
             (BgpState::Established, BgpPdu::Update(update)) => {
                 self.peers[idx].counters.updates_received += 1;
+                if let Err(t) = self.import_mp_update(idx, now_ms, &update) {
+                    return Some(t);
+                }
                 match self.import_update(idx, now_ms, update) {
                     Ok(()) => None,
                     Err(note) => {
@@ -919,11 +1057,12 @@ impl BgpRouter {
         }
     }
 
-    /// Validates a peer's OPEN against RFC 4271 section 6.2.
+    /// Validates a peer's OPEN against RFC 4271 section 6.2 and RFC 6793.
     fn validate_open(
         &self,
         idx: usize,
         open: &BgpOpenMessage,
+        peer_caps: &BgpCapabilitySet,
     ) -> Result<(), BgpNotificationMessage> {
         if open.version != BGP_VERSION {
             let mut note = BgpNotificationMessage::new(
@@ -933,10 +1072,23 @@ impl BgpRouter {
             note.data = (BGP_VERSION as u16).to_be_bytes().to_vec();
             return Err(note);
         }
-        if open.my_as != self.peers[idx].remote_as {
+        // The configured neighbour ASN is compared against what the peer really
+        // claims, which for a 32-bit AS is the capability rather than the
+        // two-octet field. Comparing the field alone would accept any 32-bit
+        // neighbour at all, because every one of them writes AS_TRANS there.
+        if open.effective_as(peer_caps) != self.peers[idx].remote_as {
             return Err(BgpNotificationMessage::new(
                 crate::bgp::BGP_ERR_OPEN_MESSAGE,
                 BGP_SUB_BAD_PEER_AS,
+            ));
+        }
+        // A peer whose ASN does not fit two octets must have said so in the
+        // capability; otherwise the two fields contradict each other and there is
+        // no honest way to read the AS_PATH that follows.
+        if self.peers[idx].remote_as > u16::MAX as u32 && !peer_caps.supports_four_octet_as() {
+            return Err(BgpNotificationMessage::new(
+                crate::bgp::BGP_ERR_OPEN_MESSAGE,
+                BGP_SUB_UNSUPPORTED_CAPABILITY,
             ));
         }
         // A BGP identifier must be a valid unicast host address and must differ from ours.
@@ -1054,6 +1206,15 @@ impl BgpRouter {
 
         let purged = self.adj_rib_in.clear_peer(addr);
         self.adj_rib_out.clear_peer(addr);
+        // EVPN state learned from this peer goes with it. Leaving it behind would
+        // keep the VTEP encapsulating tenant traffic towards a leaf whose session
+        // is gone, which is exactly the black hole the control plane exists to
+        // avoid.
+        let evpn_purged = self.evpn_adj_rib_in.clear_peer(addr);
+        self.evpn_adj_rib_out.clear_peer(addr);
+        if evpn_purged > 0 {
+            self.evpn_dirty = true;
+        }
 
         let peer = &mut self.peers[idx];
         peer.framer.reset();
@@ -1062,6 +1223,7 @@ impl BgpRouter {
         peer.keepalive_deadline = None;
         peer.negotiated_hold_ms = 0;
         peer.keepalive_interval_ms = 0;
+        peer.negotiated = NegotiatedCapabilities::default();
         peer.remote_router_id = None;
         peer.established_since_ms = None;
         peer.tx_desynced = false;
@@ -1072,7 +1234,10 @@ impl BgpRouter {
         self.log(
             now_ms,
             addr,
-            format!("session down ({}); purged {} learned paths", reason, purged),
+            format!(
+                "session down ({}); purged {} learned path(s) and {} EVPN route(s)",
+                reason, purged, evpn_purged
+            ),
         );
     }
 
@@ -1259,6 +1424,469 @@ impl BgpRouter {
     }
 
     // ========================================================================
+    // MP-BGP EVPN
+    // ========================================================================
+
+    /// Route Targets this speaker imports EVPN routes on.
+    pub fn import_route_targets(&self) -> Vec<RouteTarget> {
+        self.import_rts.iter().copied().collect()
+    }
+
+    /// Adds an import Route Target. A received EVPN route is accepted into the
+    /// Loc-RIB only if one of its RTs is in this set.
+    pub fn add_import_route_target(&mut self, rt: RouteTarget) {
+        if self.import_rts.insert(rt) {
+            // A newly imported RT can make routes already sitting in the
+            // Adj-RIB-In acceptable, so the decision process has to run again.
+            self.evpn_dirty = true;
+        }
+    }
+
+    pub fn remove_import_route_target(&mut self, rt: &RouteTarget) -> bool {
+        let removed = self.import_rts.remove(rt);
+        if removed {
+            self.evpn_dirty = true;
+        }
+        removed
+    }
+
+    /// Originates an EVPN route for a host attached to this speaker.
+    ///
+    /// Returns true if anything changed. An identical re-origination is a no-op,
+    /// so a VTEP can call this every poll for every local MAC without producing a
+    /// duplicate advertisement.
+    pub fn originate_evpn(&mut self, route: EvpnRoute) -> bool {
+        let key = route.key();
+        if self.evpn_originated.get(&key) == Some(&route) {
+            return false;
+        }
+        self.evpn_originated.insert(key, route);
+        self.evpn_dirty = true;
+        true
+    }
+
+    /// Stops originating an EVPN route, which propagates as an MP_UNREACH.
+    pub fn withdraw_evpn(&mut self, key: &EvpnRouteKey) -> bool {
+        let removed = self.evpn_originated.remove(key).is_some();
+        if removed {
+            self.evpn_dirty = true;
+        }
+        removed
+    }
+
+    pub fn evpn_originated_routes(&self) -> Vec<&EvpnRoute> {
+        self.evpn_originated.values().collect()
+    }
+
+    /// Applies the multiprotocol part of a received UPDATE.
+    ///
+    /// An UPDATE that carries EVPN NLRI on a session that never negotiated the
+    /// family is a protocol violation, not something to quietly ignore: the peer
+    /// is sending routes it was told this speaker cannot read.
+    fn import_mp_update(
+        &mut self,
+        idx: usize,
+        now_ms: u64,
+        update: &BgpUpdateMessage,
+    ) -> Result<(), Teardown> {
+        let addr = self.peers[idx].addr;
+
+        for family in [
+            update.mp_reach().map(|m| m.family()),
+            update.mp_unreach().map(|m| m.family()),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if family != AfiSafi::L2VPN_EVPN {
+                // A family that was never negotiated has no business here either,
+                // but an unnegotiated *unknown* family is best ignored rather than
+                // treated as fatal: RFC 4760 leaves the NLRI meaningless to us.
+                self.log(
+                    now_ms,
+                    addr,
+                    format!("ignored MP NLRI for unsupported family {}", family),
+                );
+                continue;
+            }
+            if !self.peers[idx].negotiated.supports_evpn() {
+                return Err(Teardown::Protocol(
+                    BgpNotificationMessage::new(
+                        BGP_ERR_UPDATE_MESSAGE,
+                        BGP_SUB_OPTIONAL_ATTRIBUTE_ERROR,
+                    ),
+                    "peer sent EVPN NLRI without negotiating AFI 25 / SAFI 70".to_string(),
+                ));
+            }
+        }
+
+        if let Some(mp) = update.mp_unreach()
+            && mp.family() == AfiSafi::L2VPN_EVPN
+        {
+            let nlri = decode_evpn_nlri_list(&mp.nlri).map_err(|e| {
+                Teardown::Protocol(
+                    BgpNotificationMessage::new(e.code, e.subcode),
+                    format!("malformed EVPN MP_UNREACH: {}", e),
+                )
+            })?;
+            let mut removed = 0usize;
+            for n in &nlri {
+                if self
+                    .evpn_adj_rib_in
+                    .remove(addr, &EvpnRouteKey::from_nlri(n))
+                    .is_some()
+                {
+                    removed += 1;
+                    self.evpn_dirty = true;
+                }
+            }
+            if removed > 0 {
+                self.log(
+                    now_ms,
+                    addr,
+                    format!("withdrew {} EVPN route(s) from Adj-RIB-In", removed),
+                );
+            }
+        }
+
+        let Some(mp) = update.mp_reach() else {
+            return Ok(());
+        };
+        if mp.family() != AfiSafi::L2VPN_EVPN {
+            return Ok(());
+        }
+
+        let Some(next_hop) = mp.ipv4_next_hop() else {
+            return Err(Teardown::Protocol(
+                BgpNotificationMessage::new(BGP_ERR_UPDATE_MESSAGE, BGP_SUB_INVALID_NEXT_HOP),
+                format!(
+                    "EVPN MP_REACH next hop is {} bytes, which is no IPv4 VTEP address",
+                    mp.next_hop.len()
+                ),
+            ));
+        };
+        // The VTEP address has to be something a packet could actually be sent
+        // to, or the overlay would program a tunnel that can never come up.
+        if next_hop.is_unspecified()
+            || next_hop.is_loopback()
+            || next_hop.is_multicast()
+            || next_hop.is_broadcast()
+        {
+            return Err(Teardown::Protocol(
+                BgpNotificationMessage::new(BGP_ERR_UPDATE_MESSAGE, BGP_SUB_INVALID_NEXT_HOP),
+                format!(
+                    "EVPN MP_REACH next hop {} is not a unicast address",
+                    next_hop
+                ),
+            ));
+        }
+
+        let nlri = decode_evpn_nlri_list(&mp.nlri).map_err(|e| {
+            Teardown::Protocol(
+                BgpNotificationMessage::new(e.code, e.subcode),
+                format!("malformed EVPN MP_REACH: {}", e),
+            )
+        })?;
+
+        let attrs = update
+            .attributes
+            .as_ref()
+            .expect("an UPDATE carrying MP_REACH always decodes with attributes");
+        let route_targets = route_targets_from_communities(&attrs.ext_communities);
+        let mobility_seq = mac_mobility_from_communities(&attrs.ext_communities);
+
+        // The AS loop check applies to EVPN exactly as it does to IPv4: a route
+        // that has already been through this AS must not come back in.
+        if attrs.as_path.contains(self.local_as) {
+            self.peers[idx].counters.as_loops_rejected += nlri.len() as u64;
+            self.log(
+                now_ms,
+                addr,
+                format!(
+                    "rejected {} EVPN route(s): AS_PATH [{}] already contains AS {}",
+                    nlri.len(),
+                    attrs.as_path,
+                    self.local_as
+                ),
+            );
+            return Ok(());
+        }
+
+        let is_ebgp = self.peers[idx].remote_as != self.local_as;
+        let peer_as = self.peers[idx].remote_as;
+        let peer_router_id = self.peers[idx].remote_router_id.unwrap_or(addr);
+        let mut accepted = 0usize;
+
+        for n in nlri {
+            let route = EvpnRoute {
+                nlri: n,
+                next_hop,
+                route_targets: route_targets.clone(),
+                mobility_seq,
+            };
+
+            // Route Target import. A route nobody asked for is dropped here, at
+            // the edge of the Adj-RIB-In, so it can never reach the Loc-RIB and
+            // never program a tunnel for another tenant's VNI.
+            if !route.matches_import(&self.import_rts) {
+                self.peers[idx].counters.evpn_rt_rejected += 1;
+                // A route that used to match and no longer does must also go.
+                if self.evpn_adj_rib_in.remove(addr, &route.key()).is_some() {
+                    self.evpn_dirty = true;
+                }
+                continue;
+            }
+
+            let path = EvpnPath {
+                route,
+                peer_addr: addr,
+                peer_as,
+                peer_router_id,
+                origin: attrs.origin,
+                as_path: attrs.as_path.clone(),
+                local_pref: attrs.local_pref.unwrap_or(BGP_DEFAULT_LOCAL_PREF),
+                received_at_ms: now_ms,
+                local: false,
+            };
+            let _ = is_ebgp;
+
+            let previous = self.evpn_adj_rib_in.insert(addr, path.clone());
+            if previous.is_none_or(|prev| !prev.same_route_as(&path)) {
+                self.evpn_dirty = true;
+            }
+            accepted += 1;
+
+            if self.evpn_adj_rib_in.route_count(addr) > MAX_EVPN_ROUTES {
+                return Err(Teardown::Protocol(
+                    BgpNotificationMessage::new(BGP_ERR_CEASE, BGP_SUB_MAX_PREFIXES),
+                    format!("peer advertised more than {} EVPN routes", MAX_EVPN_ROUTES),
+                ));
+            }
+        }
+
+        if accepted > 0 {
+            self.peers[idx].counters.evpn_received += accepted as u64;
+            self.log(
+                now_ms,
+                addr,
+                format!(
+                    "imported {} EVPN route(s) via next-hop {}; Adj-RIB-In holds {}",
+                    accepted,
+                    next_hop,
+                    self.evpn_adj_rib_in.route_count(addr)
+                ),
+            );
+        }
+        Ok(())
+    }
+
+    /// Recomputes the EVPN Loc-RIB from the Adj-RIB-In tables plus what this
+    /// speaker originates itself.
+    ///
+    /// Rebuilding rather than patching is what guarantees the overlay has no
+    /// stale state: a peer that went down, a route that was withdrawn, and a host
+    /// that moved all reduce to "the input set is different", and the output
+    /// follows from the input alone.
+    fn run_evpn_decision_process(&mut self, now_ms: u64) {
+        let mut new_rib = EvpnLocRib::new();
+        let mut keys = self.evpn_adj_rib_in.keys();
+        keys.extend(self.evpn_originated.keys().cloned());
+
+        for key in keys {
+            let learned = self.evpn_adj_rib_in.candidates(&key);
+            let local = self
+                .evpn_originated
+                .get(&key)
+                .map(|r| EvpnPath::local(r.clone(), self.router_id, now_ms));
+
+            let mut candidates: Vec<&EvpnPath> = learned;
+            if let Some(ref l) = local {
+                candidates.push(l);
+            }
+            if let Some(best) = select_best_evpn(&candidates) {
+                new_rib.insert(best.clone());
+            }
+        }
+
+        if new_rib.len() != self.evpn_loc_rib.len() {
+            self.log(
+                now_ms,
+                Ipv4Address::UNSPECIFIED,
+                format!(
+                    "EVPN decision process: Loc-RIB {} -> {} route(s)",
+                    self.evpn_loc_rib.len(),
+                    new_rib.len()
+                ),
+            );
+        }
+        self.evpn_loc_rib = new_rib;
+    }
+
+    /// Sends `idx` the EVPN routes it should be hearing, and withdraws the ones
+    /// it should not.
+    fn advertise_evpn_to_peer(&mut self, idx: usize, now_ms: u64, sockets: &mut SocketRuntime) {
+        // The capability gate. A peer that did not negotiate AFI 25 / SAFI 70
+        // never sees an EVPN route, no matter what the Loc-RIB holds.
+        if !self.peers[idx].carries_evpn() {
+            return;
+        }
+        let addr = self.peers[idx].addr;
+        let desired = self.compute_evpn_adj_rib_out(idx);
+
+        let withdrawn: Vec<EvpnRouteKey> = self
+            .evpn_adj_rib_out
+            .keys(addr)
+            .into_iter()
+            .filter(|k| !desired.contains_key(k))
+            .collect();
+
+        if !withdrawn.is_empty() {
+            let nlri: Vec<crate::evpn::EvpnNlri> = withdrawn
+                .iter()
+                .filter_map(|k| self.evpn_adj_rib_out.get(addr, k).map(|r| r.nlri.clone()))
+                .collect();
+            let mp = MpUnreachNlri::new(AfiSafi::L2VPN_EVPN, encode_evpn_nlri_list(&nlri));
+            let pdu = BgpPdu::Update(BgpUpdateMessage::mp_withdraw(mp));
+            if self.send_pdu(idx, sockets, &pdu) {
+                self.peers[idx].counters.updates_sent += 1;
+                for k in &withdrawn {
+                    self.evpn_adj_rib_out.remove(addr, k);
+                }
+                self.log(
+                    now_ms,
+                    addr,
+                    format!("withdrew {} EVPN route(s) via MP_UNREACH", withdrawn.len()),
+                );
+            }
+        }
+
+        // Announcements are grouped by identical attribute set, so one UPDATE
+        // carries every route that shares a next hop, AS_PATH and RT list.
+        let four_octet = self.peers[idx].negotiated.four_octet_as;
+        let mut groups: BTreeMap<Vec<u8>, (BgpPathAttributes, Vec<EvpnRouteKey>)> = BTreeMap::new();
+        for (key, route) in &desired {
+            if self.evpn_adj_rib_out.get(addr, key) == Some(route) {
+                continue;
+            }
+            let attrs = self.evpn_attributes_for(idx, route, four_octet);
+            // The MP_REACH NLRI itself is excluded from the grouping key: it is
+            // what differs between the routes being merged.
+            let mut key_bytes = attrs.encode_for(false);
+            if let Some(mp) = &attrs.mp_reach {
+                let n = mp.encode_value().len();
+                key_bytes.truncate(key_bytes.len().saturating_sub(n));
+            }
+            groups
+                .entry(key_bytes)
+                .or_insert_with(|| (attrs, Vec::new()))
+                .1
+                .push(key.clone());
+        }
+
+        for (_, (mut attrs, keys)) in groups {
+            let nlri: Vec<crate::evpn::EvpnNlri> = keys
+                .iter()
+                .filter_map(|k| desired.get(k).map(|r| r.nlri.clone()))
+                .collect();
+            attrs.mp_reach = Some(MpReachNlri::with_ipv4_next_hop(
+                AfiSafi::L2VPN_EVPN,
+                attrs
+                    .mp_reach
+                    .as_ref()
+                    .and_then(|m| m.ipv4_next_hop())
+                    .unwrap_or(self.peers[idx].local_addr),
+                encode_evpn_nlri_list(&nlri),
+            ));
+            let pdu = BgpPdu::Update(BgpUpdateMessage::mp_announce(attrs));
+            if self.send_pdu(idx, sockets, &pdu) {
+                self.peers[idx].counters.updates_sent += 1;
+                self.peers[idx].counters.evpn_advertised += keys.len() as u64;
+                for k in &keys {
+                    if let Some(route) = desired.get(k) {
+                        self.evpn_adj_rib_out.insert(addr, route.clone());
+                    }
+                }
+                self.log(
+                    now_ms,
+                    addr,
+                    format!("advertised {} EVPN route(s) in one UPDATE", keys.len()),
+                );
+            }
+        }
+    }
+
+    /// The attribute set for one EVPN route on one session.
+    fn evpn_attributes_for(
+        &self,
+        idx: usize,
+        route: &EvpnRoute,
+        four_octet: bool,
+    ) -> BgpPathAttributes {
+        let peer = &self.peers[idx];
+        let is_ebgp = peer.remote_as != self.local_as;
+        let best = self.evpn_loc_rib.get(&route.key());
+
+        let mut as_path = best.map(|p| p.as_path.clone()).unwrap_or_default();
+        if is_ebgp {
+            as_path.prepend(self.local_as);
+        }
+
+        let mut attrs = BgpPathAttributes::new(BgpOrigin::Igp, as_path, Ipv4Address::UNSPECIFIED);
+        attrs.four_octet_as = four_octet;
+        attrs.ext_communities = route.ext_communities();
+        if !is_ebgp {
+            attrs.local_pref = Some(best.map(|p| p.local_pref).unwrap_or(BGP_DEFAULT_LOCAL_PREF));
+        }
+        attrs.mp_reach = Some(MpReachNlri::with_ipv4_next_hop(
+            AfiSafi::L2VPN_EVPN,
+            route.next_hop,
+            Vec::new(),
+        ));
+        attrs
+    }
+
+    /// What `idx` should be hearing about EVPN.
+    ///
+    /// The next hop is *not* rewritten to this speaker's session address the way
+    /// an eBGP IPv4 next hop is. In an EVPN fabric the next hop names the VTEP
+    /// that owns the MAC, and rewriting it at every hop would make every leaf
+    /// claim every host.
+    fn compute_evpn_adj_rib_out(&self, idx: usize) -> BTreeMap<EvpnRouteKey, EvpnRoute> {
+        let peer = &self.peers[idx];
+        let is_ebgp_session = peer.remote_as != self.local_as;
+        let mut out = BTreeMap::new();
+
+        for (key, best) in self.evpn_loc_rib.iter() {
+            // Never advertise a route back to the peer it came from.
+            if !best.local && best.peer_addr == peer.addr {
+                continue;
+            }
+            // A route learned over iBGP is not re-advertised to another iBGP peer.
+            if !is_ebgp_session && !best.local && best.peer_as == self.local_as {
+                continue;
+            }
+            let mut as_path = best.as_path.clone();
+            if is_ebgp_session {
+                as_path.prepend(self.local_as);
+            }
+            if as_path.contains(peer.remote_as) {
+                continue;
+            }
+            out.insert(key.clone(), best.route.clone());
+        }
+        out
+    }
+
+    /// `show bgp evpn summary`
+    pub fn evpn_route_counts(&self) -> (usize, usize, usize) {
+        (
+            self.evpn_adj_rib_in.total_routes(),
+            self.evpn_loc_rib.len(),
+            self.evpn_originated.len(),
+        )
+    }
+
+    // ========================================================================
     // Decision process and FIB
     // ========================================================================
 
@@ -1437,12 +2065,13 @@ impl BgpRouter {
 
         // Announcements: new or changed routes, grouped by identical attribute set so
         // one UPDATE can carry several NLRI, exactly as a real speaker packs them.
+        let four_octet = self.peers[idx].negotiated.four_octet_as;
         let mut groups: BTreeMap<Vec<u8>, (AdvertisedRoute, Vec<Ipv4Prefix>)> = BTreeMap::new();
         for (prefix, route) in &desired {
             if self.adj_rib_out.get(addr, prefix) == Some(route) {
                 continue;
             }
-            let attrs = Self::attributes_for(route);
+            let attrs = Self::attributes_for(route, four_octet);
             let key = attrs.encode();
             groups
                 .entry(key)
@@ -1452,7 +2081,7 @@ impl BgpRouter {
         }
 
         for (_, (route, prefixes)) in groups {
-            let attrs = Self::attributes_for(&route);
+            let attrs = Self::attributes_for(&route, four_octet);
             let pdu = BgpPdu::Update(BgpUpdateMessage::announce(attrs, prefixes.clone()));
             if self.send_pdu(idx, sockets, &pdu) {
                 self.peers[idx].counters.updates_sent += 1;
@@ -1473,7 +2102,7 @@ impl BgpRouter {
         }
     }
 
-    fn attributes_for(route: &AdvertisedRoute) -> BgpPathAttributes {
+    fn attributes_for(route: &AdvertisedRoute, four_octet_as: bool) -> BgpPathAttributes {
         BgpPathAttributes {
             origin: route.origin,
             as_path: route.as_path.clone(),
@@ -1481,6 +2110,10 @@ impl BgpRouter {
             med: route.med,
             local_pref: route.local_pref,
             atomic_aggregate: false,
+            ext_communities: Vec::new(),
+            mp_reach: None,
+            mp_unreach: None,
+            four_octet_as,
         }
     }
 

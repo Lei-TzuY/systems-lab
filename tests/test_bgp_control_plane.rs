@@ -838,7 +838,7 @@ fn test_diagnostics_report_real_session_and_rib_state() {
 // ============================================================================
 
 /// Snapshot of every Loc-RIB in the lab: prefix and the AS_PATH of its best path.
-fn rib_snapshot(lab: &VirtualLab) -> Vec<(String, String, Vec<u16>)> {
+fn rib_snapshot(lab: &VirtualLab) -> Vec<(String, String, Vec<u32>)> {
     let mut out = Vec::new();
     let mut names: Vec<&String> = lab.routers.keys().collect();
     names.sort();
@@ -1072,17 +1072,14 @@ fn test_a_peer_exceeding_its_prefix_limit_is_cut_off() {
 
     // Six distinct prefixes in one UPDATE: well past the limit of three.
     let nlri: Vec<_> = (0..6u8).map(|i| prefix(203, 0, 113, i * 8, 29)).collect();
-    peer.write(
-        &BgpPdu::Update(BgpUpdateMessage::announce(
-            BgpPathAttributes::new(
-                BgpOrigin::Igp,
-                AsPath::sequence(vec![AS2]),
-                ip(10, 50, 0, 2),
-            ),
-            nlri,
-        ))
-        .serialize(),
-    );
+    peer.write_pdu(BgpPdu::Update(BgpUpdateMessage::announce(
+        BgpPathAttributes::new(
+            BgpOrigin::Igp,
+            AsPath::sequence(vec![AS2]),
+            ip(10, 50, 0, 2),
+        ),
+        nlri,
+    )));
 
     let note = peer
         .notification()
@@ -1111,10 +1108,9 @@ fn test_an_identical_re_advertisement_does_not_rerun_the_decision_process() {
             ),
             vec![prefix(10, 99, 0, 0, 24)],
         ))
-        .serialize()
     };
 
-    peer.write(&announce());
+    peer.write_pdu(announce());
     let after_first = peer.victim_bgp().decision_runs;
     assert_eq!(peer.victim_bgp().adj_rib_in.path_count(), 1);
 
@@ -1124,7 +1120,7 @@ fn test_an_identical_re_advertisement_does_not_rerun_the_decision_process() {
     // into the comparison every duplicate would look like a change and the whole
     // decision process would run again for a table that did not move.
     peer.run_until(4_000, |_| false);
-    peer.write(&announce());
+    peer.write_pdu(announce());
 
     assert_eq!(
         peer.victim_bgp().decision_runs,
@@ -1135,17 +1131,14 @@ fn test_an_identical_re_advertisement_does_not_rerun_the_decision_process() {
     assert_eq!(peer.state(), BgpState::Established);
 
     // A real change still gets through: same prefix, different next hop.
-    peer.write(
-        &BgpPdu::Update(BgpUpdateMessage::announce(
-            BgpPathAttributes::new(
-                BgpOrigin::Igp,
-                AsPath::sequence(vec![AS2]),
-                ip(10, 50, 0, 3),
-            ),
-            vec![prefix(10, 99, 0, 0, 24)],
-        ))
-        .serialize(),
-    );
+    peer.write_pdu(BgpPdu::Update(BgpUpdateMessage::announce(
+        BgpPathAttributes::new(
+            BgpOrigin::Igp,
+            AsPath::sequence(vec![AS2]),
+            ip(10, 50, 0, 3),
+        ),
+        vec![prefix(10, 99, 0, 0, 24)],
+    )));
     assert!(
         peer.victim_bgp().decision_runs > after_first,
         "a changed next hop was ignored"

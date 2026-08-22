@@ -139,7 +139,7 @@ fn test_arbitrary_byte_soup_never_panics_and_never_decodes() {
 #[test]
 fn test_a_bad_marker_tears_the_session_down_with_a_notification() {
     let mut peer = RawBgpPeer::connect(AS1, AS2, ip(9, 9, 9, 9));
-    peer.establish();
+    peer.establish_legacy();
 
     // 19 bytes that look like a header but carry the wrong marker.
     let mut junk = vec![0xAAu8; 16];
@@ -158,7 +158,7 @@ fn test_a_bad_marker_tears_the_session_down_with_a_notification() {
 #[test]
 fn test_an_impossible_length_field_tears_the_session_down() {
     let mut peer = RawBgpPeer::connect(AS1, AS2, ip(9, 9, 9, 9));
-    peer.establish();
+    peer.establish_legacy();
 
     let mut frame = BGP_MARKER.to_vec();
     frame.extend_from_slice(&65_535u16.to_be_bytes());
@@ -175,7 +175,7 @@ fn test_an_impossible_length_field_tears_the_session_down() {
 #[test]
 fn test_a_peer_that_vanishes_mid_message_leaves_nothing_behind() {
     let mut peer = RawBgpPeer::connect(AS1, AS2, ip(9, 9, 9, 9));
-    peer.establish();
+    peer.establish_legacy();
 
     // Half an UPDATE, then the connection goes away.
     let update = BgpPdu::Update(BgpUpdateMessage::announce(
@@ -217,7 +217,7 @@ fn test_a_peer_that_vanishes_mid_message_leaves_nothing_behind() {
 #[test]
 fn test_a_flood_of_junk_cannot_grow_the_receive_buffer_without_bound() {
     let mut peer = RawBgpPeer::connect(AS1, AS2, ip(9, 9, 9, 9));
-    peer.establish();
+    peer.establish_legacy();
 
     // Far more bytes than any legal message, all header-shaped so the framer keeps
     // looking at them.
@@ -261,14 +261,14 @@ fn test_a_flood_of_junk_cannot_grow_the_receive_buffer_without_bound() {
 fn test_update_without_the_mandatory_attributes_is_rejected() {
     // ORIGIN and AS_PATH present, NEXT_HOP missing.
     let mut attrs = origin_attr(0);
-    attrs.extend(as_path_attr(&[AS2]));
+    attrs.extend(as_path_attr(&[AS2 as u16]));
     let body = raw_update_body(&[], &attrs, &[24, 198, 51, 100]);
     let err = BgpUpdateMessage::parse_body(&body[..]).unwrap_err();
     assert_eq!(err.code, BGP_ERR_UPDATE_MESSAGE);
     assert_eq!(err.subcode, BGP_SUB_MISSING_WELL_KNOWN_ATTR);
 
     let mut peer = RawBgpPeer::connect(AS1, AS2, ip(9, 9, 9, 9));
-    peer.establish();
+    peer.establish_legacy();
     peer.write(&frame_update(&body));
     let note = peer
         .notification()
@@ -296,7 +296,7 @@ fn test_a_truncated_as_path_segment_is_rejected() {
     assert_eq!(err.subcode, BGP_SUB_MALFORMED_AS_PATH);
 
     let mut peer = RawBgpPeer::connect(AS1, AS2, ip(9, 9, 9, 9));
-    peer.establish();
+    peer.establish_legacy();
     peer.write(&frame_update(&body));
     let note = peer
         .notification()
@@ -329,7 +329,7 @@ fn test_an_invalid_next_hop_is_rejected_by_the_live_speaker() {
         Ipv4Address::new(255, 255, 255, 255),
     ] {
         let mut peer = RawBgpPeer::connect(AS1, AS2, ip(9, 9, 9, 9));
-        peer.establish();
+        peer.establish_legacy();
         peer.write(
             &BgpPdu::Update(BgpUpdateMessage::announce(
                 BgpPathAttributes::new(BgpOrigin::Igp, AsPath::sequence(vec![AS2]), bad),
@@ -351,7 +351,7 @@ fn test_an_invalid_next_hop_is_rejected_by_the_live_speaker() {
 fn test_attribute_lengths_that_run_past_the_end_are_rejected() {
     // NEXT_HOP claiming 200 bytes inside a 7-byte attribute block.
     let mut attrs = origin_attr(0);
-    attrs.extend(as_path_attr(&[AS2]));
+    attrs.extend(as_path_attr(&[AS2 as u16]));
     attrs.extend_from_slice(&[
         BGP_ATTR_FLAG_TRANSITIVE,
         BGP_ATTR_NEXT_HOP,
@@ -367,7 +367,7 @@ fn test_attribute_lengths_that_run_past_the_end_are_rejected() {
 
     // Extended-length flag with a two-byte length that also overruns.
     let mut attrs = origin_attr(0);
-    attrs.extend(as_path_attr(&[AS2]));
+    attrs.extend(as_path_attr(&[AS2 as u16]));
     attrs.extend_from_slice(&[
         BGP_ATTR_FLAG_TRANSITIVE | BGP_ATTR_FLAG_EXT_LEN,
         BGP_ATTR_NEXT_HOP,
@@ -386,7 +386,7 @@ fn test_attribute_lengths_that_run_past_the_end_are_rejected() {
 
     // A wrong-but-in-range fixed length is also caught.
     let mut attrs = origin_attr(0);
-    attrs.extend(as_path_attr(&[AS2]));
+    attrs.extend(as_path_attr(&[AS2 as u16]));
     attrs.extend_from_slice(&[BGP_ATTR_FLAG_TRANSITIVE, BGP_ATTR_NEXT_HOP, 2, 10, 0]);
     let body = raw_update_body(&[], &attrs, &[24, 198, 51, 100]);
     assert_eq!(
@@ -422,7 +422,7 @@ fn test_length_fields_inside_the_update_body_are_bounds_checked() {
 #[test]
 fn test_an_nlri_prefix_longer_than_32_bits_is_rejected() {
     let mut attrs = origin_attr(0);
-    attrs.extend(as_path_attr(&[AS2]));
+    attrs.extend(as_path_attr(&[AS2 as u16]));
     attrs.extend(next_hop_attr(10, 50, 0, 2));
     let body = raw_update_body(&[], &attrs, &[33, 10, 0, 0, 0, 1]);
     assert!(BgpUpdateMessage::parse_body(&body).is_err());
@@ -435,7 +435,7 @@ fn test_an_nlri_prefix_longer_than_32_bits_is_rejected() {
 #[test]
 fn test_an_undefined_origin_value_is_rejected() {
     let mut attrs = origin_attr(9);
-    attrs.extend(as_path_attr(&[AS2]));
+    attrs.extend(as_path_attr(&[AS2 as u16]));
     attrs.extend(next_hop_attr(10, 50, 0, 2));
     let body = raw_update_body(&[], &attrs, &[24, 198, 51, 100]);
     let err = BgpUpdateMessage::parse_body(&body).unwrap_err();
@@ -447,7 +447,7 @@ fn test_an_undefined_origin_value_is_rejected() {
 fn test_a_duplicated_attribute_is_rejected() {
     let mut attrs = origin_attr(0);
     attrs.extend(origin_attr(1));
-    attrs.extend(as_path_attr(&[AS2]));
+    attrs.extend(as_path_attr(&[AS2 as u16]));
     attrs.extend(next_hop_attr(10, 50, 0, 2));
     let body = raw_update_body(&[], &attrs, &[24, 198, 51, 100]);
     assert_eq!(
@@ -459,7 +459,7 @@ fn test_a_duplicated_attribute_is_rejected() {
 #[test]
 fn test_an_unknown_well_known_attribute_is_an_error_but_an_unknown_optional_is_ignored() {
     let mut attrs = origin_attr(0);
-    attrs.extend(as_path_attr(&[AS2]));
+    attrs.extend(as_path_attr(&[AS2 as u16]));
     attrs.extend(next_hop_attr(10, 50, 0, 2));
 
     // Type 240 with the optional bit clear: a well-known attribute we do not know.
@@ -596,7 +596,7 @@ fn announce_with_as_path(peer: &mut RawBgpPeer, as_path: AsPath) -> (Option<u8>,
 #[test]
 fn test_an_ebgp_peer_cannot_advertise_an_empty_as_path() {
     let mut peer = RawBgpPeer::connect(AS1, AS2, ip(9, 9, 9, 9));
-    peer.establish();
+    peer.establish_legacy();
 
     // A zero-length AS_PATH is the strongest possible route: it wins the shortest
     // AS_PATH step against every legitimate path, for every prefix at once. Accepting
@@ -612,7 +612,7 @@ fn test_an_ebgp_peer_cannot_advertise_an_empty_as_path() {
 #[test]
 fn test_an_ebgp_peer_cannot_disown_the_leading_as() {
     let mut peer = RawBgpPeer::connect(AS1, AS2, ip(9, 9, 9, 9));
-    peer.establish();
+    peer.establish_legacy();
 
     // The harness speaks for AS65002, so a path claiming to arrive straight from
     // AS65099 is a peer misrepresenting the route it is carrying.
@@ -637,7 +637,7 @@ fn test_an_ebgp_peer_cannot_disown_the_leading_as() {
 #[test]
 fn test_a_path_leading_with_an_as_set_is_refused_on_an_external_session() {
     let mut peer = RawBgpPeer::connect(AS1, AS2, ip(9, 9, 9, 9));
-    peer.establish();
+    peer.establish_legacy();
 
     // An AS_SET in front hides which AS actually handed the route over, so there is
     // nothing to check the neighbour against.
@@ -664,7 +664,7 @@ fn test_turning_off_enforce_first_as_relaxes_the_check_but_not_the_empty_path_ru
     // With the check disabled a third-party leading AS is tolerated, the way an
     // operator peering through a route server needs it to be.
     let mut peer = RawBgpPeer::connect(AS1, AS2, ip(9, 9, 9, 9));
-    peer.establish();
+    peer.establish_legacy();
     let addr = peer.peer;
     peer.lab
         .router_mut("victim")
@@ -681,7 +681,7 @@ fn test_turning_off_enforce_first_as_relaxes_the_check_but_not_the_empty_path_ru
     // The empty path is a different matter: it is refused whatever the knob says,
     // because no configuration makes a zero-length AS_PATH meaningful.
     let mut peer = RawBgpPeer::connect(AS1, AS2, ip(9, 9, 9, 9));
-    peer.establish();
+    peer.establish_legacy();
     let addr = peer.peer;
     peer.lab
         .router_mut("victim")
@@ -702,7 +702,7 @@ fn test_an_internal_peer_is_not_subject_to_the_leading_as_rule() {
     // AS_PATH at all until it leaves - applying the external rule here would break
     // ordinary iBGP.
     let mut peer = RawBgpPeer::connect(AS1, AS1, ip(9, 9, 9, 9));
-    peer.establish();
+    peer.establish_legacy();
 
     let (subcode, held) = announce_with_as_path(&mut peer, AsPath::sequence(vec![65099, AS3]));
     assert_eq!(subcode, None);

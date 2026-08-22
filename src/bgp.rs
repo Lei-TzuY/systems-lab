@@ -3,6 +3,11 @@
 //! Inter-domain path-vector routing protocol over TCP port 179.
 //! Features 19-byte BGP framing, OPEN, UPDATE (AS_PATH / NEXT_HOP), and KEEPALIVE messages.
 
+use crate::bgp_caps::BgpCapabilitySet;
+use crate::bgp_mp::{
+    BGP_ATTR_AS4_PATH, BGP_ATTR_EXT_COMMUNITIES, BGP_ATTR_MP_REACH_NLRI, BGP_ATTR_MP_UNREACH_NLRI,
+    MpReachNlri, MpUnreachNlri,
+};
 use crate::ipv4::Ipv4Address;
 use std::collections::HashMap;
 use std::fmt;
@@ -368,6 +373,11 @@ pub const AS_PATH_MAX_SEGMENT_ASNS: usize = 255;
 pub const BGP_AS_SET: u8 = 1;
 pub const BGP_AS_SEQUENCE: u8 = 2;
 
+/// The reserved ASN a 4-octet speaker puts on the wire where a 2-octet field
+/// cannot hold the real one (RFC 6793 section 4.1). It is a placeholder, never a
+/// routable AS: the true value travels in the Four-Octet AS capability or AS4_PATH.
+pub const AS_TRANS: u16 = 23_456;
+
 // NOTIFICATION error codes (RFC 4271 section 4.5).
 pub const BGP_ERR_MESSAGE_HEADER: u8 = 1;
 pub const BGP_ERR_OPEN_MESSAGE: u8 = 2;
@@ -395,6 +405,9 @@ pub const BGP_SUB_MISSING_WELL_KNOWN_ATTR: u8 = 3;
 pub const BGP_SUB_ATTRIBUTE_FLAGS_ERROR: u8 = 4;
 pub const BGP_SUB_ATTRIBUTE_LENGTH_ERROR: u8 = 5;
 pub const BGP_SUB_INVALID_ORIGIN: u8 = 6;
+/// Optional Attribute Error: an optional attribute the receiver could not
+/// accept, such as MP_REACH_NLRI for a family the session never negotiated.
+pub const BGP_SUB_OPTIONAL_ATTRIBUTE_ERROR: u8 = 9;
 pub const BGP_SUB_INVALID_NEXT_HOP: u8 = 8;
 pub const BGP_SUB_INVALID_NETWORK_FIELD: u8 = 10;
 pub const BGP_SUB_MALFORMED_AS_PATH: u8 = 11;
@@ -551,10 +564,14 @@ pub enum AsPathSegmentKind {
 
 /// One AS_PATH segment. A SET contributes 1 to the path length no matter how many
 /// ASNs it holds, which is what RFC 4271 section 9.1.2.2 requires.
+///
+/// ASNs are held as `u32`. RFC 6793 made 4-octet ASNs the general case and
+/// redefined the classic 2-octet encoding as the compatibility path, so the
+/// in-memory form is the wide one and the *encoding* is what narrows.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AsPathSegment {
     pub kind: AsPathSegmentKind,
-    pub asns: Vec<u16>,
+    pub asns: Vec<u32>,
 }
 
 /// The AS_PATH attribute as a list of segments, with the helpers the decision
@@ -570,7 +587,7 @@ impl AsPath {
     }
 
     /// Builds a single AS_SEQUENCE path, leftmost ASN first.
-    pub fn sequence(asns: Vec<u16>) -> Self {
+    pub fn sequence(asns: Vec<u32>) -> Self {
         if asns.is_empty() {
             return AsPath::default();
         }
@@ -598,13 +615,21 @@ impl AsPath {
         self.segments.iter().all(|s| s.asns.is_empty())
     }
 
-    pub fn contains(&self, asn: u16) -> bool {
+    pub fn contains(&self, asn: u32) -> bool {
         self.segments.iter().any(|s| s.asns.contains(&asn))
+    }
+
+    /// True when any ASN on the path needs more than two octets, which is what
+    /// decides whether the classic encoding can carry it truthfully.
+    pub fn needs_four_octets(&self) -> bool {
+        self.segments
+            .iter()
+            .any(|s| s.asns.iter().any(|a| *a > u16::MAX as u32))
     }
 
     /// Leftmost ASN of the leftmost AS_SEQUENCE: the neighbouring AS that advertised
     /// the route. Used to decide whether two MEDs are comparable.
-    pub fn first_as(&self) -> Option<u16> {
+    pub fn first_as(&self) -> Option<u32> {
         self.segments
             .iter()
             .find(|s| s.kind == AsPathSegmentKind::Sequence)
@@ -617,7 +642,7 @@ impl AsPath {
     /// with the advertising peer's own ASN. [`AsPath::first_as`] deliberately skips a
     /// leading AS_SET to find something MED-comparable; that would be the wrong answer
     /// here, because a path that leads with an AS_SET has no leading AS at all.
-    pub fn leading_as(&self) -> Option<u16> {
+    pub fn leading_as(&self) -> Option<u32> {
         match self.segments.first() {
             Some(seg) if seg.kind == AsPathSegmentKind::Sequence => seg.asns.first().copied(),
             _ => None,
@@ -626,7 +651,7 @@ impl AsPath {
 
     /// Prepends the local ASN, as an eBGP speaker must do before re-advertising.
     /// A leading SEQUENCE is extended; anything else gets a fresh SEQUENCE in front.
-    pub fn prepend(&mut self, asn: u16) {
+    pub fn prepend(&mut self, asn: u32) {
         match self.segments.first_mut() {
             Some(seg) if seg.kind == AsPathSegmentKind::Sequence && seg.asns.len() < 255 => {
                 seg.asns.insert(0, asn);
@@ -642,18 +667,31 @@ impl AsPath {
     }
 
     /// Flattened ASN list, left to right. Convenient for assertions and display.
-    pub fn flatten(&self) -> Vec<u16> {
+    pub fn flatten(&self) -> Vec<u32> {
         self.segments.iter().flat_map(|s| s.asns.clone()).collect()
     }
 
+    /// Encodes the path with the classic two-octet ASN width (RFC 4271).
+    ///
+    /// An ASN that does not fit becomes [`AS_TRANS`], never a truncated value. The
+    /// true path is preserved separately in AS4_PATH, which is exactly the split
+    /// RFC 6793 defines; silently writing `asn as u16` would put a real, different,
+    /// someone else's ASN on the wire.
+    pub fn encode(&self) -> Vec<u8> {
+        self.encode_width(false)
+    }
+
     /// Encodes the path.
+    ///
+    /// `four_octet` selects the ASN width, which on a live session comes from
+    /// whether both ends advertised the Four-Octet AS capability.
     ///
     /// A segment holding more than [`AS_PATH_MAX_SEGMENT_ASNS`] entries is emitted as
     /// several segments of the same kind. Writing the length as a single octet instead
     /// would truncate the count and put an AS_PATH on the wire that no decoder can
     /// read. An empty segment is dropped rather than encoded, because the wire format
     /// gives it no meaning and a decoder is required to reject it.
-    pub fn encode(&self) -> Vec<u8> {
+    pub fn encode_width(&self, four_octet: bool) -> Vec<u8> {
         let mut out = Vec::new();
         for seg in &self.segments {
             let kind = match seg.kind {
@@ -664,14 +702,26 @@ impl AsPath {
                 out.push(kind);
                 out.push(chunk.len() as u8);
                 for asn in chunk {
-                    out.extend_from_slice(&asn.to_be_bytes());
+                    if four_octet {
+                        out.extend_from_slice(&asn.to_be_bytes());
+                    } else {
+                        let narrow = u16::try_from(*asn).unwrap_or(AS_TRANS);
+                        out.extend_from_slice(&narrow.to_be_bytes());
+                    }
                 }
             }
         }
         out
     }
 
+    /// Decodes a two-octet AS_PATH (RFC 4271).
     pub fn decode(data: &[u8]) -> Result<Self, BgpParseError> {
+        Self::decode_width(data, false)
+    }
+
+    /// Decodes an AS_PATH whose ASNs are two or four octets wide.
+    pub fn decode_width(data: &[u8], four_octet: bool) -> Result<Self, BgpParseError> {
+        let width = if four_octet { 4usize } else { 2usize };
         let mut segments = Vec::new();
         let mut i = 0usize;
         while i < data.len() {
@@ -698,7 +748,7 @@ impl AsPath {
                     "empty AS_PATH segment",
                 ));
             }
-            let end = i + 2 + count * 2;
+            let end = i + 2 + count * width;
             if end > data.len() {
                 return Err(BgpParseError::update(
                     BGP_SUB_MALFORMED_AS_PATH,
@@ -707,13 +757,47 @@ impl AsPath {
             }
             let mut asns = Vec::with_capacity(count);
             for k in 0..count {
-                let off = i + 2 + k * 2;
-                asns.push(u16::from_be_bytes([data[off], data[off + 1]]));
+                let off = i + 2 + k * width;
+                asns.push(if four_octet {
+                    u32::from_be_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]])
+                } else {
+                    u16::from_be_bytes([data[off], data[off + 1]]) as u32
+                });
             }
             segments.push(AsPathSegment { kind, asns });
             i = end;
         }
         Ok(AsPath { segments })
+    }
+
+    /// Rebuilds the true path from a narrow AS_PATH and the AS4_PATH that
+    /// accompanied it (RFC 6793 section 4.2.3).
+    ///
+    /// The rule is positional, not a merge: AS4_PATH is the *tail* of the real
+    /// path, so it replaces that many trailing hops of the two-octet path and the
+    /// leading hops - the ones added by AS4-unaware speakers - are kept as they
+    /// are. If AS4_PATH is the longer of the two it is discarded, because it then
+    /// claims hops the AS_PATH never had.
+    pub fn merge_as4_path(&self, as4: &AsPath) -> AsPath {
+        let narrow = self.flatten();
+        let wide = as4.flatten();
+        if wide.is_empty() || wide.len() > narrow.len() {
+            return self.clone();
+        }
+        // Only a plain sequence can be spliced positionally; a path carrying an
+        // AS_SET has no single well-defined hop order to graft onto.
+        if self
+            .segments
+            .iter()
+            .chain(as4.segments.iter())
+            .any(|s| s.kind != AsPathSegmentKind::Sequence)
+        {
+            return self.clone();
+        }
+        let keep = narrow.len() - wide.len();
+        let mut merged: Vec<u32> = narrow[..keep].to_vec();
+        merged.extend_from_slice(&wide);
+        AsPath::sequence(merged)
     }
 }
 
@@ -745,14 +829,29 @@ impl fmt::Display for AsPath {
 }
 
 /// The path attributes attached to the NLRI of one UPDATE.
+///
+/// The RFC 4271 attributes are held as concrete fields; the multiprotocol ones
+/// (RFC 4760) and Extended Communities (RFC 4360) hang off the same struct so a
+/// single UPDATE can carry an IPv4 route, an EVPN route, or a withdrawal of
+/// either without a second message shape.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BgpPathAttributes {
     pub origin: BgpOrigin,
     pub as_path: AsPath,
+    /// The IPv4 NEXT_HOP. Meaningful only for IPv4-unicast NLRI; a family carried
+    /// in MP_REACH_NLRI has its next hop inside that attribute instead, and this
+    /// field is left unspecified.
     pub next_hop: Ipv4Address,
     pub med: Option<u32>,
     pub local_pref: Option<u32>,
     pub atomic_aggregate: bool,
+    /// Extended Communities, which is where an EVPN route carries its Route Targets.
+    pub ext_communities: Vec<[u8; 8]>,
+    pub mp_reach: Option<MpReachNlri>,
+    pub mp_unreach: Option<MpUnreachNlri>,
+    /// True when the AS_PATH on this UPDATE should be written with 4-octet ASNs,
+    /// which is the case exactly when both speakers negotiated the capability.
+    pub four_octet_as: bool,
 }
 
 impl BgpPathAttributes {
@@ -764,22 +863,81 @@ impl BgpPathAttributes {
             med: None,
             local_pref: None,
             atomic_aggregate: false,
+            ext_communities: Vec::new(),
+            mp_reach: None,
+            mp_unreach: None,
+            four_octet_as: false,
         }
     }
 
+    /// The attribute set of an UPDATE that only withdraws multiprotocol NLRI.
+    ///
+    /// RFC 4760 section 3 says such an UPDATE need carry no other path attribute,
+    /// and [`BgpPathAttributes::encode_for`] emits nothing else for it.
+    pub fn mp_withdraw(mp_unreach: MpUnreachNlri) -> Self {
+        let mut attrs =
+            BgpPathAttributes::new(BgpOrigin::Igp, AsPath::empty(), Ipv4Address::UNSPECIFIED);
+        attrs.mp_unreach = Some(mp_unreach);
+        attrs
+    }
+
+    /// True when this attribute set describes nothing but a multiprotocol
+    /// withdrawal, and so must not carry ORIGIN, AS_PATH, or NEXT_HOP.
+    fn is_mp_withdraw_only(&self, has_ipv4_nlri: bool) -> bool {
+        self.mp_unreach.is_some() && self.mp_reach.is_none() && !has_ipv4_nlri
+    }
+
+    /// Encodes for an UPDATE that announces IPv4 NLRI.
     pub fn encode(&self) -> Vec<u8> {
+        self.encode_for(true)
+    }
+
+    /// Encodes the attribute block.
+    ///
+    /// `has_ipv4_nlri` decides two things the attribute set cannot know on its
+    /// own: whether the IPv4 NEXT_HOP belongs on the wire at all, and whether a
+    /// lone MP_UNREACH means "this is a pure withdrawal". Emitting a NEXT_HOP
+    /// beside an EVPN MP_REACH would be a second, contradictory next hop for a
+    /// family that does not use it.
+    pub fn encode_for(&self, has_ipv4_nlri: bool) -> Vec<u8> {
         let mut out = Vec::new();
+
+        if self.is_mp_withdraw_only(has_ipv4_nlri) {
+            if let Some(mp) = &self.mp_unreach {
+                push_attribute(
+                    &mut out,
+                    BGP_ATTR_FLAG_OPTIONAL,
+                    BGP_ATTR_MP_UNREACH_NLRI,
+                    &mp.encode_value(),
+                );
+            }
+            return out;
+        }
 
         out.extend_from_slice(&[BGP_ATTR_FLAG_TRANSITIVE, BGP_ATTR_ORIGIN, 1]);
         out.push(self.origin.to_u8());
 
-        let path = self.as_path.encode();
-        out.extend_from_slice(&[BGP_ATTR_FLAG_TRANSITIVE, BGP_ATTR_AS_PATH]);
-        out.push(path.len() as u8);
-        out.extend_from_slice(&path);
+        let path = self.as_path.encode_width(self.four_octet_as);
+        push_attribute(&mut out, BGP_ATTR_FLAG_TRANSITIVE, BGP_ATTR_AS_PATH, &path);
 
-        out.extend_from_slice(&[BGP_ATTR_FLAG_TRANSITIVE, BGP_ATTR_NEXT_HOP, 4]);
-        out.extend_from_slice(&self.next_hop.0);
+        // A session that did not negotiate 4-octet ASNs gets the classic AS_PATH
+        // with AS_TRANS standing in, plus AS4_PATH carrying the truth. Sending
+        // AS4_PATH only when it is actually needed keeps ordinary 16-bit sessions
+        // byte-for-byte what they were.
+        if !self.four_octet_as && self.as_path.needs_four_octets() {
+            let wide = self.as_path.encode_width(true);
+            push_attribute(
+                &mut out,
+                BGP_ATTR_FLAG_OPTIONAL | BGP_ATTR_FLAG_TRANSITIVE,
+                BGP_ATTR_AS4_PATH,
+                &wide,
+            );
+        }
+
+        if has_ipv4_nlri {
+            out.extend_from_slice(&[BGP_ATTR_FLAG_TRANSITIVE, BGP_ATTR_NEXT_HOP, 4]);
+            out.extend_from_slice(&self.next_hop.0);
+        }
 
         if let Some(med) = self.med {
             out.extend_from_slice(&[BGP_ATTR_FLAG_OPTIONAL, BGP_ATTR_MED, 4]);
@@ -795,8 +953,58 @@ impl BgpPathAttributes {
             out.extend_from_slice(&[BGP_ATTR_FLAG_TRANSITIVE, BGP_ATTR_ATOMIC_AGGREGATE, 0]);
         }
 
+        if !self.ext_communities.is_empty() {
+            let mut value = Vec::with_capacity(self.ext_communities.len() * 8);
+            for comm in &self.ext_communities {
+                value.extend_from_slice(comm);
+            }
+            push_attribute(
+                &mut out,
+                BGP_ATTR_FLAG_OPTIONAL | BGP_ATTR_FLAG_TRANSITIVE,
+                BGP_ATTR_EXT_COMMUNITIES,
+                &value,
+            );
+        }
+
+        if let Some(mp) = &self.mp_reach {
+            push_attribute(
+                &mut out,
+                BGP_ATTR_FLAG_OPTIONAL,
+                BGP_ATTR_MP_REACH_NLRI,
+                &mp.encode_value(),
+            );
+        }
+
+        if let Some(mp) = &self.mp_unreach {
+            push_attribute(
+                &mut out,
+                BGP_ATTR_FLAG_OPTIONAL,
+                BGP_ATTR_MP_UNREACH_NLRI,
+                &mp.encode_value(),
+            );
+        }
+
         out
     }
+}
+
+/// Appends one path attribute, choosing the one- or two-octet length form.
+///
+/// A value of 256 bytes or more - an EVPN UPDATE carrying many routes, or a long
+/// Extended Communities list - does not fit the single length octet, and writing
+/// `len as u8` would silently truncate the attribute and desynchronise the
+/// receiver's parser. The Extended Length flag exists for exactly this case.
+fn push_attribute(out: &mut Vec<u8>, flags: u8, type_code: u8, value: &[u8]) {
+    if value.len() > u8::MAX as usize {
+        out.push(flags | BGP_ATTR_FLAG_EXT_LEN);
+        out.push(type_code);
+        out.extend_from_slice(&(value.len() as u16).to_be_bytes());
+    } else {
+        out.push(flags);
+        out.push(type_code);
+        out.push(value.len() as u8);
+    }
+    out.extend_from_slice(value);
 }
 
 /// A decoded UPDATE: routes being withdrawn, the attributes for the announced
@@ -826,6 +1034,35 @@ impl BgpUpdateMessage {
         }
     }
 
+    /// An UPDATE that announces multiprotocol NLRI: no IPv4 NLRI, the family's
+    /// routes and next hop inside MP_REACH_NLRI.
+    pub fn mp_announce(attributes: BgpPathAttributes) -> Self {
+        BgpUpdateMessage {
+            withdrawn: Vec::new(),
+            attributes: Some(attributes),
+            nlri: Vec::new(),
+        }
+    }
+
+    /// An UPDATE that withdraws multiprotocol NLRI and nothing else.
+    pub fn mp_withdraw(mp_unreach: MpUnreachNlri) -> Self {
+        BgpUpdateMessage {
+            withdrawn: Vec::new(),
+            attributes: Some(BgpPathAttributes::mp_withdraw(mp_unreach)),
+            nlri: Vec::new(),
+        }
+    }
+
+    /// The MP_REACH_NLRI attribute, if this UPDATE carries one.
+    pub fn mp_reach(&self) -> Option<&MpReachNlri> {
+        self.attributes.as_ref().and_then(|a| a.mp_reach.as_ref())
+    }
+
+    /// The MP_UNREACH_NLRI attribute, if this UPDATE carries one.
+    pub fn mp_unreach(&self) -> Option<&MpUnreachNlri> {
+        self.attributes.as_ref().and_then(|a| a.mp_unreach.as_ref())
+    }
+
     pub fn end_of_rib() -> Self {
         BgpUpdateMessage {
             withdrawn: Vec::new(),
@@ -843,8 +1080,13 @@ impl BgpUpdateMessage {
         for p in &self.withdrawn {
             p.encode(&mut withdrawn_bytes);
         }
+        // Attributes belong on the wire whenever they describe something: IPv4
+        // NLRI, or a multiprotocol announcement or withdrawal. An UPDATE that only
+        // withdraws IPv4 prefixes still carries none, as RFC 4271 requires.
         let attr_bytes = match &self.attributes {
-            Some(a) if !self.nlri.is_empty() => a.encode(),
+            Some(a) if !self.nlri.is_empty() || a.mp_reach.is_some() || a.mp_unreach.is_some() => {
+                a.encode_for(!self.nlri.is_empty())
+            }
             _ => Vec::new(),
         };
 
@@ -859,8 +1101,16 @@ impl BgpUpdateMessage {
         body
     }
 
-    /// Decodes an UPDATE body (everything after the 19-byte header).
+    /// Decodes an UPDATE body (everything after the 19-byte header), reading
+    /// AS_PATH with the classic two-octet ASN width.
     pub fn parse_body(body: &[u8]) -> Result<Self, BgpParseError> {
+        Self::parse_body_width(body, false)
+    }
+
+    /// Decodes an UPDATE body. `four_octet_as` must be what the session
+    /// negotiated, because the AS_PATH encoding depends on it and nothing in the
+    /// message itself records which width was used.
+    pub fn parse_body_width(body: &[u8], four_octet_as: bool) -> Result<Self, BgpParseError> {
         if body.len() < 4 {
             return Err(BgpParseError::update(
                 BGP_SUB_MALFORMED_ATTRIBUTE_LIST,
@@ -888,37 +1138,56 @@ impl BgpUpdateMessage {
             ));
         }
 
-        let attributes = Self::parse_attributes(&body[attr_start..attr_end])?;
+        let parsed = Self::parse_attributes(&body[attr_start..attr_end], four_octet_as)?;
         let nlri = Ipv4Prefix::decode_list(&body[attr_end..], BGP_SUB_INVALID_NETWORK_FIELD)?;
 
-        // NLRI without attributes is meaningless: the mandatory ones carry the next hop.
-        if !nlri.is_empty() && attributes.is_none() {
-            return Err(BgpParseError::update(
-                BGP_SUB_MISSING_WELL_KNOWN_ATTR,
-                "UPDATE announces NLRI without the mandatory path attributes",
-            ));
-        }
+        // Which attributes are mandatory depends on what the UPDATE actually says.
+        //
+        //  * IPv4 NLRI needs ORIGIN, AS_PATH and NEXT_HOP (RFC 4271 section 5).
+        //  * MP_REACH_NLRI needs ORIGIN and AS_PATH, but not NEXT_HOP: the family
+        //    carries its own inside the attribute (RFC 4760 section 3).
+        //  * A pure withdrawal, IPv4 or multiprotocol, needs none of them.
+        let announces_mp = parsed.mp_reach.is_some();
+        let describes_routes = !nlri.is_empty() || announces_mp || parsed.mp_unreach.is_some();
+
+        let attributes = if describes_routes {
+            Some(parsed.into_attributes(!nlri.is_empty(), announces_mp)?)
+        } else {
+            None
+        };
 
         Ok(BgpUpdateMessage {
             withdrawn,
-            attributes: if nlri.is_empty() { None } else { attributes },
+            attributes,
             nlri,
         })
     }
 
-    /// Decodes the path attribute block, enforcing flags, lengths, and the presence
-    /// of the well-known mandatory attributes.
-    fn parse_attributes(data: &[u8]) -> Result<Option<BgpPathAttributes>, BgpParseError> {
+    /// Decodes the path attribute block, enforcing flags and lengths.
+    ///
+    /// Which attributes are *required* is not decided here: that depends on what
+    /// the UPDATE announces, which the caller knows and this does not.
+    fn parse_attributes(
+        data: &[u8],
+        four_octet_as: bool,
+    ) -> Result<ParsedAttributes, BgpParseError> {
+        let mut parsed = ParsedAttributes::default();
         if data.is_empty() {
-            return Ok(None);
+            return Ok(parsed);
         }
 
-        let mut origin: Option<BgpOrigin> = None;
-        let mut as_path: Option<AsPath> = None;
-        let mut next_hop: Option<Ipv4Address> = None;
-        let mut med: Option<u32> = None;
-        let mut local_pref: Option<u32> = None;
-        let mut atomic_aggregate = false;
+        let ParsedAttributes {
+            ref mut origin,
+            ref mut as_path,
+            ref mut as4_path,
+            ref mut next_hop,
+            ref mut med,
+            ref mut local_pref,
+            ref mut atomic_aggregate,
+            ref mut ext_communities,
+            ref mut mp_reach,
+            ref mut mp_unreach,
+        } = parsed;
         let mut seen: Vec<u8> = Vec::new();
 
         let mut i = 0usize;
@@ -987,7 +1256,7 @@ impl BgpUpdateMessage {
                             "ORIGIN must be exactly one byte",
                         ));
                     }
-                    origin = Some(BgpOrigin::from_u8(value[0]).ok_or_else(|| {
+                    *origin = Some(BgpOrigin::from_u8(value[0]).ok_or_else(|| {
                         BgpParseError::update(
                             BGP_SUB_INVALID_ORIGIN,
                             format!("undefined ORIGIN value {}", value[0]),
@@ -1001,7 +1270,20 @@ impl BgpUpdateMessage {
                             "AS_PATH marked optional",
                         ));
                     }
-                    as_path = Some(AsPath::decode(value)?);
+                    // The bytes alone do not say how wide the ASNs are: a two-ASN
+                    // 4-octet segment and a four-ASN 2-octet one are the same
+                    // length and both decode. Only the session knows, because it
+                    // negotiated it, so the width is passed in rather than guessed.
+                    *as_path = Some(AsPath::decode_width(value, four_octet_as)?);
+                }
+                BGP_ATTR_AS4_PATH => {
+                    if !optional {
+                        return Err(BgpParseError::update(
+                            BGP_SUB_ATTRIBUTE_FLAGS_ERROR,
+                            "AS4_PATH must be marked optional",
+                        ));
+                    }
+                    *as4_path = Some(AsPath::decode_width(value, true)?);
                 }
                 BGP_ATTR_NEXT_HOP => {
                     if optional {
@@ -1016,7 +1298,7 @@ impl BgpUpdateMessage {
                             "NEXT_HOP must be exactly four bytes",
                         ));
                     }
-                    next_hop = Some(Ipv4Address([value[0], value[1], value[2], value[3]]));
+                    *next_hop = Some(Ipv4Address([value[0], value[1], value[2], value[3]]));
                 }
                 BGP_ATTR_MED => {
                     if value.len() != 4 {
@@ -1025,7 +1307,7 @@ impl BgpUpdateMessage {
                             "MULTI_EXIT_DISC must be exactly four bytes",
                         ));
                     }
-                    med = Some(u32::from_be_bytes([value[0], value[1], value[2], value[3]]));
+                    *med = Some(u32::from_be_bytes([value[0], value[1], value[2], value[3]]));
                 }
                 BGP_ATTR_LOCAL_PREF => {
                     if value.len() != 4 {
@@ -1034,7 +1316,8 @@ impl BgpUpdateMessage {
                             "LOCAL_PREF must be exactly four bytes",
                         ));
                     }
-                    local_pref = Some(u32::from_be_bytes([value[0], value[1], value[2], value[3]]));
+                    *local_pref =
+                        Some(u32::from_be_bytes([value[0], value[1], value[2], value[3]]));
                 }
                 BGP_ATTR_ATOMIC_AGGREGATE => {
                     if !value.is_empty() {
@@ -1043,7 +1326,44 @@ impl BgpUpdateMessage {
                             "ATOMIC_AGGREGATE must be empty",
                         ));
                     }
-                    atomic_aggregate = true;
+                    *atomic_aggregate = true;
+                }
+                BGP_ATTR_EXT_COMMUNITIES => {
+                    // Every extended community is exactly eight bytes; a length
+                    // that is not a multiple of eight means the list is truncated
+                    // and the Route Targets in it cannot be trusted.
+                    if value.is_empty() || !value.len().is_multiple_of(8) {
+                        return Err(BgpParseError::update(
+                            BGP_SUB_ATTRIBUTE_LENGTH_ERROR,
+                            format!(
+                                "EXTENDED_COMMUNITIES is {} bytes, must be a non-zero multiple of 8",
+                                value.len()
+                            ),
+                        ));
+                    }
+                    for chunk in value.chunks_exact(8) {
+                        let mut comm = [0u8; 8];
+                        comm.copy_from_slice(chunk);
+                        ext_communities.push(comm);
+                    }
+                }
+                BGP_ATTR_MP_REACH_NLRI => {
+                    if !optional {
+                        return Err(BgpParseError::update(
+                            BGP_SUB_ATTRIBUTE_FLAGS_ERROR,
+                            "MP_REACH_NLRI must be marked optional",
+                        ));
+                    }
+                    *mp_reach = Some(MpReachNlri::parse_value(value)?);
+                }
+                BGP_ATTR_MP_UNREACH_NLRI => {
+                    if !optional {
+                        return Err(BgpParseError::update(
+                            BGP_SUB_ATTRIBUTE_FLAGS_ERROR,
+                            "MP_UNREACH_NLRI must be marked optional",
+                        ));
+                    }
+                    *mp_unreach = Some(MpUnreachNlri::parse_value(value)?);
                 }
                 other => {
                     // Unknown optional attributes are ignored, exactly as RFC 4271
@@ -1060,24 +1380,80 @@ impl BgpUpdateMessage {
             i = val_end;
         }
 
-        let origin = origin.ok_or_else(|| {
-            BgpParseError::update(BGP_SUB_MISSING_WELL_KNOWN_ATTR, "UPDATE has no ORIGIN")
-        })?;
-        let as_path = as_path.ok_or_else(|| {
-            BgpParseError::update(BGP_SUB_MISSING_WELL_KNOWN_ATTR, "UPDATE has no AS_PATH")
-        })?;
-        let next_hop = next_hop.ok_or_else(|| {
-            BgpParseError::update(BGP_SUB_MISSING_WELL_KNOWN_ATTR, "UPDATE has no NEXT_HOP")
-        })?;
+        Ok(parsed)
+    }
+}
 
-        Ok(Some(BgpPathAttributes {
+/// The path attributes of one UPDATE, before it is known which of them the
+/// message was required to carry.
+#[derive(Debug, Clone, Default)]
+struct ParsedAttributes {
+    origin: Option<BgpOrigin>,
+    as_path: Option<AsPath>,
+    as4_path: Option<AsPath>,
+    next_hop: Option<Ipv4Address>,
+    med: Option<u32>,
+    local_pref: Option<u32>,
+    atomic_aggregate: bool,
+    ext_communities: Vec<[u8; 8]>,
+    mp_reach: Option<MpReachNlri>,
+    mp_unreach: Option<MpUnreachNlri>,
+}
+
+impl ParsedAttributes {
+    /// Enforces the mandatory attributes for what this UPDATE actually announces,
+    /// then folds AS4_PATH into AS_PATH.
+    fn into_attributes(
+        self,
+        has_ipv4_nlri: bool,
+        announces_mp: bool,
+    ) -> Result<BgpPathAttributes, BgpParseError> {
+        let missing = |what: &str| {
+            BgpParseError::update(
+                BGP_SUB_MISSING_WELL_KNOWN_ATTR,
+                format!("UPDATE has no {}", what),
+            )
+        };
+
+        // A pure multiprotocol withdrawal is allowed to carry nothing at all
+        // (RFC 4760 section 3), so the well-known attributes are only demanded
+        // when the UPDATE announces something.
+        let announces = has_ipv4_nlri || announces_mp;
+        let origin = match self.origin {
+            Some(o) => o,
+            None if !announces => BgpOrigin::Igp,
+            None => return Err(missing("ORIGIN")),
+        };
+        let as_path = match self.as_path {
+            Some(p) => p,
+            None if !announces => AsPath::empty(),
+            None => return Err(missing("AS_PATH")),
+        };
+        // NEXT_HOP is mandatory only for IPv4 NLRI. A family carried in
+        // MP_REACH_NLRI has its own next hop in that attribute.
+        let next_hop = match self.next_hop {
+            Some(nh) => nh,
+            None if !has_ipv4_nlri => Ipv4Address::UNSPECIFIED,
+            None => return Err(missing("NEXT_HOP")),
+        };
+
+        let as_path = match &self.as4_path {
+            Some(as4) => as_path.merge_as4_path(as4),
+            None => as_path,
+        };
+
+        Ok(BgpPathAttributes {
             origin,
             as_path,
             next_hop,
-            med,
-            local_pref,
-            atomic_aggregate,
-        }))
+            med: self.med,
+            local_pref: self.local_pref,
+            atomic_aggregate: self.atomic_aggregate,
+            ext_communities: self.ext_communities,
+            mp_reach: self.mp_reach,
+            mp_unreach: self.mp_unreach,
+            four_octet_as: false,
+        })
     }
 }
 
@@ -1092,14 +1468,55 @@ pub struct BgpOpenMessage {
 }
 
 impl BgpOpenMessage {
-    pub fn new(my_as: u16, hold_time: u16, bgp_id: Ipv4Address) -> Self {
+    /// An OPEN with no optional parameters: a plain RFC 4271 speaker.
+    ///
+    /// `my_as` is a `u32` like every other ASN in this crate. Without the
+    /// Four-Octet AS capability there is nowhere to put a value above 65535, so
+    /// one becomes [`AS_TRANS`] - which is what a legacy speaker would see on the
+    /// wire anyway, and is never a silent truncation to a different real AS.
+    pub fn new(my_as: u32, hold_time: u16, bgp_id: Ipv4Address) -> Self {
         BgpOpenMessage {
             version: BGP_VERSION,
-            my_as,
+            my_as: u16::try_from(my_as).unwrap_or(AS_TRANS),
             hold_time,
             bgp_id,
             opt_params: Vec::new(),
         }
+    }
+
+    /// Builds an OPEN for a speaker with a 32-bit ASN and a capability set.
+    ///
+    /// The two-octet `My Autonomous System` field cannot hold an ASN above 65535,
+    /// so RFC 6793 puts [`AS_TRANS`] there and the real value in the Four-Octet AS
+    /// capability. Truncating instead would name a different, real AS.
+    pub fn with_capabilities(
+        my_as: u32,
+        hold_time: u16,
+        bgp_id: Ipv4Address,
+        capabilities: &BgpCapabilitySet,
+    ) -> Self {
+        BgpOpenMessage {
+            version: BGP_VERSION,
+            my_as: u16::try_from(my_as).unwrap_or(AS_TRANS),
+            hold_time,
+            bgp_id,
+            opt_params: capabilities.encode_opt_params(),
+        }
+    }
+
+    /// The capabilities this OPEN advertises.
+    pub fn capabilities(&self) -> Result<BgpCapabilitySet, BgpParseError> {
+        BgpCapabilitySet::parse_opt_params(&self.opt_params)
+    }
+
+    /// The ASN this OPEN really claims.
+    ///
+    /// The Four-Octet AS capability wins when present, because the two-octet field
+    /// may only be carrying [`AS_TRANS`]. A capability that disagrees with a
+    /// perfectly representable `my_as` is a contradiction, and the wider field is
+    /// treated as authoritative so a 4-octet peer is never misread as AS 23456.
+    pub fn effective_as(&self, capabilities: &BgpCapabilitySet) -> u32 {
+        capabilities.four_octet_as().unwrap_or(self.my_as as u32)
     }
 
     fn encode_body(&self) -> Vec<u8> {
@@ -1220,10 +1637,19 @@ impl BgpPdu {
     /// Decodes one complete framed message. `frame` must be exactly one message as
     /// produced by `BgpFramer`; trailing bytes are rejected rather than ignored.
     pub fn parse(frame: &[u8]) -> Result<Self, BgpParseError> {
+        Self::parse_width(frame, false)
+    }
+
+    /// Decodes one complete framed message, reading AS_PATH with the ASN width
+    /// the session negotiated.
+    pub fn parse_width(frame: &[u8], four_octet_as: bool) -> Result<Self, BgpParseError> {
         let (msg_type, body) = parse_bgp_header(frame)?;
         match msg_type {
             BGP_MSG_OPEN => Ok(BgpPdu::Open(BgpOpenMessage::parse_body(body)?)),
-            BGP_MSG_UPDATE => Ok(BgpPdu::Update(BgpUpdateMessage::parse_body(body)?)),
+            BGP_MSG_UPDATE => Ok(BgpPdu::Update(BgpUpdateMessage::parse_body_width(
+                body,
+                four_octet_as,
+            )?)),
             BGP_MSG_NOTIFICATION => {
                 if body.len() < 2 {
                     return Err(BgpParseError::header(
@@ -1540,7 +1966,7 @@ mod tests {
         // The segment count is one octet. Writing 300 as a u8 would put 44 on the
         // wire and leave the remaining ASNs to be read as segment headers, producing
         // a stream no decoder can follow.
-        let asns: Vec<u16> = (0..300u16).map(|i| 1_000u16 + i).collect();
+        let asns: Vec<u32> = (0..300u32).map(|i| 1_000u32 + i).collect();
         let encoded = AsPath::sequence(asns.clone()).encode();
         let decoded = AsPath::decode(&encoded).expect("a 300-ASN path must survive encoding");
 
