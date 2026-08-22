@@ -60,7 +60,7 @@ A complete educational dual-stack IPv4/IPv6 network protocol stack built from sc
 | **Advanced Routing** | **Cisco EIGRP & DUAL (RFC 7868)** | IP Protocol 88 over Multicast `224.0.0.10`, 20-byte EIGRP header, composite metric formula ($256 \times (10^7/\text{BW} + \text{Delay})$), Feasibility Condition ($RD < FD$), Successor & Feasible Successor loop-free backup path. |
 | **Dynamic Routing** | **RIPv2 (RFC 2453)** | Distance-Vector dynamic routing protocol over UDP 520, Bellman-Ford algorithm with Split Horizon & Poison Reverse, metric calculations (1..16). |
 | **Inter-Domain Route**| **BGP-4 (RFC 4271)** | Packet-driven BGP speaker running over this stack's own TCP sockets on port 179: full Idle/Connect/Active/OpenSent/OpenConfirm/Established FSM, OPEN negotiation, ConnectRetry / Hold / Keepalive timers, stream reassembly, Adj-RIB-In / Loc-RIB / Adj-RIB-Out, best-path selection, and installation into the real IPv4 forwarding table. |
-| **BGP EVPN Fabric** | **BGP EVPN (RFC 7432 / RFC 8365)** | BGP L2VPN EVPN (AFI 25, SAFI 70), Route Type 2 (MAC/IP Advertisement) & Route Type 3 (Inclusive Multicast), `EvpnMacTable` control-plane forwarding. |
+| **BGP EVPN Fabric** | **MP-BGP EVPN (RFC 4760 / 5492 / 6793 / 7432 / 8365)** | Packet-driven MP-BGP EVPN on the same TCP session as IPv4 unicast: OPEN capability negotiation (Multiprotocol, Four-Octet AS), 32-bit ASNs with `AS_TRANS` / `AS4_PATH`, `MP_REACH_NLRI` / `MP_UNREACH_NLRI` carrying Route Type 2 and Type 3 NLRI, Route Target import, EVPN Adj-RIB-In / Loc-RIB / Adj-RIB-Out, MAC mobility, and a VTEP whose VXLAN forwarding is programmed only from the EVPN Loc-RIB. |
 | **Fragmentation (L3)** | **IP Fragmenter & Reassembler** | Splits $> \text{MTU}$ packets into 8-byte aligned slices with `MF` flags; reassembles out-of-order fragment streams. |
 | **Control (L3.5)** | **ICMP (RFC 792)** | Type 8 (Echo Request / Ping) and Type 0 (Echo Reply), identifier & sequence number tracking, payload preservation. |
 | **Control (L3.5)** | **ICMPv6 & NDP (RFC 4443, 4861)** | ICMPv6 Echo Request/Reply (`ping6`), Neighbor Solicitation (NS) / Neighbor Advertisement (NA), dynamic in-memory `NdpTable` (Neighbor Cache). |
@@ -162,6 +162,10 @@ TCP-IP Stack/
 │   ├── bgp.rs             # Layer 3/4: BGP-4 wire format, path attributes & TCP stream framer (RFC 4271)
 │   ├── bgp_rib.rs         # Layer 3: BGP Adj-RIB-In / Loc-RIB / Adj-RIB-Out, decision process & route policy
 │   ├── bgp_router.rs      # Layer 3: BGP-4 speaker - FSM, timers, sockets on port 179, FIB installation
+│   ├── bgp_caps.rs        # Layer 3: BGP OPEN capability framework & AFI/SAFI negotiation (RFC 5492)
+│   ├── bgp_mp.rs          # Layer 3: MP_REACH_NLRI / MP_UNREACH_NLRI multiprotocol attributes (RFC 4760)
+│   ├── bgp_evpn.rs        # Datacenter Fabric: Route Targets, EVPN RIBs & EVPN decision process (RFC 7432)
+│   ├── evpn_vtep.rs       # Datacenter Fabric: VTEP, EVPN instances & VXLAN forwarding state (RFC 8365)
 │   ├── evpn.rs            # Datacenter Fabric: BGP EVPN Type 2/3 Control Plane (RFC 7432)
 │   ├── tunnel.rs          # Layer 3: GRE (RFC 2784) & IP-in-IP (RFC 2003) Tunneling
 │   ├── igmp.rs            # Layer 3.5: IGMPv2 (RFC 2236) & Multicast MAC (RFC 1112)
@@ -418,6 +422,11 @@ TCP-IP Stack/
 │   ├── test_bgp_control_plane.rs # BGP-4 UPDATE, RIBs, AS_PATH, withdrawal, FIB & data-plane tests
 │   ├── test_bgp_failover.rs # BGP-4 best path, MED, iBGP, route policy & failover tests
 │   ├── test_bgp_malformed.rs # BGP-4 hostile and malformed input tests
+│   ├── test_bgp_capabilities.rs # OPEN capabilities, AFI/SAFI negotiation & 4-octet ASN tests
+│   ├── test_evpn_vxlan.rs   # MP-BGP EVPN → VXLAN acceptance chain, end to end, plus PCAP proof
+│   ├── test_evpn_failover.rs # EVPN withdrawal, session loss & MAC mobility tests
+│   ├── test_evpn_isolation.rs # Two tenants on one session: Route Target isolation tests
+│   ├── test_evpn_malformed.rs # Hostile MP-BGP and EVPN input tests
 │   ├── test_tunnel.rs     # GRE and IP-in-IP tunneling tests
 │   ├── test_igmp.rs       # IGMPv2 and Multicast MAC mapping tests
 │   ├── test_fragment.rs   # IPv4 fragmentation & reassembly tests
@@ -624,6 +633,160 @@ netstack > bgp events       # the control-plane event log
 
 ---
 
+## 🧬 MP-BGP EVPN / VXLAN Overlay
+
+The BGP speaker also carries `AFI 25 / SAFI 70`, and what it learns there programs the
+VXLAN data plane. A remote MAC becomes forwardable because an EVPN route said so — never
+because a tunnel destination was configured, and never because a frame was flooded and the
+source address remembered:
+
+```text
+local host sends a frame
+    ↓  access port learning                 (src/evpn_vtep.rs)
+EVPN Type 2 route originated
+    ↓  MP_REACH_NLRI, AFI 25 / SAFI 70      (src/bgp_mp.rs)
+MP-BGP UPDATE
+    ↓  the same TCP session on port 179     (src/bgp_router.rs → src/socket.rs)
+remote EVPN Adj-RIB-In
+    ↓  Route Target import                  (src/bgp_evpn.rs)
+EVPN Loc-RIB
+    ↓  (VNI, MAC) → remote VTEP             (src/evpn_vtep.rs)
+VXLAN encapsulation on UDP 4789             (src/vxlan.rs)
+    ↓
+IPv4 underlay → remote VTEP → decapsulation → tenant host
+```
+
+### Modules
+
+| File | Role |
+|---|---|
+| `src/bgp_caps.rs` | RFC 5492 capability framework: `AfiSafi`, Multiprotocol and Four-Octet AS capabilities, and the negotiation that decides what a session may carry. |
+| `src/bgp_mp.rs` | RFC 4760 `MP_REACH_NLRI` and `MP_UNREACH_NLRI`. The NLRI payload stays opaque here; what the bytes mean belongs to the family that owns them. |
+| `src/bgp_evpn.rs` | `RouteTarget`, `EvpnRouteKey`, `EvpnRoute`, the EVPN RIBs, the EVPN decision process, and the NLRI list codec. |
+| `src/evpn_vtep.rs` | `Vtep` and `EvpnInstance`: local MAC learning, origination, and the overlay forwarding table the data plane reads. |
+| `src/evpn.rs` | The EVPN NLRI wire format (Route Types 2 and 3) and the Route Distinguisher. |
+| `src/vxlan.rs` | VXLAN header and encapsulation on UDP 4789. |
+
+### Capability negotiation
+
+Both OPENs are intersected into a negotiated family set, and that set gates everything
+else. A speaker that sent no Multiprotocol capability is a legacy RFC 4271 speaker and
+negotiates IPv4 unicast alone, so an ordinary session is unaffected by any of this:
+
+```text
+netstack > bgp capabilities
+  advertised: Multiprotocol IPv4 Unicast (AFI 1/SAFI 1), Multiprotocol L2VPN EVPN (AFI 25/SAFI 70), Four-Octet AS 65001
+  neighbor 10.0.0.2 (Established)
+    peer offered : Multiprotocol IPv4 Unicast, Multiprotocol L2VPN EVPN, Four-Octet AS 65002
+    negotiated   : IPv4 Unicast (AFI 1/SAFI 1), L2VPN EVPN (AFI 25/SAFI 70)
+```
+
+A peer that did not negotiate EVPN is never sent an EVPN route, and one that sends EVPN
+NLRI anyway is answered with a NOTIFICATION rather than having its routes quietly stored.
+
+### 4-octet autonomous system numbers
+
+`AsPath` holds `u32`, and the encoding width comes from the negotiation rather than being
+fixed. Where a two-octet field cannot hold the value it carries `AS_TRANS` and the true
+value travels in the Four-Octet AS capability or `AS4_PATH` (RFC 6793) — never a truncation
+to a different real AS. The width is passed into the parser rather than guessed, because
+the bytes genuinely do not say: a two-ASN wide segment and a four-ASN narrow one are the
+same length and both decode.
+
+### Route Targets and tenant isolation
+
+Import is a filter *on the way in*. A route whose Extended Communities carry no Route
+Target this speaker imports never reaches the Loc-RIB, so it cannot program anything:
+
+```text
+VNI 5001   RD 10.0.0.1:5001   import RT 65001:5001   export RT 65001:5001
+VNI 5002   RD 10.0.0.2:5002   import RT 65001:5002   export RT 65001:5002
+```
+
+An instance accepts a route only when an import RT matches **and** the route's VNI is that
+instance's VNI. The two conditions are independent — the RT says which tenant asked for the
+route, the VNI says which broadcast domain the sender put it in — and requiring both stops
+a neighbour using a valid Route Target to inject a MAC into a tenant it has no business
+reaching.
+
+### Forwarding
+
+| Destination | What happens |
+|---|---|
+| A MAC with a Type 2 route | VXLAN unicast to exactly that VTEP. |
+| A MAC on another local access port | Bridged locally; nothing is encapsulated. |
+| A MAC on the port it arrived from | Dropped: the segment already delivered it. |
+| Broadcast, multicast, or an unknown MAC | Ingress replication to the VTEPs that advertised a Type 3 route, and to nobody else. |
+| Anything, with no Type 3 route yet | Dropped. There is nowhere to send it. |
+
+Decapsulation deliberately learns nothing from the inner frame. Data-plane learning would
+reintroduce the flood-and-learn behaviour EVPN exists to replace, and would install
+forwarding state that no withdrawal could remove.
+
+### Withdrawal, session loss, and mobility
+
+Remote forwarding state is a pure function of the EVPN Loc-RIB: the tables are rebuilt on
+every programming pass rather than patched. A withdrawn route, a dead session, and a host
+that moved are therefore the same operation — the input set changed — and none of them can
+leave an entry behind.
+
+MAC mobility is ordered by the sequence number, compared *ahead* of every ordinary BGP
+attribute (RFC 7432 section 15). Running the normal tie-break chain first would let a
+detail such as a lower peer address pin traffic to the location a host has left. A MAC that
+moves more than `MAX_MAC_MOVES` times is declared duplicate and left alone, so two VTEPs
+that both genuinely hold it stop bidding the sequence number up against each other.
+
+### The leaf-spine-leaf fabric
+
+`build_evpn_fabric` gives each leaf a loopback VTEP address and peers the leaves loopback
+to loopback, so the TCP session carrying the EVPN routes is itself multihop traffic the
+spine forwards:
+
+```text
+ host_a 192.168.10.11                       host_b 192.168.10.22
+ 02:00:00:00:0a:0a                          02:00:00:00:0b:0b
+        │ tenant1                                   │ tenant2
+      leaf1  VTEP 10.0.0.1                        leaf2  VTEP 10.0.0.2
+        └── 10.1.0.1/30 ─── spine ─── 10.2.0.2/30 ──┘
+                       (IP underlay only)
+```
+
+The spine runs no BGP and knows no VNI. Neither leaf is configured with a remote MAC, a
+remote VTEP, or a tunnel destination; both tenant hosts sit in one `/24` with no gateway, so
+every packet between them has to cross the overlay for that to be true.
+
+### Hardening
+
+MP-BGP nests three length-delimited structures — a path attribute, an MP attribute inside
+it, and the EVPN NLRI inside that — so every length is checked against what actually
+remains before it is used. `tests/test_evpn_malformed.rs` covers malformed capability
+blocks, lying `MP_REACH` and `MP_UNREACH` lengths, EVPN NLRI truncated at every possible
+byte, MAC and IP length fields that do not match the body, Extended Communities lists that
+are not a multiple of eight bytes, duplicate attributes, unusable next hops, and EVPN NLRI
+on a session that never negotiated the family. The EVPN Adj-RIB-In and the per-instance MAC
+tables are both bounded.
+
+Two defects in the pre-existing EVPN NLRI parser were fixed in the process: a MAC/IP route
+claiming a 32-bit host IP inside a body too short to hold one indexed past the end, and the
+MAC and IP length fields were read and then ignored, so a route with a non-48-bit MAC was
+decoded as if it had said 48.
+
+### Shell diagnostics
+
+```text
+netstack > evpn mac          # (VNI, MAC) → location, sequence number, and how it was learned
+netstack > evpn routes       # the EVPN Loc-RIB: type, RD, MAC, host IP, VNI, VTEP, RTs
+netstack > evpn adj-rib-in   # every EVPN route received, before best-path selection
+netstack > evpn advertised   # the EVPN Adj-RIB-Out, per neighbor
+netstack > evpn vni          # one row per instance: RD, import and export RTs, MAC counts
+netstack > bgp capabilities  # what each speaker offers and what each session agreed
+netstack > bgp evpn summary  # sessions, negotiated families, EVPN route counts
+netstack > vxlan vtep        # VTEP source, underlay interface, instances, flood lists
+netstack > vxlan vni         # the per-VNI table
+```
+
+---
+
 ## 🔌 Application Socket Runtime & Reliable TCP
 
 The stack is usable by ordinary applications. An application talks to sockets; the runtime
@@ -738,7 +901,16 @@ cargo test --test test_bgp_failover       # best path, MED, iBGP rules, policy, 
 cargo test --test test_bgp_malformed      # hostile and malformed input
 ```
 
-### 5. Launch the Dual-Stack Interactive Shell (REPL)
+### 5. Run the MP-BGP EVPN / VXLAN Overlay Suites
+```bash
+cargo test --test test_bgp_capabilities   # OPEN capabilities, AFI/SAFI negotiation, 4-octet ASNs
+cargo test --test test_evpn_vxlan         # the acceptance chain, end to end, plus the PCAP proof
+cargo test --test test_evpn_failover      # withdrawal, session loss, MAC mobility
+cargo test --test test_evpn_isolation     # two tenants, Route Target isolation
+cargo test --test test_evpn_malformed     # hostile MP-BGP and EVPN input
+```
+
+### 6. Launch the Dual-Stack Interactive Shell (REPL)
 ```bash
 cargo run -- shell
 ```
@@ -768,6 +940,13 @@ netstack > lab pcap lab_capture.pcap
 netstack > bgp summary
 netstack > bgp routes
 netstack > bgp route
+netstack > bgp capabilities
+netstack > bgp evpn summary
+netstack > evpn mac
+netstack > evpn routes
+netstack > evpn vni
+netstack > vxlan vtep
+netstack > vxlan vni
 netstack > status
 netstack > exit
 ```
