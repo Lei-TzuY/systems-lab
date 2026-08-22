@@ -61,6 +61,7 @@ A complete educational dual-stack IPv4/IPv6 network protocol stack built from sc
 | **Dynamic Routing** | **RIPv2 (RFC 2453)** | Distance-Vector dynamic routing protocol over UDP 520, Bellman-Ford algorithm with Split Horizon & Poison Reverse, metric calculations (1..16). |
 | **Inter-Domain Route**| **BGP-4 (RFC 4271)** | Packet-driven BGP speaker running over this stack's own TCP sockets on port 179: full Idle/Connect/Active/OpenSent/OpenConfirm/Established FSM, OPEN negotiation, ConnectRetry / Hold / Keepalive timers, stream reassembly, Adj-RIB-In / Loc-RIB / Adj-RIB-Out, best-path selection, and installation into the real IPv4 forwarding table. |
 | **BGP EVPN Fabric** | **MP-BGP EVPN (RFC 4760 / 5492 / 6793 / 7432 / 8365)** | Packet-driven MP-BGP EVPN on the same TCP session as IPv4 unicast: OPEN capability negotiation (Multiprotocol, Four-Octet AS), 32-bit ASNs with `AS_TRANS` / `AS4_PATH`, `MP_REACH_NLRI` / `MP_UNREACH_NLRI` carrying Route Type 2 and Type 3 NLRI, Route Target import, EVPN Adj-RIB-In / Loc-RIB / Adj-RIB-Out, MAC mobility, and a VTEP whose VXLAN forwarding is programmed only from the EVPN Loc-RIB. |
+| **Route Reflection** | **BGP Route Reflection (RFC 4456)** | Configured client / non-client peer roles, cluster identity, `ORIGINATOR_ID` and `CLUSTER_LIST` with strict parsing and loop detection, and one reflection engine shared by IPv4 unicast and EVPN. An EVPN route reflector needs no VNI, no `EvpnInstance` and no tenant Route Target, yet retains and reflects the fabric; dual-reflector redundancy, RFC 4271 section 6.8 connection collision resolution, and the RFC 4456 section 9 shortest-`CLUSTER_LIST` tie-break that keeps a reflector pair from oscillating. |
 | **Fragmentation (L3)** | **IP Fragmenter & Reassembler** | Splits $> \text{MTU}$ packets into 8-byte aligned slices with `MF` flags; reassembles out-of-order fragment streams. |
 | **Control (L3.5)** | **ICMP (RFC 792)** | Type 8 (Echo Request / Ping) and Type 0 (Echo Reply), identifier & sequence number tracking, payload preservation. |
 | **Control (L3.5)** | **ICMPv6 & NDP (RFC 4443, 4861)** | ICMPv6 Echo Request/Reply (`ping6`), Neighbor Solicitation (NS) / Neighbor Advertisement (NA), dynamic in-memory `NdpTable` (Neighbor Cache). |
@@ -161,7 +162,8 @@ TCP-IP Stack/
 │   ├── rip.rs             # Layer 3: Routing Information Protocol v2 (RFC 2453)
 │   ├── bgp.rs             # Layer 3/4: BGP-4 wire format, path attributes & TCP stream framer (RFC 4271)
 │   ├── bgp_rib.rs         # Layer 3: BGP Adj-RIB-In / Loc-RIB / Adj-RIB-Out, decision process & route policy
-│   ├── bgp_router.rs      # Layer 3: BGP-4 speaker - FSM, timers, sockets on port 179, FIB installation
+│   ├── bgp_router.rs      # Layer 3: BGP-4 speaker - FSM, timers, sockets on port 179, FIB installation,
+│   │                      #          RFC 4456 route reflection & RFC 4271 6.8 collision resolution
 │   ├── bgp_caps.rs        # Layer 3: BGP OPEN capability framework & AFI/SAFI negotiation (RFC 5492)
 │   ├── bgp_mp.rs          # Layer 3: MP_REACH_NLRI / MP_UNREACH_NLRI multiprotocol attributes (RFC 4760)
 │   ├── bgp_evpn.rs        # Datacenter Fabric: Route Targets, EVPN RIBs & EVPN decision process (RFC 7432)
@@ -422,6 +424,10 @@ TCP-IP Stack/
 │   ├── test_bgp_control_plane.rs # BGP-4 UPDATE, RIBs, AS_PATH, withdrawal, FIB & data-plane tests
 │   ├── test_bgp_failover.rs # BGP-4 best path, MED, iBGP, route policy & failover tests
 │   ├── test_bgp_malformed.rs # BGP-4 hostile and malformed input tests
+│   ├── test_bgp_route_reflector.rs  # RFC 4456 client/non-client rules, metadata, collisions
+│   ├── test_evpn_route_reflector.rs # EVPN through a reflector with no VNI, plus the PCAP proof
+│   ├── test_evpn_rr_failover.rs     # dual-RR redundancy, loop prevention, mobility, scale
+│   ├── test_rr_malformed.rs         # hostile ORIGINATOR_ID and CLUSTER_LIST
 │   ├── test_bgp_capabilities.rs # OPEN capabilities, AFI/SAFI negotiation & 4-octet ASN tests
 │   ├── test_evpn_vxlan.rs   # MP-BGP EVPN → VXLAN acceptance chain, end to end, plus PCAP proof
 │   ├── test_evpn_failover.rs # EVPN withdrawal, session loss & MAC mobility tests
@@ -787,6 +793,200 @@ netstack > vxlan vni         # the per-VNI table
 
 ---
 
+## 🪞 BGP Route Reflection & EVPN Route Reflectors
+
+A full iBGP mesh needs a session between every pair of speakers, because RFC 4271 forbids
+passing a route learned from one internal peer to another. RFC 4456 lifts that restriction
+for one configured role: a **route reflector** may pass such a route on, and carries two
+extra attributes so the loop the mesh rule used to prevent is caught explicitly instead.
+
+The interesting half of this in an EVPN fabric is what a reflector must *not* need:
+
+```text
+Leaf1 local MAC
+    ↓  EVPN Type 2 origination                   (src/evpn_vtep.rs)
+MP_REACH_NLRI over the real TCP session          (src/bgp_router.rs → src/socket.rs)
+    ↓
+RR: no VNI, no EvpnInstance, no import Route Target, no VTEP
+    ↓  RFC 4456 reflection + ORIGINATOR_ID + CLUSTER_LIST
+Leaf2
+    ↓  Route Target import                       (src/bgp_evpn.rs)
+EVPN Loc-RIB → (VNI, MAC) → remote VTEP          (src/evpn_vtep.rs)
+    ↓
+VXLAN on UDP 4789 → tenant traffic
+```
+
+The reflector is a control-plane device. It never becomes a tenant forwarding endpoint, it
+is in nobody's flood list, and no tenant MAC points at it.
+
+### Peer roles and cluster identity
+
+Roles are configured, never inferred from the shape of the topology — a speaker that
+guessed "this looks like a hub" would start reflecting between peers an operator had
+deliberately kept apart.
+
+```rust
+bgp.set_route_reflector_client(peer_addr, true);   // BgpPeerRole::RouteReflectorClient
+bgp.set_cluster_id(Ipv4Address::new(10, 0, 0, 254));
+bgp.is_route_reflector();                          // true once any peer is a client
+```
+
+`cluster_id()` defaults to the BGP identifier, which RFC 4456 section 7 allows for a
+cluster served by one reflector. Two reflectors serving the same clients may either share a
+cluster ID — in which case each refuses the other's reflections as its own cluster coming
+back — or keep distinct ones, which is what gives a client two live paths.
+
+### Propagation rules
+
+The plain RFC 4271 rule stays the default; reflection is an exception carved out of it, and
+only for the pairings the RFC names:
+
+| Path learned from | to a client | to a non-client | to an eBGP peer |
+|---|---|---|---|
+| a route reflector client | reflected | reflected | advertised |
+| a non-client iBGP peer | reflected | **withheld** | advertised |
+| locally originated / eBGP | advertised | advertised | advertised |
+
+An external session never reflects. The two attributes are non-transitive and describe one
+autonomous system, so an eBGP neighbour is advertised to exactly as it was before.
+
+The engine is one code path shared by both families: `BgpRouter::propagation` answers
+"may this go, and is sending it reflection?", and `compute_adj_rib_out` (IPv4 unicast) and
+`compute_evpn_adj_rib_out` (AFI 25 / SAFI 70) both consult it. There is no separate
+EVPN-only reflection engine.
+
+### ORIGINATOR_ID and CLUSTER_LIST
+
+| | ORIGINATOR_ID (type 9) | CLUSTER_LIST (type 10) |
+|---|---|---|
+| flags | optional, **non-transitive** | optional, **non-transitive** |
+| length | exactly 4 | non-zero multiple of 4, at most `MAX_CLUSTER_LIST_LEN` |
+| set by | the first reflector, to the advertising speaker's BGP identifier | every reflector, prepending its own cluster ID |
+| on later hops | unchanged | the previous list is preserved beneath the new entry |
+
+A wrong length, wrong flags, or a second copy of either attribute is an UPDATE error and
+resets the session. A route whose ORIGINATOR_ID is our own identifier, or whose
+CLUSTER_LIST already contains our cluster, is a *loop* rather than a protocol violation: the
+sender did nothing wrong and the topology simply brought the route back, so the route is
+dropped, a counter moves, and the session is left alone. Treating that as an error would
+tear a redundant fabric down every time redundancy did its job.
+
+Both checks apply to IPv4 unicast and to EVPN. They have to: inside one AS the AS_PATH never
+changes, so it can say nothing at all about whether a route has been round already.
+
+### Retaining a tenant a reflector does not own
+
+An ordinary leaf filters on import: a route whose Extended Communities carry no Route Target
+it asked for is dropped at the edge of the Adj-RIB-In and can never program anything. That
+is exactly what makes two VNIs on the same pair of leaves genuinely separate, and it is
+unchanged.
+
+A reflector cannot do that, because it owns no tenant and would have nothing left to
+reflect. So three things that are easy to conflate are kept apart:
+
+| | holds it | can use it | can pass it on |
+|---|---|---|---|
+| `evpn_adj_rib_in` | everything received | — | — |
+| `evpn_loc_rib` | — | only what the local Route Targets import; the **only** thing the VTEP is programmed from | — |
+| `evpn_advertise_rib` | — | — | the best path per route, whatever its Route Targets |
+
+`retains_all_route_targets()` is implied by being a reflector, and can also be set
+explicitly for a transit speaker with no local instances. Each stored path carries an
+`importable` flag recording whether this speaker's own Route Targets matched, so "stored"
+and "usable here" are separate questions with separately recorded answers. The per-peer
+`MAX_EVPN_ROUTES` ceiling still applies, so a retaining speaker is still bounded.
+
+### Redundancy, and the oscillation it would otherwise cause
+
+```text
+           rr1  10.0.0.254                 rr1 and rr2 peer with each other
+         /     \                            as ordinary non-clients, so a route
+     leaf1     leaf2                        from leaf1 reaches leaf2 twice over
+         \     /                            and reaches each reflector both
+           rr2  10.0.0.253                  directly and through the other
+```
+
+Two reflected paths for one MAC produce two entries in the Adj-RIB-In and exactly one in
+the Loc-RIB, because the Loc-RIB is keyed by route and not by peer. The winner is
+deterministic, and the answer — MAC → VTEP — is the same whichever path wins, because a
+reflector must not rewrite the next hop (RFC 4456 section 10): it names the VTEP that owns
+the MAC, not the router that carried the route.
+
+Losing one reflector purges only its paths; the other reflector's copy keeps the overlay
+working and nothing is withdrawn that is still reachable. Restoring it reconverges without
+duplicate forwarding state and without an update storm.
+
+The decision process gained the RFC 4456 section 9 tie-break — **prefer the shorter
+CLUSTER_LIST** — and that is not decoration. Without it, a reflector pair prefers each
+other's reflected copy of a client's route over the copy the client advertised directly,
+whenever the client's BGP identifier is the higher one, since that is what the next
+tie-break compares. Each reflector then sees its best path as coming from the other, stops
+advertising to it under split horizon, immediately loses that path again, and
+re-advertises — for ever. `build_evpn_rr_oscillation_fabric` is that topology, and
+`test_reflectors_do_not_oscillate_when_the_leaves_have_high_identifiers` is the regression:
+before the tie-break it produced roughly 8.7 million UPDATEs in fifteen seconds of
+simulated time and never settled; after it, twelve, and then silence.
+
+### Connection collision resolution
+
+A reflector topology makes simultaneous opens likely, and the speaker now resolves them
+per RFC 4271 section 6.8 rather than refusing the second connection outright.
+
+An inbound connection arriving for a peer that already has one is *held* rather than
+aborted, because the rule needs the peer's BGP identifier and that does not arrive until
+its OPEN does. The held connection's OPEN is read without being consumed; then the speaker
+with the lower identifier keeps the connection its peer initiated and drops the one it
+initiated itself, and the other end does the reverse. Both ends therefore choose the same
+connection. If the held connection wins it is promoted with its framer intact, so the OPEN
+already sitting in it is processed by the ordinary FSM exactly as on any accepted
+connection. The loser is aborted, never abandoned, so no orphan TCP stream is left behind.
+
+### Scale
+
+`build_evpn_rr_scale_fabric` builds two reflectors and N leaves on one underlay subnet with
+several tenants each. `tests/test_evpn_rr_failover.rs` runs it at eight leaves, four VNIs
+and eight hosts per tenant — 288 EVPN routes — and asserts exact counts rather than
+approximate health: every leaf's Loc-RIB holds the whole fabric and nothing more, every
+leaf holds exactly one copy per reflector, each reflector can advertise all 288 and imports
+none of them, no MAC appears in the wrong tenant or points at the wrong VTEP, and after
+convergence five further minutes of simulated time produce no UPDATE at all while
+KEEPALIVEs keep flowing.
+
+### Shell diagnostics
+
+Everything below is read out of a live two-reflector fabric, built and converged on first
+use. Neither reflector in it has a VTEP, a VNI, or an import Route Target.
+
+```text
+netstack > bgp rr             # role, cluster ID, received / imported / retained / advertisable,
+                              # reflected and withheld counts, loop rejections, collisions
+netstack > bgp rr clients     # who is a client of whom, and what that permits
+netstack > bgp rr routes      # every EVPN path held: from whom, client or not, imported or retained-only
+netstack > bgp rr advertised  # the Adj-RIB-Out, marking what was reflected and with which cluster list
+netstack > bgp capabilities   # now also shows the reflection role and local cluster ID per session
+```
+
+```text
+netstack > bgp rr
+== rr1 == router-id 10.0.0.254  AS 65000  route-reflector enabled
+  cluster-id 10.0.0.254  clients [10.0.0.1, 10.0.0.2]
+  import route-targets []  retain-all-RTs yes
+  EVPN routes: received 8  locally imported 0  retained-not-imported 8  advertisable 4  originated 0
+  VXLAN tenant forwarding: none (control plane only)
+  neighbor 10.0.0.1 role client     state Established up 60000ms
+    AFI/SAFI [IPv4 Unicast, L2VPN EVPN]  4-octet ASN yes
+    EVPN received 2  advertised 2  reflected 2  withheld-by-propagation-rules 0
+```
+
+### Scope
+
+This phase is route reflection and EVPN control-plane scale and high availability. EVPN
+multihoming — Route Types 1 and 4, designated-forwarder election, Ethernet Segment split
+horizon, aliasing, and mass withdrawal by Ethernet Segment — is the next one and is
+deliberately absent.
+
+---
+
 ## 🔌 Application Socket Runtime & Reliable TCP
 
 The stack is usable by ordinary applications. An application talks to sockets; the runtime
@@ -908,6 +1108,14 @@ cargo test --test test_evpn_vxlan         # the acceptance chain, end to end, pl
 cargo test --test test_evpn_failover      # withdrawal, session loss, MAC mobility
 cargo test --test test_evpn_isolation     # two tenants, Route Target isolation
 cargo test --test test_evpn_malformed     # hostile MP-BGP and EVPN input
+```
+
+### 5b. Run the Route Reflection Suites
+```bash
+cargo test --test test_bgp_route_reflector  # client/non-client rules, metadata, collisions
+cargo test --test test_evpn_route_reflector # EVPN through a reflector with no VNI, plus PCAP
+cargo test --test test_evpn_rr_failover     # dual-RR HA, loop prevention, mobility, scale
+cargo test --test test_rr_malformed         # hostile ORIGINATOR_ID and CLUSTER_LIST
 ```
 
 ### 6. Launch the Dual-Stack Interactive Shell (REPL)
