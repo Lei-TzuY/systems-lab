@@ -10,10 +10,14 @@
 
 use crate::arp::{ArpOpcode, ArpPacket, ArpTable};
 use crate::bgp::Ipv4Prefix;
+use crate::bgp_caps::AfiSafi;
+use crate::bgp_evpn::RouteTarget;
 use crate::bgp_router::{BgpPeerMode, BgpRouter};
 use crate::ethernet::{
     ETHERTYPE_ARP, ETHERTYPE_IPV4, ETHERTYPE_MPLS, EtherType, EthernetFrame, MacAddress,
 };
+use crate::evpn::RouteDistinguisher;
+use crate::evpn_vtep::{OverlayDecision, Vtep};
 use crate::firewall::{Firewall, FirewallAction, FirewallChain};
 use crate::icmp::{IcmpPacket, IcmpType};
 use crate::ipv4::{IP_PROTO_ICMP, IP_PROTO_TCP, IP_PROTO_UDP, Ipv4Address, Ipv4Packet};
@@ -28,7 +32,7 @@ use crate::stack::{NetStack, NetStackConfig};
 use crate::tcp::TcpSegment;
 use crate::udp::UdpDatagram;
 use crate::vxlan::{VXLAN_UDP_PORT, VxlanPacket};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Fault injection configuration and frame accounting for a virtual point-to-point or broadcast link.
 #[derive(Debug)]
@@ -257,6 +261,10 @@ pub struct LabRouter {
     pub sockets: Option<SocketRuntime>,
     /// The BGP-4 speaker running on this router, if configured.
     pub bgp: Option<BgpRouter>,
+    /// The VXLAN tunnel endpoint driven by MP-BGP EVPN, if this router is a leaf.
+    /// Distinct from `vxlan_tunnels`, which is the older statically configured
+    /// point-to-point overlay and stays available for topologies that use it.
+    pub vtep: Option<Vtep>,
     /// Simulated clock, advanced by the lab.
     pub current_time_ms: u64,
 }
@@ -282,6 +290,7 @@ impl LabRouter {
             ip_id_counter: 100,
             sockets: None,
             bgp: None,
+            vtep: None,
             current_time_ms: 0,
         }
     }
@@ -369,6 +378,118 @@ impl LabRouter {
         self.bgp.as_mut()
     }
 
+    // ========================================================================
+    // EVPN / VXLAN tunnel endpoint
+    // ========================================================================
+
+    /// Turns this router into a VXLAN tunnel endpoint driven by MP-BGP EVPN.
+    ///
+    /// `source_ip` is the address every VXLAN packet is sent from and the next
+    /// hop this leaf advertises in its own EVPN routes, so it has to be an
+    /// address the other leaves can route to. Enabling a VTEP also puts L2VPN
+    /// EVPN into the capability set the BGP speaker offers, because a leaf with
+    /// no EVPN capability could never learn a remote MAC.
+    pub fn enable_vtep(&mut self, source_ip: Ipv4Address, underlay_iface: &str) -> &mut Vtep {
+        self.vtep = Some(Vtep::new(source_ip, underlay_iface));
+        if let Some(bgp) = self.bgp.as_mut() {
+            bgp.enable_family(AfiSafi::L2VPN_EVPN);
+        }
+        self.vtep.as_mut().unwrap()
+    }
+
+    /// Configures a tenant EVPN instance on this VTEP.
+    ///
+    /// The import Route Targets are registered with the BGP speaker at the same
+    /// time. That is what makes the Adj-RIB-In filter and the instance agree:
+    /// a route no instance here asked for is dropped before it is even stored.
+    pub fn add_evpn_instance(
+        &mut self,
+        vni: u32,
+        rd: RouteDistinguisher,
+        import_rts: &[RouteTarget],
+        export_rts: &[RouteTarget],
+    ) {
+        if let Some(vtep) = self.vtep.as_mut() {
+            vtep.add_instance(vni, rd, import_rts, export_rts);
+        }
+        if let Some(bgp) = self.bgp.as_mut() {
+            for rt in import_rts {
+                bgp.add_import_route_target(*rt);
+            }
+        }
+    }
+
+    /// Puts one of this router's interfaces into a tenant instance as an access
+    /// port. Frames arriving there are tenant traffic, not underlay traffic.
+    pub fn attach_evpn_access_port(&mut self, vni: u32, iface: &str) {
+        if let Some(vtep) = self.vtep.as_mut() {
+            vtep.attach_access_port(vni, iface);
+        }
+    }
+
+    pub fn vtep(&self) -> Option<&Vtep> {
+        self.vtep.as_ref()
+    }
+
+    pub fn vtep_mut(&mut self) -> Option<&mut Vtep> {
+        self.vtep.as_mut()
+    }
+
+    /// Pushes what the VTEP has learned locally into the BGP speaker as EVPN
+    /// routes, and stops originating anything it no longer knows about.
+    ///
+    /// The originated set is made to equal the VTEP's view rather than being
+    /// appended to, so a host that disappears withdraws itself.
+    fn sync_evpn_origination(&mut self) {
+        let Some(vtep) = self.vtep.as_ref() else {
+            return;
+        };
+        let desired = vtep.routes_to_originate();
+        let Some(bgp) = self.bgp.as_mut() else {
+            return;
+        };
+
+        let desired_keys: HashSet<_> = desired.iter().map(|r| r.key()).collect();
+        let stale: Vec<_> = bgp
+            .evpn_originated_routes()
+            .iter()
+            .map(|r| r.key())
+            .filter(|k| !desired_keys.contains(k))
+            .collect();
+        for key in stale {
+            bgp.withdraw_evpn(&key);
+        }
+        for route in desired {
+            bgp.originate_evpn(route);
+        }
+    }
+
+    /// Rebuilds the VTEP's remote forwarding state from the EVPN Loc-RIB.
+    ///
+    /// The VTEP is moved out for the duration so the speaker can be borrowed
+    /// immutably at the same time; cloning the Loc-RIB on every poll instead
+    /// would make a steady state cost work proportional to its size.
+    fn program_vtep_from_bgp(&mut self) {
+        let Some(mut vtep) = self.vtep.take() else {
+            return;
+        };
+        let withdraw = match self.bgp.as_ref() {
+            Some(bgp) => vtep.program_from_rib(&bgp.evpn_loc_rib),
+            None => Vec::new(),
+        };
+        self.vtep = Some(vtep);
+
+        // A host that turned up behind another VTEP with a higher mobility
+        // sequence is no longer ours to advertise.
+        if !withdraw.is_empty()
+            && let Some(bgp) = self.bgp.as_mut()
+        {
+            for key in withdraw {
+                bgp.withdraw_evpn(&key);
+            }
+        }
+    }
+
     /// Runs this router's control plane and transport timers at simulated time `now_ms`
     /// and returns `(egress_link, frame)` pairs for everything it wants to transmit.
     ///
@@ -381,9 +502,19 @@ impl LabRouter {
             return out;
         }
 
+        // Local MAC learning becomes EVPN origination before the speaker runs, so
+        // a host that appeared since the last step is advertised in this poll
+        // rather than the next one.
+        self.sync_evpn_origination();
+
         if let (Some(bgp), Some(sockets)) = (self.bgp.as_mut(), self.sockets.as_mut()) {
             bgp.poll(now_ms, sockets, &mut self.routing_table);
         }
+
+        // ...and whatever the speaker decided is programmed into the data plane
+        // immediately afterwards, so the overlay never lags the control plane by
+        // a whole simulation step.
+        self.program_vtep_from_bgp();
 
         let pending = match self.sockets.as_mut() {
             Some(s) => s.step_timers(now_ms),
@@ -624,6 +755,138 @@ impl LabRouter {
 
     /// Processes an incoming frame arriving on a specific virtual link.
     /// Returns a list of `(egress_link_name, frame_bytes)` to transmit.
+    /// Handles a tenant frame arriving on an EVPN access port.
+    ///
+    /// Two things happen, in this order and for different reasons. The source
+    /// MAC is learned locally, which is what turns a host plugging in into an
+    /// EVPN Type 2 advertisement. Then the *destination* is looked up in the
+    /// state MP-BGP built, which is what decides whether the frame is bridged
+    /// locally, encapsulated to exactly one remote VTEP, or replicated to the
+    /// VTEPs that signalled participation with a Type 3 route.
+    fn evpn_access_ingress(
+        &mut self,
+        ingress: &RouterInterface,
+        raw_frame: &[u8],
+    ) -> Vec<(String, Vec<u8>)> {
+        let mut out = Vec::new();
+        let Ok(eth) = EthernetFrame::parse(raw_frame) else {
+            return out;
+        };
+
+        let host_ip = Self::tenant_source_ip(&eth);
+        if let Some(vtep) = self.vtep.as_mut() {
+            vtep.learn_local(&ingress.name, eth.src_mac, host_ip);
+        }
+
+        let decision = match self.vtep.as_ref() {
+            Some(v) => v.forward(&ingress.name, eth.dst_mac),
+            None => OverlayDecision::Drop,
+        };
+
+        match decision {
+            OverlayDecision::Local { access_interface } => {
+                if let Some(iface) = self
+                    .interfaces
+                    .iter()
+                    .find(|i| i.name == access_interface)
+                    .cloned()
+                {
+                    out.push((iface.link_name, raw_frame.to_vec()));
+                }
+            }
+            OverlayDecision::Unicast { vni, vtep } => {
+                self.encapsulate_vxlan(vni, vtep, raw_frame, &mut out);
+            }
+            OverlayDecision::Flood { vni, vteps } => {
+                // Ingress replication: one copy per participating VTEP, built
+                // separately so each carries its own outer IP header.
+                for remote in vteps {
+                    self.encapsulate_vxlan(vni, remote, raw_frame, &mut out);
+                }
+            }
+            OverlayDecision::Drop => {}
+        }
+        out
+    }
+
+    /// The tenant host address a frame reveals, used to fill in the IP field of
+    /// an EVPN Type 2 route. An ARP sender address counts, because that is the
+    /// first thing a host says and often the only thing it says about itself.
+    fn tenant_source_ip(eth: &EthernetFrame<'_>) -> Option<Ipv4Address> {
+        match eth.ethertype {
+            EtherType::IPv4 => Ipv4Packet::parse(eth.payload, false)
+                .ok()
+                .map(|p| p.header.src_ip),
+            EtherType::Arp => ArpPacket::parse(eth.payload)
+                .ok()
+                .map(|a| Ipv4Address(a.sender_ip)),
+            _ => None,
+        }
+    }
+
+    /// Wraps a tenant frame in VXLAN / UDP 4789 / IPv4 and hands it to the real
+    /// underlay forwarding path: routing table lookup, ARP resolution, and the
+    /// same pending-packet queue every other locally originated packet uses.
+    fn encapsulate_vxlan(
+        &mut self,
+        vni: u32,
+        remote_vtep: Ipv4Address,
+        inner_frame: &[u8],
+        out: &mut Vec<(String, Vec<u8>)>,
+    ) {
+        let Some(source_ip) = self.vtep.as_ref().map(|v| v.source_ip) else {
+            return;
+        };
+        let Ok(vxlan_bytes) = VxlanPacket::encapsulate(vni, inner_frame) else {
+            return;
+        };
+        let udp_bytes = UdpDatagram::serialize(
+            source_ip,
+            remote_vtep,
+            VXLAN_UDP_PORT,
+            VXLAN_UDP_PORT,
+            &vxlan_bytes,
+        );
+        let ip_id = self.next_ip_id();
+        let ip_bytes =
+            Ipv4Packet::serialize(source_ip, remote_vtep, IP_PROTO_UDP, ip_id, 64, &udp_bytes);
+
+        let Some(route) = self.routing_table.lookup(remote_vtep).cloned() else {
+            return;
+        };
+        let Some(egress) = self
+            .interfaces
+            .iter()
+            .find(|i| i.name == route.interface)
+            .cloned()
+        else {
+            return;
+        };
+        let next_hop = route.next_hop(remote_vtep);
+        let arp = self.arp_tables.entry(egress.name.clone()).or_default();
+        if let Some(dst_mac) = arp.lookup(&next_hop.0) {
+            out.push((
+                egress.link_name.clone(),
+                EthernetFrame::serialize(dst_mac, egress.mac, ETHERTYPE_IPV4, &ip_bytes),
+            ));
+        } else {
+            self.pending_transit_packets
+                .entry((egress.name.clone(), next_hop))
+                .or_default()
+                .push(ip_bytes);
+            let arp_req = ArpPacket::build_request(egress.mac, egress.ip.0, next_hop.0);
+            out.push((
+                egress.link_name.clone(),
+                EthernetFrame::serialize(
+                    MacAddress::BROADCAST,
+                    egress.mac,
+                    ETHERTYPE_ARP,
+                    &arp_req.serialize(),
+                ),
+            ));
+        }
+    }
+
     pub fn process_incoming_frame(
         &mut self,
         ingress_link: &str,
@@ -635,6 +898,18 @@ impl LabRouter {
             Some(i) => i.clone(),
             None => return out_transmissions,
         };
+
+        // An EVPN access port carries tenant traffic, and where it goes is
+        // decided by what MP-BGP taught this VTEP - never by a configured
+        // destination. This is checked before the older static tunnel below, so
+        // a router with both configured uses the control-plane path.
+        if self
+            .vtep
+            .as_ref()
+            .is_some_and(|v| v.vni_for_access(&ingress_iface.name).is_some())
+        {
+            return self.evpn_access_ingress(&ingress_iface, raw_frame);
+        }
 
         // Check if this ingress interface is a VXLAN Access port
         if let Some(&(vni, remote_vtep_ip, ref underlay_iface_name)) =
@@ -877,7 +1152,44 @@ impl LabRouter {
                             return out_transmissions;
                         }
 
-                        // VXLAN Decapsulation (UDP 4789)
+                        // VXLAN Decapsulation (UDP 4789), EVPN-driven.
+                        //
+                        // Nothing is learned from the inner frame. In EVPN the
+                        // only way a MAC becomes reachable is a Type 2 route, so
+                        // data-plane learning here would quietly reintroduce the
+                        // flood-and-learn behaviour the control plane replaces -
+                        // and would install state no withdrawal could remove.
+                        if udp.dst_port == VXLAN_UDP_PORT
+                            && is_for_router
+                            && let Ok(vxlan) = VxlanPacket::parse(udp.payload)
+                            && self
+                                .vtep
+                                .as_ref()
+                                .is_some_and(|v| v.has_vni(vxlan.header.vni))
+                        {
+                            let inner_dst = EthernetFrame::parse(&vxlan.inner_frame)
+                                .map(|f| f.dst_mac)
+                                .unwrap_or(MacAddress::BROADCAST);
+                            let ports = self
+                                .vtep
+                                .as_ref()
+                                .map(|v| v.access_ports_for(vxlan.header.vni, inner_dst))
+                                .unwrap_or_default();
+                            for port in ports {
+                                if let Some(access) =
+                                    self.interfaces.iter().find(|i| i.name == port)
+                                {
+                                    out_transmissions.push((
+                                        access.link_name.clone(),
+                                        vxlan.inner_frame.clone(),
+                                    ));
+                                }
+                            }
+                            return out_transmissions;
+                        }
+
+                        // VXLAN Decapsulation for the older statically configured
+                        // point-to-point overlay.
                         if udp.dst_port == VXLAN_UDP_PORT
                             && is_for_router
                             && let Ok(vxlan) = VxlanPacket::parse(udp.payload)
@@ -1201,6 +1513,186 @@ pub fn build_bgp_demo_fabric() -> VirtualLab {
     lab.add_router(r2);
     lab.add_router(r3);
     lab
+}
+
+/// Route Target for a VNI in the usual `AS:VNI` form.
+pub fn evpn_rt(asn: u16, vni: u32) -> RouteTarget {
+    RouteTarget::as2(asn, vni)
+}
+
+/// Builds the leaf-spine-leaf EVPN/VXLAN fabric:
+///
+/// ```text
+///  host_a 192.168.10.11            host_b 192.168.10.22
+///  MAC 02:..:0A                    MAC 02:..:0B
+///        |  tenant1                      |  tenant2
+///      leaf1                           leaf2
+///      VTEP 10.0.0.1                   VTEP 10.0.0.2
+///        \  10.1.0.1/30      10.2.0.2/30  /
+///         \-------- spine (IP underlay) -/
+///                 10.1.0.2      10.2.0.1
+/// ```
+///
+/// The two tenant hosts sit in one /24 with no gateway: as far as they can tell
+/// they share a wire, and every packet between them has to cross the overlay for
+/// that to be true.
+///
+/// The spine forwards IP and nothing else - it runs no BGP and knows no VNI. The
+/// leaves peer directly, loopback to loopback, so the TCP session carrying the
+/// EVPN routes is itself multihop traffic the spine forwards. Nothing about the
+/// overlay is configured on either leaf beyond its own instance: no remote MAC,
+/// no remote VTEP, no tunnel destination. Every one of those has to arrive as an
+/// EVPN route or the fabric does not work at all.
+///
+/// `leaf_as` gives the two leaves their ASNs, so a caller can run the same fabric
+/// on 16-bit or 32-bit autonomous system numbers.
+pub fn build_evpn_fabric(leaf1_as: u32, leaf2_as: u32) -> VirtualLab {
+    fn mac(a: u8, b: u8) -> MacAddress {
+        MacAddress([0x02, 0x00, 0x00, 0x00, a, b])
+    }
+    let addr = Ipv4Address::new;
+
+    const VNI: u32 = 5001;
+    let vtep1 = addr(10, 0, 0, 1);
+    let vtep2 = addr(10, 0, 0, 2);
+
+    let mut lab = VirtualLab::new();
+    for link in [
+        "tenant1",
+        "tenant2",
+        "leaf1spine",
+        "leaf2spine",
+        "lo1",
+        "lo2",
+    ] {
+        lab.add_link(link);
+    }
+
+    // Tenant hosts: same subnet, no gateway. Anything that reaches the far side
+    // did so as a bridged Ethernet frame, not as a routed packet.
+    lab.add_host(
+        "host_a",
+        "tenant1",
+        NetStackConfig {
+            mac: mac(0x0A, 0x0A),
+            ip: addr(192, 168, 10, 11),
+            ipv6: None,
+            subnet_mask: 24,
+            gateway: None,
+        },
+    );
+    lab.add_host(
+        "host_b",
+        "tenant2",
+        NetStackConfig {
+            mac: mac(0x0B, 0x0B),
+            ip: addr(192, 168, 10, 22),
+            ipv6: None,
+            subnet_mask: 24,
+            gateway: None,
+        },
+    );
+
+    let mut leaf1 = LabRouter::new("leaf1");
+    leaf1.add_interface(
+        "eth0",
+        mac(0x01, 0x00),
+        addr(192, 168, 10, 1),
+        24,
+        "tenant1",
+    );
+    leaf1.add_interface("eth1", mac(0x01, 0x01), addr(10, 1, 0, 1), 30, "leaf1spine");
+    // The VTEP address lives on a loopback, exactly as it would on a real leaf:
+    // it must stay up when any one underlay link does not.
+    leaf1.add_interface("lo0", mac(0x01, 0xFF), vtep1, 32, "lo1");
+    leaf1.routing_table.add_route_from(
+        vtep2,
+        32,
+        Some(addr(10, 1, 0, 2)),
+        "eth1",
+        RouteSource::Static,
+    );
+    leaf1
+        .enable_bgp(leaf1_as, addr(1, 1, 1, 1))
+        .set_hold_time(9);
+    leaf1.add_bgp_peer(vtep2, leaf2_as, vtep1, BgpPeerMode::Active);
+    leaf1.enable_vtep(vtep1, "eth1");
+    leaf1.add_evpn_instance(
+        VNI,
+        RouteDistinguisher::new(vtep1, VNI as u16),
+        &[evpn_rt(65001, VNI)],
+        &[evpn_rt(65001, VNI)],
+    );
+    leaf1.attach_evpn_access_port(VNI, "eth0");
+
+    let mut spine = LabRouter::new("spine");
+    spine.add_interface("eth0", mac(0x02, 0x00), addr(10, 1, 0, 2), 30, "leaf1spine");
+    spine.add_interface("eth1", mac(0x02, 0x01), addr(10, 2, 0, 1), 30, "leaf2spine");
+    spine.routing_table.add_route_from(
+        vtep1,
+        32,
+        Some(addr(10, 1, 0, 1)),
+        "eth0",
+        RouteSource::Static,
+    );
+    spine.routing_table.add_route_from(
+        vtep2,
+        32,
+        Some(addr(10, 2, 0, 2)),
+        "eth1",
+        RouteSource::Static,
+    );
+
+    let mut leaf2 = LabRouter::new("leaf2");
+    leaf2.add_interface(
+        "eth0",
+        mac(0x03, 0x00),
+        addr(192, 168, 10, 2),
+        24,
+        "tenant2",
+    );
+    leaf2.add_interface("eth1", mac(0x03, 0x01), addr(10, 2, 0, 2), 30, "leaf2spine");
+    leaf2.add_interface("lo0", mac(0x03, 0xFF), vtep2, 32, "lo2");
+    leaf2.routing_table.add_route_from(
+        vtep1,
+        32,
+        Some(addr(10, 2, 0, 1)),
+        "eth1",
+        RouteSource::Static,
+    );
+    leaf2
+        .enable_bgp(leaf2_as, addr(3, 3, 3, 3))
+        .set_hold_time(9);
+    leaf2.add_bgp_peer(vtep1, leaf1_as, vtep2, BgpPeerMode::Passive);
+    leaf2.enable_vtep(vtep2, "eth1");
+    leaf2.add_evpn_instance(
+        VNI,
+        RouteDistinguisher::new(vtep2, VNI as u16),
+        &[evpn_rt(65001, VNI)],
+        &[evpn_rt(65001, VNI)],
+    );
+    leaf2.attach_evpn_access_port(VNI, "eth0");
+
+    lab.add_router(leaf1);
+    lab.add_router(spine);
+    lab.add_router(leaf2);
+    lab
+}
+
+/// Drives `lab` until every configured BGP session is ESTABLISHED and every VTEP
+/// has been told about at least one remote MAC, or the simulated deadline passes.
+///
+/// The second half of that condition is the point: a session that is up but has
+/// exchanged no EVPN route has not converged the overlay.
+pub fn converge_evpn(lab: &mut VirtualLab, max_sim_ms: u64) -> bool {
+    lab.run_until(250, max_sim_ms, |l| {
+        l.routers.values().all(|r| match (r.bgp(), r.vtep()) {
+            (Some(b), Some(v)) => {
+                b.peers().iter().all(|p| p.carries_evpn()) && v.remote_mac_count() > 0
+            }
+            _ => true,
+        })
+    })
 }
 
 /// Drives `lab` until every configured BGP session is ESTABLISHED and every speaker has
