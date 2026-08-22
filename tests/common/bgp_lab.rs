@@ -513,6 +513,17 @@ impl RawBgpPeer {
     /// Builds the lab and completes the TCP three-way handshake to port 179.
     /// The router is passive, so it waits for this connection.
     pub fn connect(victim_as: u32, expected_peer_as: u32, victim_router_id: Ipv4Address) -> Self {
+        Self::connect_configured(victim_as, expected_peer_as, victim_router_id, |_| {})
+    }
+
+    /// [`RawBgpPeer::connect`], with a chance to configure the router under test
+    /// before it is put in the lab - a VTEP and its EVPN instances, say.
+    pub fn connect_configured(
+        victim_as: u32,
+        expected_peer_as: u32,
+        victim_router_id: Ipv4Address,
+        configure: impl FnOnce(&mut LabRouter),
+    ) -> Self {
         use toy_tcpip::tcp::{SocketAddrV4, TcpState};
 
         let victim = ip(10, 50, 0, 1);
@@ -544,6 +555,7 @@ impl RawBgpPeer {
             .enable_bgp(victim_as, victim_router_id)
             .set_hold_time(LAB_HOLD_TIME);
         router.add_bgp_peer(peer, expected_peer_as, victim, BgpPeerMode::Passive);
+        configure(&mut router);
         lab.add_router(router);
 
         // Let the router bind its listener before dialling it.
