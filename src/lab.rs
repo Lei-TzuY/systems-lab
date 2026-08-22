@@ -408,15 +408,20 @@ impl LabRouter {
         rd: RouteDistinguisher,
         import_rts: &[RouteTarget],
         export_rts: &[RouteTarget],
-    ) {
-        if let Some(vtep) = self.vtep.as_mut() {
-            vtep.add_instance(vni, rd, import_rts, export_rts);
-        }
-        if let Some(bgp) = self.bgp.as_mut() {
+    ) -> bool {
+        let added = match self.vtep.as_mut() {
+            Some(vtep) => vtep.add_instance(vni, rd, import_rts, export_rts),
+            None => false,
+        };
+        // Only register the import targets if the instance actually exists.
+        // Importing on behalf of an instance that was refused would fill the
+        // Adj-RIB-In with routes nothing could ever program.
+        if added && let Some(bgp) = self.bgp.as_mut() {
             for rt in import_rts {
                 bgp.add_import_route_target(*rt);
             }
         }
+        added
     }
 
     /// Puts one of this router's interfaces into a tenant instance as an access

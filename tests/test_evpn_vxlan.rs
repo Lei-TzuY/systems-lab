@@ -341,6 +341,78 @@ fn test_a_leaf_with_no_type_3_route_has_nowhere_to_flood() {
 // ============================================================================
 
 #[test]
+fn test_a_converged_fabric_stops_talking() {
+    // The strongest statement available about duplicate advertisement: once the
+    // overlay has converged, an idle fabric must send no further UPDATEs. A
+    // speaker that re-originated an unchanged route, or re-advertised what the
+    // Adj-RIB-Out already holds, would keep the count climbing forever.
+    let mut lab = converged_fabric();
+
+    let updates = |l: &VirtualLab| -> u64 {
+        l.routers
+            .values()
+            .filter_map(|r| r.bgp())
+            .flat_map(|b| b.peers())
+            .map(|p| p.counters.updates_sent)
+            .sum()
+    };
+    let decisions = |l: &VirtualLab| -> u64 {
+        l.routers
+            .values()
+            .filter_map(|r| r.bgp())
+            .map(|b| b.decision_runs)
+            .sum()
+    };
+
+    let before = updates(&lab);
+    let decisions_before = decisions(&lab);
+    assert!(before > 0, "the fabric never advertised anything");
+
+    // Thirty simulated seconds of nothing happening: several hold and keepalive
+    // intervals, so KEEPALIVEs still flow but no UPDATE should.
+    lab.run_until(1_000, 30_000, |_| false);
+
+    assert_eq!(
+        updates(&lab),
+        before,
+        "an idle fabric kept sending EVPN UPDATEs"
+    );
+    assert_eq!(
+        decisions(&lab),
+        decisions_before,
+        "an idle fabric kept rerunning the decision process"
+    );
+    // And it stayed up, so the silence is quiescence rather than a dead session.
+    assert!(
+        lab.routers
+            .values()
+            .filter_map(|r| r.bgp())
+            .all(|b| b.peers().iter().all(|p| p.carries_evpn()))
+    );
+    assert_eq!(remote_mac(&lab, "leaf2", MAC_A), Some(VTEP1));
+}
+
+#[test]
+fn test_a_vni_that_does_not_fit_24_bits_is_refused() {
+    use toy_tcpip::evpn::RouteDistinguisher;
+    use toy_tcpip::evpn_vtep::{MAX_VNI, Vtep};
+    use toy_tcpip::lab::evpn_rt;
+
+    let mut vtep = Vtep::new(VTEP1, "eth1");
+    let rd = RouteDistinguisher::new(VTEP1, 1);
+    let rts = [evpn_rt(65001, 1)];
+
+    // Masking would create an instance under a number nobody asked for, and the
+    // mismatch would only show up later as encapsulation quietly failing.
+    assert!(!vtep.add_instance(MAX_VNI + 1, rd.clone(), &rts, &rts));
+    assert!(!vtep.has_vni(MAX_VNI + 1));
+    assert!(!vtep.has_vni(0));
+
+    assert!(vtep.add_instance(MAX_VNI, rd, &rts, &rts));
+    assert!(vtep.has_vni(MAX_VNI));
+}
+
+#[test]
 fn test_routes_with_different_next_hops_are_never_merged_into_one_update() {
     use toy_tcpip::bgp::BgpPdu;
     use toy_tcpip::bgp_evpn::{EvpnRoute, RouteTarget, decode_evpn_nlri_list};

@@ -43,6 +43,9 @@ pub const MAX_LOCAL_MACS_PER_INSTANCE: usize = 1_024;
 /// Past this many moves the MAC is declared duplicate and left alone.
 pub const MAX_MAC_MOVES: u32 = 5;
 
+/// Largest VXLAN Network Identifier: the field is 24 bits (RFC 7348).
+pub const MAX_VNI: u32 = 0x00FF_FFFF;
+
 /// A MAC learned on one of this VTEP's own access ports.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalMac {
@@ -147,13 +150,21 @@ impl Vtep {
 
     /// Configures a tenant instance. Re-adding an existing VNI updates its Route
     /// Targets and leaves learned state alone.
+    ///
+    /// A VNI is 24 bits. One that does not fit is refused rather than masked:
+    /// masking would create an instance under a number nobody asked for, and the
+    /// mismatch would only surface later as encapsulation quietly failing.
+    /// Returns whether the instance exists afterwards.
     pub fn add_instance(
         &mut self,
         vni: u32,
         rd: RouteDistinguisher,
         import_rts: &[RouteTarget],
         export_rts: &[RouteTarget],
-    ) {
+    ) -> bool {
+        if vni > MAX_VNI {
+            return false;
+        }
         let inst = self
             .instances
             .entry(vni)
@@ -161,6 +172,7 @@ impl Vtep {
         inst.rd = rd;
         inst.import_rts.extend(import_rts.iter().copied());
         inst.export_rts.extend(export_rts.iter().copied());
+        true
     }
 
     /// Puts an access interface into an instance.
@@ -329,7 +341,7 @@ impl Vtep {
                         eth_tag: 0,
                         mac: local.mac,
                         ip: local.ip,
-                        vni: inst.vni & 0x00FF_FFFF,
+                        vni: inst.vni,
                     }),
                     self.source_ip,
                     export.clone(),
