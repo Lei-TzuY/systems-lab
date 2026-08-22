@@ -8,6 +8,7 @@ use crate::bgp::{BgpMessage, BgpRib};
 use crate::bgp_epe::{
     BGP_EPE_PEER_ADJ_SID, BGP_EPE_PEER_NODE_SID, BGP_EPE_PEER_SET_SID, BgpEpeDatabase,
 };
+use crate::bgp_evpn::RouteTarget;
 use crate::bgp_ext_comm::{BgpExtCommunityContainer, BgpExtendedCommunity, TUNNEL_TYPE_VXLAN};
 use crate::bgp_ls::{BgpLsLinkDescriptor, BgpLsNlri, BgpLsNodeDescriptor, BgpLsTopologyDatabase};
 use crate::bgp_ls_srv6::{BgpLsSrv6Database, Srv6EndSidTlv, Srv6LocatorTlv};
@@ -27,7 +28,7 @@ use crate::eigrp::{EIGRP_MULTICAST_IP, EigrpPacket, EigrpTopologyTable, IP_PROTO
 use crate::erspan::ErspanPacket;
 use crate::etag::{ETHERTYPE_ETAG, ETagFrame, ETagHeader};
 use crate::ethernet::{ETHERTYPE_IPV4, ETHERTYPE_IPV6, EthernetFrame, MacAddress};
-use crate::evpn::{EvpnMacTable, EvpnNlri, RouteDistinguisher};
+use crate::evpn::{EvpnNlri, RouteDistinguisher};
 use crate::evpn_l3irb::{EvpnIpPrefixRoute, EvpnL3VrfTable};
 use crate::evpn_multihoming::EvpnDfElectionEngine;
 use crate::evpn_smet::{EvpnSmetEngine, EvpnSmetRoute};
@@ -75,7 +76,7 @@ use crate::ipv6::{Ipv6Address, Ipv6Packet, NEXT_HEADER_ICMPV6, NEXT_HEADER_UDP};
 use crate::isis::{ETHERTYPE_ISIS, IsisHelloPacket};
 use crate::l2tp::{IP_PROTO_L2TPV3, L2tpv3Packet};
 use crate::lab::{LabRouter, VirtualLab};
-use crate::lab::{build_bgp_demo_fabric, converge_bgp};
+use crate::lab::{build_bgp_demo_fabric, build_evpn_fabric, converge_bgp};
 use crate::lacp::{
     ETHERTYPE_SLOW_PROTOCOLS, LACP_STATE_ACTIVITY, LACP_STATE_AGGREGATION, LACP_STATE_COLLECTING,
     LACP_STATE_DISTRIBUTING, LACP_STATE_SYNCHRONIZATION, LacpPacket, LacpPortInfo,
@@ -198,7 +199,6 @@ pub struct NetworkShell {
     hsrp: HsrpEngine,
     glbp: GlbpEngine,
     vtp: VtpEngine,
-    evpn_table: EvpnMacTable,
     ofp_table: OfpFlowTable,
     diameter_server: DiameterServer,
     wg_peer: WireguardPeer,
@@ -212,6 +212,10 @@ pub struct NetworkShell {
     lfib: LfibTable,
     _ldp_session: LdpSession,
     bgp_rib: BgpRib,
+    /// Live leaf-spine-leaf EVPN/VXLAN fabric backing the `evpn`, `vxlan vtep`
+    /// and `bgp evpn` diagnostics. Built and converged on first use, then read
+    /// out: nothing it prints is a sample.
+    evpn_fabric: Option<VirtualLab>,
     /// Live three-AS BGP fabric backing the `bgp` diagnostics. Built and converged
     /// on first use, so the shell reports real session and RIB state rather than a
     /// hard-coded sample.
@@ -637,10 +641,6 @@ impl NetworkShell {
         let hsrp = HsrpEngine::new(1, 110, Ipv4Address::new(192, 168, 1, 1), true);
         let glbp = GlbpEngine::new(1, 120, Ipv4Address::new(192, 168, 1, 1));
         let vtp = VtpEngine::new("EnterpriseHQ", VtpMode::Server);
-        let mut evpn_table = EvpnMacTable::new();
-        evpn_table
-            .entries
-            .insert((5001, server_mac), (server_ip, Some(server_ip)));
 
         let mut ofp_table = OfpFlowTable::new();
         ofp_table.add_entry(
@@ -1209,7 +1209,6 @@ impl NetworkShell {
             hsrp,
             glbp,
             vtp,
-            evpn_table,
             ofp_table,
             diameter_server,
             wg_peer,
@@ -1223,6 +1222,7 @@ impl NetworkShell {
             lfib,
             _ldp_session: ldp_session,
             bgp_rib,
+            evpn_fabric: None,
             bgp_fabric: None,
             lldp_table,
             cdp_table,
@@ -1725,7 +1725,7 @@ impl NetworkShell {
             "  gue [encap <msg>]                   - Generic UDP Encapsulation (RFC 7763 UDP 6080)"
         );
         println!(
-            "  evpn [rib | lookup <vni> <mac>]     - BGP Ethernet VPN Control Plane (RFC 7432)"
+            "  evpn [mac|routes|advertised|vni|summary]   - MP-BGP EVPN control plane (RFC 7432, AFI 25/SAFI 70)"
         );
         println!("  ping <ipv4>                         - Send ICMP Echo Request (IPv4 Ping)");
         println!("  ping6 <ipv6>                        - Send ICMPv6 Echo Request (IPv6 Ping6)");
@@ -1824,14 +1824,14 @@ impl NetworkShell {
             "  mpls [push <label> <msg> | lfib]    - Multi-Protocol Label Switching (RFC 3031)"
         );
         println!(
-            "  bgp [summary|peers|routes|rib|route] - Border Gateway Protocol 4 control plane (RFC 4271)"
+            "  bgp [summary|peers|routes|rib|capabilities|evpn] - Border Gateway Protocol 4 control plane (RFC 4271)"
         );
         println!(
             "  lldp [neighbors | announce]         - Link Layer Discovery Protocol (IEEE 802.1AB)"
         );
         println!("  stp [status | bpdu]                 - IEEE 802.1D Spanning Tree Protocol");
         println!(
-            "  vxlan encap <vni> <msg>             - Virtual eXtensible LAN Overlay (RFC 7348)"
+            "  vxlan [vtep | vni | <vni> <msg>]    - Virtual eXtensible LAN Overlay (RFC 7348), UDP 4789"
         );
         println!(
             "  ntp [query <ip> | time]             - Network Time Protocol v4 clock synchronization"
@@ -5321,31 +5321,429 @@ impl NetworkShell {
         println!("  Inner Data  : {} bytes (\"{}\")", msg.len(), msg);
     }
 
-    fn cmd_evpn(&mut self, args: &[&str]) {
-        if args.is_empty() || args[0] == "rib" || args[0] == "status" {
-            println!("BGP EVPN (AFI 25 / SAFI 70) MAC-to-VTEP Forwarding Table (RFC 7432):");
+    /// Builds and converges the EVPN/VXLAN fabric on first use.
+    ///
+    /// Everything the `evpn`, `vxlan vtep` and `bgp evpn` subcommands print
+    /// afterwards is read out of that running fabric. The sessions really
+    /// completed a TCP handshake on port 179 through the spine, really
+    /// negotiated AFI 25 / SAFI 70, and really exchanged the EVPN routes shown -
+    /// and the MAC tables were programmed by those routes, not written here.
+    fn ensure_evpn_fabric(&mut self) -> u64 {
+        if self.evpn_fabric.is_none() {
+            let mut lab = build_evpn_fabric(65001, 65002);
+            lab.run_until(250, 60_000, |l| {
+                l.routers
+                    .values()
+                    .filter_map(|r| r.bgp())
+                    .all(|b| b.peers().iter().all(|p| p.carries_evpn()))
+            });
+            // One tenant packet in each direction, which is what makes each leaf
+            // learn its local host and originate the Type 2 route for it.
+            for (host, dst) in [
+                ("host_a", Ipv4Address::new(192, 168, 10, 22)),
+                ("host_b", Ipv4Address::new(192, 168, 10, 11)),
+            ] {
+                if let Some(h) = lab.host_mut(host)
+                    && let Some(frame) = h.stack.ping4(dst, 1, 1, b"evpn")
+                {
+                    lab.send_from_host(host, frame);
+                }
+                lab.run_until(250, 30_000, |_| false);
+            }
+            if lab
+                .routers
+                .values()
+                .filter_map(|r| r.vtep())
+                .any(|v| v.remote_mac_count() == 0)
+            {
+                println!("(warning: the EVPN fabric did not fully converge)");
+            }
+            self.evpn_fabric = Some(lab);
+        }
+        self.evpn_fabric
+            .as_ref()
+            .map(|l| l.current_time_ms)
+            .unwrap_or(0)
+    }
+
+    /// Leaf names in the EVPN fabric that actually have a VTEP, in a stable order.
+    fn evpn_leaves(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .evpn_fabric
+            .as_ref()
+            .map(|l| {
+                l.routers
+                    .iter()
+                    .filter(|(_, r)| r.vtep().is_some())
+                    .map(|(n, _)| n.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        names.sort();
+        names
+    }
+
+    /// `show evpn mac` - the live (VNI, MAC) -> VTEP table on every leaf.
+    fn print_evpn_mac_tables(&self) {
+        for name in self.evpn_leaves() {
+            let Some(vtep) = self
+                .evpn_fabric
+                .as_ref()
+                .and_then(|l| l.router(&name))
+                .and_then(|r| r.vtep())
+            else {
+                continue;
+            };
+            println!("== {} (VTEP {}) ==", name, vtep.source_ip);
             println!(
-                "┌────────┬──────────────────────┬──────────────────────┬──────────────────────┐"
+                "┌────────┬───────────────────┬──────────────────┬──────────────┬────────┬──────────────────┐"
             );
             println!(
-                "│ VNI    │ MAC Address          │ Next-Hop VTEP IP     │ Host IP Address      │"
+                "│ VNI    │ MAC Address       │ Host IP          │ Location     │ Seq    │ Source           │"
             );
             println!(
-                "├────────┼──────────────────────┼──────────────────────┼──────────────────────┤"
+                "├────────┼───────────────────┼──────────────────┼──────────────┼────────┼──────────────────┤"
             );
-            for (&(vni, mac), (vtep, host_ip)) in &self.evpn_table.entries {
-                let ip_str = host_ip
-                    .map(|i| i.to_string())
-                    .unwrap_or_else(|| "-".to_string());
-                println!(
-                    "│ {:<6} │ {:<20} │ {:<20} │ {:<20} │",
-                    vni, mac, vtep, ip_str
-                );
+            for inst in vtep.instances.values() {
+                for local in inst.local_macs.values() {
+                    println!(
+                        "│ {:<6} │ {:<17} │ {:<16} │ {:<12} │ {:<6} │ {:<16} │",
+                        inst.vni,
+                        local.mac.to_string(),
+                        local
+                            .ip
+                            .map(|i| i.to_string())
+                            .unwrap_or_else(|| "-".into()),
+                        local.access_interface,
+                        local.sequence,
+                        "local learning"
+                    );
+                }
+                for remote in inst.remote_macs.values() {
+                    println!(
+                        "│ {:<6} │ {:<17} │ {:<16} │ {:<12} │ {:<6} │ {:<16} │",
+                        inst.vni,
+                        remote.mac.to_string(),
+                        remote
+                            .ip
+                            .map(|i| i.to_string())
+                            .unwrap_or_else(|| "-".into()),
+                        remote.vtep.to_string(),
+                        remote.sequence,
+                        format!("EVPN {}", remote.learned_from)
+                    );
+                }
             }
             println!(
-                "└────────┴──────────────────────┴──────────────────────┴──────────────────────┘"
+                "└────────┴───────────────────┴──────────────────┴──────────────┴────────┴──────────────────┘"
             );
-        } else if args.len() >= 4 && args[0] == "advertise" {
+        }
+    }
+
+    /// `show vxlan vtep` - the VTEP and instance configuration on every leaf.
+    fn print_evpn_vteps(&self) {
+        for name in self.evpn_leaves() {
+            let Some(router) = self.evpn_fabric.as_ref().and_then(|l| l.router(&name)) else {
+                continue;
+            };
+            let Some(vtep) = router.vtep() else { continue };
+            println!("== {} ==", name);
+            print!("{}", vtep);
+            for inst in vtep.instances.values() {
+                println!(
+                    "    VNI {}: {} local MAC(s), {} remote MAC(s), flood list {:?}",
+                    inst.vni,
+                    inst.local_macs.len(),
+                    inst.remote_macs.len(),
+                    inst.remote_vteps
+                        .iter()
+                        .map(|v| v.to_string())
+                        .collect::<Vec<_>>()
+                );
+                if !inst.duplicate_macs.is_empty() {
+                    println!(
+                        "    VNI {}: {} MAC(s) damped as duplicate",
+                        inst.vni,
+                        inst.duplicate_macs.len()
+                    );
+                }
+            }
+        }
+    }
+
+    /// `show vxlan vni` - one row per VNI per leaf.
+    fn print_evpn_vnis(&self) {
+        println!(
+            "┌──────────┬────────┬──────────────────┬───────────────┬───────────────┬───────┬────────┐"
+        );
+        println!(
+            "│ Leaf     │ VNI    │ Route Disting.   │ Import RT     │ Export RT     │ Local │ Remote │"
+        );
+        println!(
+            "├──────────┼────────┼──────────────────┼───────────────┼───────────────┼───────┼────────┤"
+        );
+        for name in self.evpn_leaves() {
+            let Some(vtep) = self
+                .evpn_fabric
+                .as_ref()
+                .and_then(|l| l.router(&name))
+                .and_then(|r| r.vtep())
+            else {
+                continue;
+            };
+            for inst in vtep.instances.values() {
+                let join = |set: &std::collections::BTreeSet<RouteTarget>| {
+                    set.iter()
+                        .map(|r| r.to_string())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                };
+                println!(
+                    "│ {:<8} │ {:<6} │ {:<16} │ {:<13} │ {:<13} │ {:<5} │ {:<6} │",
+                    name,
+                    inst.vni,
+                    inst.rd.to_string(),
+                    join(&inst.import_rts),
+                    join(&inst.export_rts),
+                    inst.local_macs.len(),
+                    inst.remote_macs.len()
+                );
+            }
+        }
+        println!(
+            "└──────────┴────────┴──────────────────┴───────────────┴───────────────┴───────┴────────┘"
+        );
+    }
+
+    /// `bgp evpn routes` - the EVPN Loc-RIB and Adj-RIB-In on every leaf.
+    fn print_evpn_routes(&self, adj_rib_in: bool) {
+        for name in self.evpn_leaves() {
+            let Some(bgp) = self
+                .evpn_fabric
+                .as_ref()
+                .and_then(|l| l.router(&name))
+                .and_then(|r| r.bgp())
+            else {
+                continue;
+            };
+            println!(
+                "== {} EVPN {} ==",
+                name,
+                if adj_rib_in { "Adj-RIB-In" } else { "Loc-RIB" }
+            );
+            println!(
+                "   Type  Route Distinguisher  MAC                Host IP           VNI     Next-Hop VTEP  AS Path     Route Targets"
+            );
+            let paths: Vec<_> = if adj_rib_in {
+                bgp.evpn_adj_rib_in.iter_paths().collect()
+            } else {
+                bgp.evpn_loc_rib.iter().map(|(_, p)| p).collect()
+            };
+            if paths.is_empty() {
+                println!("   (no EVPN routes)");
+                continue;
+            }
+            for path in paths {
+                let key = path.route.key();
+                println!(
+                    "   [{}]   {:<19}  {:<17}  {:<16}  {:<6}  {:<13}  {:<10}  {}",
+                    key.route_type(),
+                    key.rd().to_string(),
+                    key.mac().map(|m| m.to_string()).unwrap_or("-".into()),
+                    path.route
+                        .host_ip()
+                        .map(|i| i.to_string())
+                        .unwrap_or("-".into()),
+                    path.route.vni(),
+                    path.route.next_hop.to_string(),
+                    if path.local {
+                        "local".to_string()
+                    } else {
+                        path.as_path.to_string()
+                    },
+                    path.route
+                        .route_targets
+                        .iter()
+                        .map(|r| r.to_string())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                );
+            }
+        }
+    }
+
+    /// `bgp evpn advertised` - the EVPN Adj-RIB-Out, per neighbour.
+    fn print_evpn_advertised(&self) {
+        for name in self.evpn_leaves() {
+            let Some(bgp) = self
+                .evpn_fabric
+                .as_ref()
+                .and_then(|l| l.router(&name))
+                .and_then(|r| r.bgp())
+            else {
+                continue;
+            };
+            println!("== {} EVPN Adj-RIB-Out ==", name);
+            for peer in bgp.peers() {
+                let keys = bgp.evpn_adj_rib_out.keys(peer.addr);
+                if keys.is_empty() {
+                    println!("  to {}: nothing advertised", peer.addr);
+                    continue;
+                }
+                for key in keys {
+                    if let Some(route) = bgp.evpn_adj_rib_out.get(peer.addr, &key) {
+                        println!(
+                            "  to {}: [{}] {} {} vni {} next-hop {} rt [{}]{}",
+                            peer.addr,
+                            key.route_type(),
+                            key.rd(),
+                            key.mac().map(|m| m.to_string()).unwrap_or("-".into()),
+                            route.vni(),
+                            route.next_hop,
+                            route
+                                .route_targets
+                                .iter()
+                                .map(|r| r.to_string())
+                                .collect::<Vec<_>>()
+                                .join(","),
+                            route
+                                .mobility_seq
+                                .map(|s| format!(" seq {}", s))
+                                .unwrap_or_default()
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// `bgp evpn summary` - one block per leaf: session, families, route counts.
+    fn print_evpn_summary(&self, now_ms: u64) {
+        for name in self.evpn_leaves() {
+            let Some(bgp) = self
+                .evpn_fabric
+                .as_ref()
+                .and_then(|l| l.router(&name))
+                .and_then(|r| r.bgp())
+            else {
+                continue;
+            };
+            let (adj_in, loc, originated) = bgp.evpn_route_counts();
+            println!(
+                "== {} == router-id {} local-AS {}",
+                name, bgp.router_id, bgp.local_as
+            );
+            println!(
+                "  EVPN Adj-RIB-In {} route(s), Loc-RIB {}, originated {}",
+                adj_in, loc, originated
+            );
+            let rts: Vec<String> = bgp
+                .import_route_targets()
+                .iter()
+                .map(|r| r.to_string())
+                .collect();
+            println!("  import route-targets [{}]", rts.join(", "));
+            for peer in bgp.peers() {
+                let families: Vec<String> = peer
+                    .negotiated_families()
+                    .iter()
+                    .map(|f| f.name())
+                    .collect();
+                println!(
+                    "  neighbor {} remote-AS {} state {} up {}",
+                    peer.addr,
+                    peer.remote_as,
+                    peer.state,
+                    peer.uptime_ms(now_ms)
+                        .map(|u| format!("{}ms", u))
+                        .unwrap_or("down".into())
+                );
+                println!(
+                    "    negotiated AFI/SAFI [{}]  4-octet ASN {}",
+                    families.join(", "),
+                    if peer.negotiated.four_octet_as {
+                        "yes"
+                    } else {
+                        "no"
+                    }
+                );
+                println!(
+                    "    EVPN routes received {} advertised {} rejected-by-RT {}",
+                    peer.counters.evpn_received,
+                    peer.counters.evpn_advertised,
+                    peer.counters.evpn_rt_rejected
+                );
+            }
+        }
+    }
+
+    /// `bgp capabilities` - what each speaker offers and what each session agreed.
+    fn print_bgp_capabilities(&self) {
+        for (label, fabric) in [
+            ("EVPN fabric", self.evpn_fabric.as_ref()),
+            ("IPv4 fabric", self.bgp_fabric.as_ref()),
+        ] {
+            let Some(lab) = fabric else { continue };
+            let mut names: Vec<&String> = lab.routers.keys().collect();
+            names.sort();
+            for name in names {
+                let Some(bgp) = lab.router(name).and_then(|r| r.bgp()) else {
+                    continue;
+                };
+                println!("== {} / {} ==", label, name);
+                println!("  advertised: {}", bgp.local_capabilities());
+                for peer in bgp.peers() {
+                    let families: Vec<String> = peer
+                        .negotiated_families()
+                        .iter()
+                        .map(|f| f.to_string())
+                        .collect();
+                    println!("  neighbor {} ({})", peer.addr, peer.state);
+                    println!("    peer offered : {}", peer.negotiated.peer);
+                    println!("    negotiated   : {}", families.join(", "));
+                }
+            }
+        }
+    }
+
+    fn cmd_evpn(&mut self, args: &[&str]) {
+        let sub = args.first().copied().unwrap_or("mac");
+
+        if sub == "help" {
+            println!("evpn <subcommand>  - MP-BGP EVPN control plane over the live fabric");
+            println!("  mac | rib | status - the (VNI, MAC) -> VTEP forwarding table per leaf");
+            println!("  routes             - the EVPN Loc-RIB per leaf");
+            println!("  adj-rib-in         - every EVPN route received, per leaf");
+            println!("  advertised         - the EVPN Adj-RIB-Out, per neighbor");
+            println!("  summary            - sessions, negotiated families, route counts");
+            println!("  vni                - one row per VNI: RD, import/export RT, MAC counts");
+            println!("  advertise <mac> <ip> <vni> - show the framing of a Type 2 NLRI");
+            return;
+        }
+
+        if args.len() >= 4 && args[0] == "advertise" {
+            self.cmd_evpn_advertise_demo(args);
+            return;
+        }
+
+        let now = self.ensure_evpn_fabric();
+        println!(
+            "MP-BGP EVPN (AFI 25 / SAFI 70) over VXLAN - leaf-spine-leaf fabric, simulated time {}ms",
+            now
+        );
+        match sub {
+            "routes" | "loc-rib" => self.print_evpn_routes(false),
+            "adj-rib-in" | "received" => self.print_evpn_routes(true),
+            "advertised" | "adj-rib-out" => self.print_evpn_advertised(),
+            "summary" | "sessions" => self.print_evpn_summary(now),
+            "vni" | "instances" => self.print_evpn_vnis(),
+            _ => self.print_evpn_mac_tables(),
+        }
+    }
+
+    /// The original NLRI framing demonstration, kept as `evpn advertise`.
+    fn cmd_evpn_advertise_demo(&mut self, args: &[&str]) {
+        {
             let mac = MacAddress::from_str(args[1]).unwrap_or(self.stack.config.mac);
             let ip = Ipv4Address::from_str(args[2]).ok();
             let vni = args[3].parse::<u32>().unwrap_or(5001);
@@ -6982,6 +7380,29 @@ impl NetworkShell {
     }
 
     fn cmd_vxlan(&mut self, args: &[&str]) {
+        // The live subcommands read the running EVPN fabric; the default one
+        // below still demonstrates the encapsulation framing on its own.
+        match args.first().copied().unwrap_or("") {
+            "vtep" | "vteps" => {
+                self.ensure_evpn_fabric();
+                self.print_evpn_vteps();
+                return;
+            }
+            "vni" | "vnis" => {
+                self.ensure_evpn_fabric();
+                self.print_evpn_vnis();
+                return;
+            }
+            "help" => {
+                println!("vxlan <subcommand>  - VXLAN overlay (RFC 7348), UDP port 4789");
+                println!("  vtep              - VTEP source, underlay, and instances per leaf");
+                println!("  vni               - one row per VNI: RD, Route Targets, MAC counts");
+                println!("  <vni> <message>   - show the framing of one encapsulated frame");
+                return;
+            }
+            _ => {}
+        }
+
         let vni = if args.len() >= 2 {
             args[1].parse::<u32>().unwrap_or(1001)
         } else {
@@ -7104,8 +7525,29 @@ impl NetworkShell {
                 println!("  advertised        - the Adj-RIB-Out, per neighbor");
                 println!("  route | fib       - each router's real IPv4 forwarding table");
                 println!("  events | log      - the control-plane event log");
+                println!("  capabilities      - what each speaker offers and each session agreed");
+                println!("  evpn [summary|routes|advertised|adj-rib-in] - the MP-BGP EVPN family");
                 println!("  open              - show the framing of a BGP OPEN message");
                 println!("  local-rib         - the static sample RIB kept for reference");
+                return;
+            }
+            "capabilities" | "caps" => {
+                // Both fabrics, so the output shows an IPv4-only session beside
+                // one that negotiated EVPN.
+                self.ensure_bgp_fabric();
+                self.ensure_evpn_fabric();
+                self.print_bgp_capabilities();
+                return;
+            }
+            "evpn" => {
+                let now = self.ensure_evpn_fabric();
+                match args.get(1).copied().unwrap_or("summary") {
+                    "routes" | "loc-rib" => self.print_evpn_routes(false),
+                    "adj-rib-in" | "received" => self.print_evpn_routes(true),
+                    "advertised" | "adj-rib-out" => self.print_evpn_advertised(),
+                    "mac" => self.print_evpn_mac_tables(),
+                    _ => self.print_evpn_summary(now),
+                }
                 return;
             }
             "open" => {

@@ -404,8 +404,275 @@ fn test_routes_with_different_next_hops_are_never_merged_into_one_update() {
 }
 
 // ============================================================================
+// PCAP proof
+// ============================================================================
+
+/// Captures the whole scenario on the leaf1-spine link and checks that every
+/// layer of the stack this phase claims to use is visibly present on the wire.
+///
+/// The capture is read back with this repository's own `PcapReader`, and every
+/// protocol is decoded with the repository's own parsers, so nothing here is
+/// taken on trust from the code that wrote it.
+#[test]
+fn test_the_capture_contains_the_whole_evpn_vxlan_scenario() {
+    use toy_tcpip::arp::ArpPacket;
+    use toy_tcpip::bgp::{BGP_PORT, BgpPdu};
+    use toy_tcpip::bgp_caps::AfiSafi as Af;
+    use toy_tcpip::evpn::EvpnNlri as Nlri;
+
+    let mut lab = build_evpn_fabric(AS1, AS2);
+    lab.enable_pcap("leaf1spine");
+
+    lab.run_until(250, 60_000, |l| {
+        l.routers
+            .values()
+            .filter_map(|r| r.bgp())
+            .all(|b| b.peers().iter().all(|p| p.carries_evpn()))
+    });
+    let frame = lab
+        .host_mut("host_a")
+        .unwrap()
+        .stack
+        .ping4(HOST_B, 0x9999, 3, b"capture")
+        .unwrap();
+    lab.send_from_host("host_a", frame);
+    lab.run_until(250, 60_000, |_| false);
+
+    // Long enough for a KEEPALIVE to fall due (hold 9s, so one every 3s).
+    lab.run_until(1_000, 20_000, |_| false);
+
+    // Then take host A away, which produces the withdrawal.
+    lab.router_mut("leaf1")
+        .unwrap()
+        .vtep_mut()
+        .unwrap()
+        .forget_local(VNI, &MAC_A);
+    lab.run_until(250, 30_000, |_| false);
+
+    let pcap = lab.export_pcap("leaf1spine").expect("no capture");
+    let packets = read_capture(&pcap);
+    assert!(
+        packets.len() > 10,
+        "the capture holds only {} packets",
+        packets.len()
+    );
+
+    // --- ARP: the underlay resolving the spine before anything else works ---
+    let arp = packets
+        .iter()
+        .filter(|p| p.ethertype == EtherType::Arp)
+        .filter_map(|p| ArpPacket::parse(&p.payload).ok())
+        .count();
+    assert!(arp > 0, "no ARP in the capture");
+
+    // --- TCP: a real three-way handshake to port 179 ---
+    let tcp: Vec<_> = packets
+        .iter()
+        .filter(|p| p.protocol == Some(toy_tcpip::ipv4::IpProtocol::Tcp))
+        .filter_map(|p| {
+            toy_tcpip::tcp::TcpSegment::parse(p.src, p.dst, &p.payload, false)
+                .ok()
+                .map(|s| (p.src, p.dst, s))
+        })
+        .collect();
+    assert!(
+        tcp.iter()
+            .any(|(_, _, s)| s.dst_port == BGP_PORT && s.flags.syn),
+        "no SYN to TCP port 179"
+    );
+    assert!(
+        tcp.iter()
+            .any(|(_, _, s)| s.src_port == BGP_PORT && s.flags.syn && s.flags.ack),
+        "no SYN/ACK from TCP port 179"
+    );
+
+    // --- BGP: reassembled from the captured byte stream, not from memory ---
+    let messages = bgp_stream(&packets, VTEP1, VTEP2);
+    assert!(!messages.is_empty(), "no BGP messages in the capture");
+
+    let open = messages
+        .iter()
+        .find_map(|m| match m {
+            BgpPdu::Open(o) => Some(o),
+            _ => None,
+        })
+        .expect("no OPEN in the capture");
+    let caps = open
+        .capabilities()
+        .expect("the OPEN capabilities do not parse");
+    assert!(
+        caps.supports(Af::L2VPN_EVPN),
+        "the OPEN on the wire does not advertise L2VPN EVPN"
+    );
+    assert!(caps.supports(Af::IPV4_UNICAST));
+    assert!(caps.supports_four_octet_as());
+
+    assert!(
+        messages.iter().any(|m| matches!(m, BgpPdu::Keepalive)),
+        "no KEEPALIVE in the capture"
+    );
+
+    // --- MP-BGP EVPN UPDATE, announcing a Type 2 and a Type 3 route ---
+    let announced: Vec<Nlri> = messages
+        .iter()
+        .filter_map(|m| match m {
+            BgpPdu::Update(u) => u.mp_reach(),
+            _ => None,
+        })
+        .filter(|mp| mp.family() == Af::L2VPN_EVPN)
+        .flat_map(|mp| toy_tcpip::bgp_evpn::decode_evpn_nlri_list(&mp.nlri).unwrap_or_default())
+        .collect();
+    assert!(
+        announced
+            .iter()
+            .any(|n| matches!(n, Nlri::MacIpAdv(m) if m.mac == MAC_A)),
+        "no EVPN Type 2 route for host A on the wire"
+    );
+    assert!(
+        announced
+            .iter()
+            .any(|n| matches!(n, Nlri::InclusiveMulticast(_))),
+        "no EVPN Type 3 route on the wire"
+    );
+
+    // --- EVPN withdrawal, as MP_UNREACH_NLRI ---
+    let withdrawn: Vec<Nlri> = messages
+        .iter()
+        .filter_map(|m| match m {
+            BgpPdu::Update(u) => u.mp_unreach(),
+            _ => None,
+        })
+        .filter(|mp| mp.family() == Af::L2VPN_EVPN)
+        .flat_map(|mp| toy_tcpip::bgp_evpn::decode_evpn_nlri_list(&mp.nlri).unwrap_or_default())
+        .collect();
+    assert!(
+        withdrawn
+            .iter()
+            .any(|n| matches!(n, Nlri::MacIpAdv(m) if m.mac == MAC_A)),
+        "the withdrawal of host A never reached the wire"
+    );
+
+    // --- VXLAN on UDP 4789, carrying the tenant frame ---
+    let vxlan = captured_vxlan(&pcap);
+    assert!(!vxlan.is_empty(), "no VXLAN packets in the capture");
+    let carried_tenant_ip = vxlan.iter().any(|(src, dst, vni, inner)| {
+        if *vni != VNI || *src != VTEP1 || *dst != VTEP2 {
+            return false;
+        }
+        let Ok(eth) = EthernetFrame::parse(inner) else {
+            return false;
+        };
+        eth.src_mac == MAC_A
+            && Ipv4Packet::parse(eth.payload, false)
+                .is_ok_and(|p| p.header.src_ip == HOST_A && p.header.dst_ip == HOST_B)
+    });
+    assert!(
+        carried_tenant_ip,
+        "no VXLAN packet carried the tenant IP payload from host A to host B"
+    );
+}
+
+// ============================================================================
 // Helpers
 // ============================================================================
+
+/// One captured frame, decoded down to the IPv4 payload where there is one.
+struct Captured {
+    ethertype: EtherType,
+    src: Ipv4Address,
+    dst: Ipv4Address,
+    protocol: Option<toy_tcpip::ipv4::IpProtocol>,
+    /// The IPv4 payload, or the Ethernet payload for a non-IPv4 frame.
+    payload: Vec<u8>,
+}
+
+fn read_capture(pcap: &[u8]) -> Vec<Captured> {
+    use toy_tcpip::pcap::PcapReader;
+
+    let mut reader = PcapReader::new(std::io::Cursor::new(pcap)).expect("PcapReader");
+    let mut out = Vec::new();
+    while let Ok(Some(pkt)) = reader.next_packet() {
+        let Ok(eth) = EthernetFrame::parse(&pkt.data) else {
+            continue;
+        };
+        match eth.ethertype {
+            EtherType::IPv4 => {
+                if let Ok(ipv4) = Ipv4Packet::parse(eth.payload, false) {
+                    out.push(Captured {
+                        ethertype: EtherType::IPv4,
+                        src: ipv4.header.src_ip,
+                        dst: ipv4.header.dst_ip,
+                        protocol: Some(ipv4.header.protocol),
+                        payload: ipv4.payload.to_vec(),
+                    });
+                }
+            }
+            other => out.push(Captured {
+                ethertype: other,
+                src: Ipv4Address::UNSPECIFIED,
+                dst: Ipv4Address::UNSPECIFIED,
+                protocol: None,
+                payload: eth.payload.to_vec(),
+            }),
+        }
+    }
+    out
+}
+
+/// Reassembles the BGP messages one speaker sent, from the captured TCP segments.
+///
+/// This is the same problem the speaker's own framer solves, with two extra
+/// complications a capture brings: a retransmission appears twice, and a
+/// segment may be missing entirely if the link model dropped it. Keying by
+/// sequence number handles the first, and stopping at the first gap handles the
+/// second - a stream reassembled across a hole would decode nonsense.
+fn bgp_stream(
+    packets: &[Captured],
+    from: Ipv4Address,
+    to: Ipv4Address,
+) -> Vec<toy_tcpip::bgp::BgpPdu> {
+    use std::collections::BTreeMap;
+    use toy_tcpip::bgp::{BGP_PORT, BgpFramer, BgpPdu};
+    use toy_tcpip::tcp::TcpSegment;
+
+    let mut by_seq: BTreeMap<u32, Vec<u8>> = BTreeMap::new();
+    for p in packets {
+        if p.src != from || p.dst != to || p.protocol != Some(toy_tcpip::ipv4::IpProtocol::Tcp) {
+            continue;
+        }
+        let Ok(seg) = TcpSegment::parse(p.src, p.dst, &p.payload, false) else {
+            continue;
+        };
+        if seg.src_port != BGP_PORT && seg.dst_port != BGP_PORT {
+            continue;
+        }
+        if seg.payload.is_empty() {
+            continue;
+        }
+        by_seq.insert(seg.seq_num, seg.payload.to_vec());
+    }
+
+    let mut framer = BgpFramer::new();
+    let mut out = Vec::new();
+    let mut expect: Option<u32> = None;
+    for (seq, payload) in by_seq {
+        if expect.is_some_and(|e| e != seq) {
+            break;
+        }
+        if framer.push(&payload).is_err() {
+            break;
+        }
+        expect = Some(seq.wrapping_add(payload.len() as u32));
+        while let Ok(Some(frame)) = framer.next_frame() {
+            // The fabric negotiated 4-octet ASNs, so that is how the AS_PATH on
+            // this session is written.
+            if let Ok(pdu) = BgpPdu::parse_width(&frame, true) {
+                out.push(pdu);
+            }
+        }
+    }
+    out
+}
 
 /// Pulls `(outer src, outer dst, VNI, inner frame)` out of every VXLAN packet in
 /// a capture, using this repository's own PCAP reader.
