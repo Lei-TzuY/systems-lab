@@ -23,17 +23,18 @@ use crate::bgp::{
     BGP_ERR_UPDATE_MESSAGE, BGP_MIN_HOLD_TIME, BGP_PORT, BGP_SUB_BAD_BGP_IDENTIFIER,
     BGP_SUB_BAD_PEER_AS, BGP_SUB_INVALID_NEXT_HOP, BGP_SUB_MALFORMED_AS_PATH,
     BGP_SUB_OPTIONAL_ATTRIBUTE_ERROR, BGP_SUB_UNACCEPTABLE_HOLD_TIME, BGP_SUB_UNSUPPORTED_VERSION,
-    BGP_VERSION, BgpFramer, BgpNotificationMessage, BgpOpenMessage, BgpOrigin, BgpParseError,
-    BgpPathAttributes, BgpPdu, BgpUpdateMessage, Ipv4Prefix,
+    BGP_VERSION, BgpFramer, BgpNotificationMessage, BgpOpenMessage, BgpParseError,
+    BgpPathAttributes, BgpPdu, BgpUpdateMessage, Ipv4Prefix, MAX_CLUSTER_LIST_LEN,
 };
 use crate::bgp_caps::{
     AfiSafi, BGP_SUB_UNSUPPORTED_CAPABILITY, BgpCapability, BgpCapabilitySet,
     NegotiatedCapabilities, negotiate,
 };
 use crate::bgp_evpn::{
-    EvpnAdjRibIn, EvpnAdjRibOut, EvpnLocRib, EvpnPath, EvpnRoute, EvpnRouteKey, MAX_EVPN_ROUTES,
-    RouteTarget, decode_evpn_nlri_list, encode_evpn_nlri_list, mac_mobility_from_communities,
-    route_targets_from_communities, select_best_evpn,
+    EvpnAdjRibIn, EvpnAdjRibOut, EvpnAdvertisedRoute, EvpnLocRib, EvpnPath, EvpnRoute,
+    EvpnRouteKey, MAX_EVPN_ROUTES, RouteTarget, decode_evpn_nlri_list, encode_evpn_nlri_list,
+    mac_mobility_from_communities, other_ext_communities, route_targets_from_communities,
+    select_best_evpn,
 };
 use crate::bgp_mp::{MpReachNlri, MpUnreachNlri};
 use crate::bgp_rib::{
@@ -106,6 +107,42 @@ pub enum BgpPeerMode {
     Passive,
 }
 
+/// What this neighbour is to the local speaker, for route reflection (RFC 4456).
+///
+/// The role is configured, never inferred from the shape of the topology. A
+/// speaker that guessed "this looks like a hub" would silently start reflecting
+/// between peers an operator had deliberately kept apart, and the difference
+/// between a client and a non-client is precisely what stops a reflection loop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub enum BgpPeerRole {
+    /// An ordinary neighbour. Routes learned from an internal peer are not
+    /// passed on to it, which is the plain RFC 4271 rule.
+    #[default]
+    Normal,
+    /// A route reflector client. The local speaker reflects to it, and reflects
+    /// what it hears from it on to every other internal peer.
+    RouteReflectorClient,
+}
+
+impl BgpPeerRole {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            BgpPeerRole::Normal => "non-client",
+            BgpPeerRole::RouteReflectorClient => "client",
+        }
+    }
+
+    pub fn is_client(&self) -> bool {
+        *self == BgpPeerRole::RouteReflectorClient
+    }
+}
+
+impl fmt::Display for BgpPeerRole {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// Per-peer message counters.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BgpPeerCounters {
@@ -131,6 +168,20 @@ pub struct BgpPeerCounters {
     pub evpn_advertised: u64,
     /// EVPN NLRI discarded because no configured import Route Target matched.
     pub evpn_rt_rejected: u64,
+    /// Routes discarded because ORIGINATOR_ID named this speaker (RFC 4456
+    /// section 7): the route has already been here and has come back.
+    pub originator_loops_rejected: u64,
+    /// Routes discarded because CLUSTER_LIST already contained the local cluster
+    /// ID, meaning the route has already been reflected by this cluster.
+    pub cluster_loops_rejected: u64,
+    /// Routes reflected to this peer under the RFC 4456 rules, counted at the
+    /// point the UPDATE was actually written.
+    pub routes_reflected: u64,
+    /// Routes withheld from this peer because the RFC 4456 propagation rules do
+    /// not allow it: an internally learned path with neither end a client.
+    pub rr_suppressed: u64,
+    /// Inbound connections refused or resolved away by collision handling.
+    pub collisions_resolved: u64,
 }
 
 /// One configured BGP neighbour and the session state that belongs to it.
@@ -140,10 +191,19 @@ pub struct BgpPeer {
     /// Local address used as the source of the session (the "update source").
     pub local_addr: Ipv4Address,
     pub mode: BgpPeerMode,
+    /// Route reflection role. Changing it changes what this speaker will pass on
+    /// to the neighbour, and nothing else.
+    pub role: BgpPeerRole,
     pub admin_up: bool,
     pub state: BgpState,
     pub stream: Option<TcpStreamHandle>,
+    /// True when the transport in `stream` was opened by the peer rather than by
+    /// us. Collision resolution (RFC 4271 section 6.8) is stated in terms of
+    /// which side initiated, so which side did has to be remembered.
+    stream_inbound: bool,
     framer: BgpFramer,
+    /// A second, colliding connection held while the winner is decided.
+    collision: Option<CollisionConn>,
     connect_retry_deadline: Option<u64>,
     hold_deadline: Option<u64>,
     keepalive_deadline: Option<u64>,
@@ -182,10 +242,13 @@ impl BgpPeer {
             remote_as,
             local_addr,
             mode,
+            role: BgpPeerRole::Normal,
             admin_up: true,
             state: BgpState::Idle,
             stream: None,
+            stream_inbound: false,
             framer: BgpFramer::new(),
+            collision: None,
             connect_retry_deadline: None,
             hold_deadline: None,
             keepalive_deadline: None,
@@ -245,6 +308,28 @@ impl BgpPeer {
     pub fn buffered_bytes(&self) -> usize {
         self.framer.buffered()
     }
+
+    /// True when this neighbour is a route reflector client of ours.
+    pub fn is_client(&self) -> bool {
+        self.role.is_client()
+    }
+
+    /// True while a second connection to this neighbour is being held pending
+    /// collision resolution.
+    pub fn has_collision(&self) -> bool {
+        self.collision.is_some()
+    }
+}
+
+/// A second TCP connection to a peer that already has one, held until RFC 4271
+/// section 6.8 can say which of the two survives.
+///
+/// Only the framer runs on it. No OPEN is sent and no FSM state belongs to it:
+/// all that is wanted from this connection before the decision is the peer's BGP
+/// identifier, and that arrives in the OPEN the peer sends unprompted.
+struct CollisionConn {
+    stream: TcpStreamHandle,
+    framer: BgpFramer,
 }
 
 /// A control-plane log line, retained for diagnostics.
@@ -281,6 +366,26 @@ pub struct BgpPeerSummary {
     pub establishment_count: u32,
 }
 
+/// Why a received route was discarded by the RFC 4456 loop checks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReflectionLoop {
+    /// ORIGINATOR_ID is this speaker's own BGP identifier.
+    Originator,
+    /// CLUSTER_LIST already contains this speaker's cluster ID.
+    Cluster,
+}
+
+/// What the RFC 4456 rules say about sending one path to one peer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Propagation {
+    /// Not allowed: an internally learned path with neither end a client.
+    Deny,
+    /// Allowed as an ordinary advertisement, with no reflection metadata.
+    Plain,
+    /// Allowed as a reflection, so ORIGINATOR_ID and CLUSTER_LIST go with it.
+    Reflect,
+}
+
 /// Why a session is being torn down.
 enum Teardown {
     /// The transport went away; no NOTIFICATION can be delivered.
@@ -310,6 +415,15 @@ pub struct BgpRouter {
     pub evpn_adj_rib_in: EvpnAdjRibIn,
     /// The best EVPN path per route, and the only thing the VTEP is programmed from.
     pub evpn_loc_rib: EvpnLocRib,
+    /// The best EVPN path per route among *everything* received, whether this
+    /// speaker imports the tenant or not. This is what advertisement and
+    /// reflection are computed from.
+    ///
+    /// A route reflector owns no tenant and imports no tenant Route Target, so
+    /// its `evpn_loc_rib` is empty and would reflect nothing. Separating "the
+    /// best path I could pass on" from "the best path I can use myself" is what
+    /// lets the reflector do its job without being configured as a tenant.
+    pub evpn_advertise_rib: EvpnLocRib,
     /// EVPN routes advertised to each peer.
     pub evpn_adj_rib_out: EvpnAdjRibOut,
     /// EVPN routes this speaker originates for its own local hosts.
@@ -330,6 +444,15 @@ pub struct BgpRouter {
     /// process runs once per poll instead of once per UPDATE.
     dirty: bool,
     pub decision_runs: u64,
+    /// How many times the EVPN decision process has run.
+    pub evpn_decision_runs: u64,
+    /// The cluster identifier used in CLUSTER_LIST. `None` means "use the router
+    /// ID", which is what RFC 4456 section 7 recommends for a cluster with one
+    /// reflector in it.
+    cluster_id: Option<Ipv4Address>,
+    /// Retain EVPN routes whose Route Targets match no local import, so they can
+    /// still be reflected. Implied by being a route reflector.
+    retain_all_rts: bool,
 }
 
 impl BgpRouter {
@@ -347,6 +470,7 @@ impl BgpRouter {
             families: BTreeSet::from([AfiSafi::IPV4_UNICAST]),
             evpn_adj_rib_in: EvpnAdjRibIn::new(),
             evpn_loc_rib: EvpnLocRib::new(),
+            evpn_advertise_rib: EvpnLocRib::new(),
             evpn_adj_rib_out: EvpnAdjRibOut::new(),
             evpn_originated: BTreeMap::new(),
             import_rts: BTreeSet::new(),
@@ -357,7 +481,127 @@ impl BgpRouter {
             events: Vec::new(),
             dirty: true,
             decision_runs: 0,
+            evpn_decision_runs: 0,
+            cluster_id: None,
+            retain_all_rts: false,
         }
+    }
+
+    // ========================================================================
+    // Route reflection (RFC 4456)
+    // ========================================================================
+
+    /// The cluster identifier this speaker prepends to CLUSTER_LIST when it
+    /// reflects. Defaults to the BGP identifier, which RFC 4456 section 7 allows
+    /// for a cluster served by a single reflector.
+    pub fn cluster_id(&self) -> Ipv4Address {
+        self.cluster_id.unwrap_or(self.router_id)
+    }
+
+    /// Sets an explicit cluster identifier.
+    ///
+    /// Two reflectors serving the same set of clients should share one, so that
+    /// a route reflected by either is recognised as already seen by the other.
+    ///
+    /// The Adj-RIB-Out is deliberately *not* cleared. It is the record of what
+    /// each peer was actually told, and both it and the EVPN equivalent store the
+    /// reflection metadata alongside the route - so recomputing against it finds
+    /// every advertisement whose CLUSTER_LIST has changed and re-sends exactly
+    /// those. Discarding the record instead would leave the speaker unable to
+    /// tell a peer anything had changed at all.
+    pub fn set_cluster_id(&mut self, id: Ipv4Address) {
+        if self.cluster_id == Some(id) {
+            return;
+        }
+        self.cluster_id = Some(id);
+        self.dirty = true;
+        self.evpn_dirty = true;
+    }
+
+    /// Marks `peer` as a route reflector client, or back to an ordinary peer.
+    ///
+    /// Returns false if no such neighbour is configured.
+    ///
+    /// Changing one peer's role changes what *several* peers may hear, because
+    /// the rules are stated over the pair of ends: routes this peer advertises
+    /// become reflectable to everybody, and routes from non-clients stop being
+    /// advertisable to this one. Every stored path from this peer therefore has
+    /// its `from_client` flag rewritten, and both decision processes rerun.
+    ///
+    /// The Adj-RIB-Out is left alone on purpose. It records what each peer was
+    /// actually told, and it is what the next advertisement run diffs against to
+    /// produce the withdrawals a demotion implies. Clearing it would make the
+    /// speaker forget it had ever sent those routes, and they would sit in the
+    /// demoted peer's RIB for ever.
+    pub fn set_route_reflector_client(&mut self, peer: Ipv4Address, on: bool) -> bool {
+        let role = if on {
+            BgpPeerRole::RouteReflectorClient
+        } else {
+            BgpPeerRole::Normal
+        };
+        let Some(p) = self.peers.iter_mut().find(|p| p.addr == peer) else {
+            return false;
+        };
+        if p.role == role {
+            return true;
+        }
+        p.role = role;
+
+        // Paths already learned from this peer were stamped with the old role.
+        let is_client = role.is_client();
+        if let Some(table) = self.adj_rib_in.peer_table_mut(peer) {
+            for path in table.values_mut() {
+                path.from_client = is_client;
+            }
+        }
+        if let Some(table) = self.evpn_adj_rib_in.peer_table_mut(peer) {
+            for path in table.values_mut() {
+                path.from_client = is_client;
+            }
+        }
+
+        self.dirty = true;
+        self.evpn_dirty = true;
+        true
+    }
+
+    /// True when at least one neighbour is a client, which is what makes this
+    /// speaker a route reflector.
+    pub fn is_route_reflector(&self) -> bool {
+        self.peers.iter().any(|p| p.is_client())
+    }
+
+    /// The addresses of every configured route reflector client.
+    pub fn route_reflector_clients(&self) -> Vec<Ipv4Address> {
+        self.peers
+            .iter()
+            .filter(|p| p.is_client())
+            .map(|p| p.addr)
+            .collect()
+    }
+
+    /// The role configured for one neighbour.
+    pub fn peer_role(&self, peer: Ipv4Address) -> Option<BgpPeerRole> {
+        self.peer(peer).map(|p| p.role)
+    }
+
+    /// Whether EVPN routes are retained even when no local Route Target matches.
+    ///
+    /// A route reflector does this unconditionally: it has no tenant of its own,
+    /// so filtering on import would leave it nothing to reflect. An ordinary
+    /// speaker can be told to as well, which is what a transit speaker with no
+    /// local instances would be configured to do.
+    pub fn retains_all_route_targets(&self) -> bool {
+        self.retain_all_rts || self.is_route_reflector()
+    }
+
+    /// Forces Route Target retention on independently of the reflector role.
+    pub fn set_retain_all_route_targets(&mut self, on: bool) {
+        if self.retain_all_rts == on {
+            return;
+        }
+        self.retain_all_rts = on;
+        self.evpn_dirty = true;
     }
 
     /// Sets the hold time proposed in OPEN. Values of 1 or 2 seconds are illegal
@@ -595,33 +839,218 @@ impl BgpRouter {
             };
 
             let peer = &mut self.peers[idx];
-            let acceptable = peer.admin_up
-                && peer.stream.is_none()
-                && matches!(peer.state, BgpState::Idle | BgpState::Active);
-            if !acceptable {
-                // Connection collision, or the peer is administratively down. Refuse
-                // the new connection rather than abandoning a session in progress.
-                let reason = format!(
-                    "refused inbound session while in {} (collision guard)",
-                    peer.state
+            if !peer.admin_up {
+                self.log(
+                    now_ms,
+                    remote.ip,
+                    "refused inbound session: neighbour is administratively down",
                 );
-                self.log(now_ms, remote.ip, reason);
                 Self::abandon_stream(sockets, stream, now_ms);
                 continue;
             }
 
-            peer.stream = Some(stream);
-            peer.framer.reset();
-            peer.state = BgpState::Active;
-            // Bound the wait: an accepted connection whose handshake never finishes must
-            // not hold the peer in Active forever.
-            peer.connect_retry_deadline = Some(now_ms + retry);
+            // No transport yet: this is simply the peer calling us.
+            if peer.stream.is_none() && matches!(peer.state, BgpState::Idle | BgpState::Active) {
+                peer.stream = Some(stream);
+                peer.stream_inbound = true;
+                peer.framer.reset();
+                peer.state = BgpState::Active;
+                // Bound the wait: an accepted connection whose handshake never
+                // finishes must not hold the peer in Active forever.
+                peer.connect_retry_deadline = Some(now_ms + retry);
+                self.log(
+                    now_ms,
+                    remote.ip,
+                    "accepted inbound TCP session on port 179",
+                );
+                continue;
+            }
+
+            // A second connection to a neighbour that already has one. RFC 4271
+            // section 6.8 resolves this by comparing BGP identifiers, and the
+            // peer's identifier is not known until its OPEN arrives - so the
+            // connection is held rather than judged now. Refusing it outright,
+            // which is what a plain active/passive guard does, throws away the
+            // very connection the RFC may require this speaker to keep.
+            let state = peer.state;
+            let collidable =
+                peer.collision.is_none() && state != BgpState::Established && peer.stream.is_some();
+            if collidable {
+                peer.collision = Some(CollisionConn {
+                    stream,
+                    framer: BgpFramer::new(),
+                });
+                self.log(
+                    now_ms,
+                    remote.ip,
+                    format!(
+                        "connection collision in {}: holding the inbound connection until the \
+                         peer's OPEN says which one survives",
+                        state
+                    ),
+                );
+                continue;
+            }
+
+            // Established, or already holding one collision candidate. A third
+            // connection is not a collision to resolve, it is noise.
+            peer.counters.collisions_resolved += 1;
             self.log(
                 now_ms,
                 remote.ip,
-                "accepted inbound TCP session on port 179",
+                format!("refused a further inbound session while in {}", state),
             );
+            Self::abandon_stream(sockets, stream, now_ms);
         }
+    }
+
+    /// Runs the held collision candidate, if there is one.
+    ///
+    /// Nothing is sent on it. All that is wanted before the decision is the BGP
+    /// identifier out of the peer's OPEN, and the peer sends that unprompted the
+    /// moment its own TCP connection comes up. The OPEN is read without being
+    /// consumed, so that if this connection wins the ordinary FSM still gets to
+    /// process it.
+    fn service_collision(&mut self, idx: usize, now_ms: u64, sockets: &mut SocketRuntime) {
+        let Some(collision) = self.peers[idx].collision.as_ref() else {
+            return;
+        };
+        let stream = collision.stream;
+        let addr = self.peers[idx].addr;
+
+        if !sockets.tcp_is_live(stream) {
+            self.peers[idx].collision = None;
+            sockets.tcp_abort(stream, now_ms);
+            self.log(
+                now_ms,
+                addr,
+                "the colliding connection went away on its own",
+            );
+            return;
+        }
+
+        // Drain into the collision framer.
+        let mut buf = [0u8; READ_CHUNK];
+        loop {
+            match sockets.tcp_read(stream, &mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    let Some(c) = self.peers[idx].collision.as_mut() else {
+                        return;
+                    };
+                    if c.framer.push(&buf[..n]).is_err() {
+                        self.peers[idx].collision = None;
+                        sockets.tcp_abort(stream, now_ms);
+                        self.log(now_ms, addr, "the colliding connection was not framing BGP");
+                        return;
+                    }
+                }
+                Err(SocketError::WouldBlock) => break,
+                Err(_) => break,
+            }
+        }
+
+        let Some(c) = self.peers[idx].collision.as_ref() else {
+            return;
+        };
+        let peeked = match c.framer.peek_frame() {
+            Ok(Some(frame)) => frame.to_vec(),
+            Ok(None) => return,
+            Err(_) => {
+                self.peers[idx].collision = None;
+                sockets.tcp_abort(stream, now_ms);
+                self.log(
+                    now_ms,
+                    addr,
+                    "the colliding connection sent an unframable message",
+                );
+                return;
+            }
+        };
+        let remote_id = match BgpPdu::parse_width(&peeked, false) {
+            Ok(BgpPdu::Open(open)) => open.bgp_id,
+            _ => {
+                // Anything other than an OPEN first is a protocol error on a
+                // connection this speaker never adopted; drop it.
+                self.peers[idx].collision = None;
+                sockets.tcp_abort(stream, now_ms);
+                self.log(
+                    now_ms,
+                    addr,
+                    "the colliding connection led with something other than an OPEN",
+                );
+                return;
+            }
+        };
+
+        self.resolve_collision(idx, now_ms, sockets, remote_id);
+    }
+
+    /// Decides which of two connections to a neighbour survives (RFC 4271
+    /// section 6.8).
+    ///
+    /// The rule is stated in terms of who opened what: the speaker with the
+    /// *higher* BGP identifier keeps the connection it initiated, and the other
+    /// keeps the one it accepted. Both ends applying it to the same pair of
+    /// identifiers pick the same connection, which is what makes the outcome a
+    /// single session rather than a reconnect loop.
+    ///
+    /// Two inbound connections are not a real collision - this speaker initiated
+    /// neither - so the older one simply keeps its place.
+    fn resolve_collision(
+        &mut self,
+        idx: usize,
+        now_ms: u64,
+        sockets: &mut SocketRuntime,
+        remote_id: Ipv4Address,
+    ) {
+        let Some(collision) = self.peers[idx].collision.take() else {
+            return;
+        };
+        let addr = self.peers[idx].addr;
+        self.peers[idx].counters.collisions_resolved += 1;
+
+        // The held connection is inbound by construction; keep the peer-initiated
+        // one only when our identifier is the lower of the two.
+        let keep_inbound = !self.peers[idx].stream_inbound && self.router_id < remote_id;
+
+        if !keep_inbound {
+            sockets.tcp_abort(collision.stream, now_ms);
+            self.log(
+                now_ms,
+                addr,
+                format!(
+                    "collision resolved: keeping our connection (local id {} vs remote {})",
+                    self.router_id, remote_id
+                ),
+            );
+            return;
+        }
+
+        // The inbound connection wins. Drop ours and adopt theirs, framer and all,
+        // with the OPEN still unread: the FSM restarts on it from Active and will
+        // send our own OPEN and then process the buffered one exactly as it would
+        // on any freshly accepted connection.
+        if let Some(old) = self.peers[idx].stream.take() {
+            sockets.tcp_abort(old, now_ms);
+        }
+        let peer = &mut self.peers[idx];
+        peer.stream = Some(collision.stream);
+        peer.stream_inbound = true;
+        peer.framer = collision.framer;
+        peer.state = BgpState::Active;
+        peer.hold_deadline = None;
+        peer.keepalive_deadline = None;
+        peer.negotiated = NegotiatedCapabilities::default();
+        peer.connect_retry_deadline = Some(now_ms + self.connect_retry_ms);
+        self.log(
+            now_ms,
+            addr,
+            format!(
+                "collision resolved: adopting the peer's connection (local id {} vs remote {})",
+                self.router_id, remote_id
+            ),
+        );
     }
 
     /// Drops a connection this speaker will not use: an inbound session from an
@@ -660,6 +1089,12 @@ impl BgpRouter {
                 ),
             );
             return;
+        }
+
+        // Resolve any collision before the FSM runs, so the state machine only
+        // ever sees the one connection that survived.
+        if self.peers[idx].collision.is_some() {
+            self.service_collision(idx, now_ms, sockets);
         }
 
         // A dead transport ends the session from any state that owns one.
@@ -718,6 +1153,7 @@ impl BgpRouter {
         match sockets.tcp_connect_from(local, remote, isn) {
             Ok(stream) => {
                 self.peers[idx].stream = Some(stream);
+                self.peers[idx].stream_inbound = false;
                 self.peers[idx].framer.reset();
                 self.peers[idx].state = BgpState::Connect;
                 self.peers[idx].connect_retry_deadline = Some(now_ms + self.connect_retry_ms);
@@ -1203,6 +1639,12 @@ impl BgpRouter {
         if let Some(stream) = self.peers[idx].stream.take() {
             sockets.tcp_abort(stream, now_ms);
         }
+        // A collision candidate held for a session that is going down anyway has
+        // nothing left to be a candidate for, and leaving it would strand a TCP
+        // connection nothing owns.
+        if let Some(collision) = self.peers[idx].collision.take() {
+            sockets.tcp_abort(collision.stream, now_ms);
+        }
 
         let purged = self.adj_rib_in.clear_peer(addr);
         self.adj_rib_out.clear_peer(addr);
@@ -1219,6 +1661,7 @@ impl BgpRouter {
         let peer = &mut self.peers[idx];
         peer.framer.reset();
         peer.state = BgpState::Idle;
+        peer.stream_inbound = false;
         peer.hold_deadline = None;
         peer.keepalive_deadline = None;
         peer.negotiated_hold_ms = 0;
@@ -1244,6 +1687,35 @@ impl BgpRouter {
     // ========================================================================
     // Import
     // ========================================================================
+
+    /// The RFC 4456 section 7 loop checks, applied to any received path.
+    ///
+    /// Returns the reason a reflected route must be discarded, or `None` when it
+    /// is acceptable. Two independent tests, because they catch different things:
+    ///
+    /// * ORIGINATOR_ID equal to our own identifier means this speaker originated
+    ///   the route and a reflector has handed it back. That is a loop even in a
+    ///   cluster this speaker does not belong to.
+    /// * Our own cluster ID in CLUSTER_LIST means the route has already been
+    ///   reflected by this cluster, which is the case the attribute exists for
+    ///   and the one that stops a route circling between two reflectors.
+    ///
+    /// Neither is a protocol violation - the sender did nothing wrong, the
+    /// topology simply brought the route back - so the route is dropped and the
+    /// session is left alone.
+    fn reflection_loop(
+        &self,
+        originator_id: Option<Ipv4Address>,
+        cluster_list: &[Ipv4Address],
+    ) -> Option<ReflectionLoop> {
+        if originator_id == Some(self.router_id) {
+            return Some(ReflectionLoop::Originator);
+        }
+        if cluster_list.contains(&self.cluster_id()) {
+            return Some(ReflectionLoop::Cluster);
+        }
+        None
+    }
 
     /// Applies one received UPDATE to the Adj-RIB-In for this peer.
     ///
@@ -1329,6 +1801,32 @@ impl BgpRouter {
             }
         }
 
+        // Reflection loop: the route has been through this speaker, or through
+        // this cluster, and has come back. The AS_PATH cannot catch this, because
+        // reflection happens entirely inside one AS and never touches it.
+        if let Some(loop_kind) = self.reflection_loop(attrs.originator_id, &attrs.cluster_list) {
+            let n = update.nlri.len() as u64;
+            let detail = match loop_kind {
+                ReflectionLoop::Originator => {
+                    self.peers[idx].counters.originator_loops_rejected += n;
+                    format!("ORIGINATOR_ID is our own BGP identifier {}", self.router_id)
+                }
+                ReflectionLoop::Cluster => {
+                    self.peers[idx].counters.cluster_loops_rejected += n;
+                    format!(
+                        "CLUSTER_LIST already contains cluster {}",
+                        self.cluster_id()
+                    )
+                }
+            };
+            self.log(
+                now_ms,
+                addr,
+                format!("rejected {} reflected prefix(es): {}", n, detail),
+            );
+            return Ok(());
+        }
+
         // AS loop: our own ASN already appears in the path, so the route has been
         // through this AS and must not be re-accepted (RFC 4271 section 9.1.2).
         if attrs.as_path.contains(self.local_as) {
@@ -1355,6 +1853,7 @@ impl BgpRouter {
         // point straight back at us; refuse it rather than build a forwarding loop.
         let own_addr = self.peers[idx].local_addr;
         let peer_router_id = self.peers[idx].remote_router_id.unwrap_or(addr);
+        let from_client = self.peers[idx].is_client();
 
         for prefix in update.nlri {
             if attrs.next_hop == own_addr {
@@ -1392,6 +1891,9 @@ impl BgpRouter {
                     .or(attrs.local_pref)
                     .unwrap_or(BGP_DEFAULT_LOCAL_PREF),
                 atomic_aggregate: attrs.atomic_aggregate,
+                originator_id: attrs.originator_id,
+                cluster_list: attrs.cluster_list.clone(),
+                from_client,
                 received_at_ms: now_ms,
             };
 
@@ -1611,6 +2113,10 @@ impl BgpRouter {
         };
         let route_targets = route_targets_from_communities(&attrs.ext_communities);
         let mobility_seq = mac_mobility_from_communities(&attrs.ext_communities);
+        // Everything else the peer attached travels with the route unchanged, so
+        // re-advertising it - and above all reflecting it - does not quietly strip
+        // communities a downstream speaker depends on.
+        let other_communities = other_ext_communities(&attrs.ext_communities);
 
         // The same AS_PATH policing an IPv4 UPDATE gets. It has to be repeated
         // here rather than inherited: `import_update` returns as soon as it sees
@@ -1648,6 +2154,33 @@ impl BgpRouter {
             }
         }
 
+        // The RFC 4456 loop checks apply to EVPN exactly as they do to IPv4. They
+        // have to: a fabric with two route reflectors carries EVPN routes between
+        // them, and inside one AS the AS_PATH never changes, so it can say nothing
+        // at all about whether a route has been round already.
+        if let Some(loop_kind) = self.reflection_loop(attrs.originator_id, &attrs.cluster_list) {
+            let n = nlri.len() as u64;
+            let detail = match loop_kind {
+                ReflectionLoop::Originator => {
+                    self.peers[idx].counters.originator_loops_rejected += n;
+                    format!("ORIGINATOR_ID is our own BGP identifier {}", self.router_id)
+                }
+                ReflectionLoop::Cluster => {
+                    self.peers[idx].counters.cluster_loops_rejected += n;
+                    format!(
+                        "CLUSTER_LIST already contains cluster {}",
+                        self.cluster_id()
+                    )
+                }
+            };
+            self.log(
+                now_ms,
+                addr,
+                format!("rejected {} reflected EVPN route(s): {}", n, detail),
+            );
+            return Ok(());
+        }
+
         // The AS loop check applies to EVPN exactly as it does to IPv4: a route
         // that has already been through this AS must not come back in.
         if attrs.as_path.contains(self.local_as) {
@@ -1667,6 +2200,13 @@ impl BgpRouter {
 
         let peer_as = self.peers[idx].remote_as;
         let peer_router_id = self.peers[idx].remote_router_id.unwrap_or(addr);
+        let from_client = self.peers[idx].is_client();
+        // A route reflector has no tenant of its own and so imports no tenant
+        // Route Target. Filtering on import would leave it with nothing to
+        // reflect, which is the whole reason it is in the topology. It therefore
+        // retains every route it hears - still under the per-peer ceiling - and
+        // records separately whether each one is usable *here*.
+        let retain_all = self.retains_all_route_targets();
         let mut accepted = 0usize;
 
         for n in nlri {
@@ -1675,18 +2215,26 @@ impl BgpRouter {
                 next_hop,
                 route_targets: route_targets.clone(),
                 mobility_seq,
+                other_communities: other_communities.clone(),
             };
 
-            // Route Target import. A route nobody asked for is dropped here, at
-            // the edge of the Adj-RIB-In, so it can never reach the Loc-RIB and
-            // never program a tunnel for another tenant's VNI.
-            if !route.matches_import(&self.import_rts) {
+            let importable = route.matches_import(&self.import_rts);
+
+            // Route Target import on an ordinary speaker. A route nobody here
+            // asked for is dropped at the edge of the Adj-RIB-In, so it can never
+            // reach the Loc-RIB and never program a tunnel for another tenant.
+            if !importable && !retain_all {
                 self.peers[idx].counters.evpn_rt_rejected += 1;
                 // A route that used to match and no longer does must also go.
                 if self.evpn_adj_rib_in.remove(addr, &route.key()).is_some() {
                     self.evpn_dirty = true;
                 }
                 continue;
+            }
+            if !importable {
+                // Retained for reflection, but counted: the operator can still
+                // see that this speaker is carrying routes it does not use.
+                self.peers[idx].counters.evpn_rt_rejected += 1;
             }
 
             let path = EvpnPath {
@@ -1697,6 +2245,10 @@ impl BgpRouter {
                 origin: attrs.origin,
                 as_path: attrs.as_path.clone(),
                 local_pref: attrs.local_pref.unwrap_or(BGP_DEFAULT_LOCAL_PREF),
+                originator_id: attrs.originator_id,
+                cluster_list: attrs.cluster_list.clone(),
+                from_client,
+                importable,
                 received_at_ms: now_ms,
                 local: false,
             };
@@ -1739,6 +2291,21 @@ impl BgpRouter {
     /// that moved all reduce to "the input set is different", and the output
     /// follows from the input alone.
     fn run_evpn_decision_process(&mut self, now_ms: u64) {
+        self.evpn_decision_runs += 1;
+        // Two outputs from one pass over the same candidate sets.
+        //
+        //  * the advertisement RIB, the best path per route over everything
+        //    received, which is what this speaker may pass on or reflect;
+        //  * the Loc-RIB, the best path per route among the ones this speaker
+        //    actually imports, which is the only thing the VTEP is programmed
+        //    from.
+        //
+        // On a leaf they come out identical, because a route no local instance
+        // asked for was never stored in the first place. On a route reflector the
+        // Loc-RIB is empty and the advertisement RIB holds the whole fabric,
+        // which is exactly the asymmetry that lets a reflector carry a tenant it
+        // is not part of.
+        let mut new_advertise = EvpnLocRib::new();
         let mut new_rib = EvpnLocRib::new();
         let mut keys = self.evpn_adj_rib_in.keys();
         keys.extend(self.evpn_originated.keys().cloned());
@@ -1755,6 +2322,18 @@ impl BgpRouter {
                 candidates.push(l);
             }
             if let Some(best) = select_best_evpn(&candidates) {
+                new_advertise.insert(best.clone());
+            }
+
+            // The best *importable* path is selected among the importable
+            // candidates rather than by testing the overall winner, so a tenant
+            // this speaker does own is not deprived of its route merely because
+            // some other path it cannot use happened to score higher.
+            let importable: Vec<&EvpnPath> = candidates
+                .into_iter()
+                .filter(|p| p.local || p.importable)
+                .collect();
+            if let Some(best) = select_best_evpn(&importable) {
                 new_rib.insert(best.clone());
             }
         }
@@ -1771,6 +2350,7 @@ impl BgpRouter {
             );
         }
         self.evpn_loc_rib = new_rib;
+        self.evpn_advertise_rib = new_advertise;
     }
 
     /// Sends `idx` the EVPN routes it should be hearing, and withdraws the ones
@@ -1794,7 +2374,11 @@ impl BgpRouter {
         if !withdrawn.is_empty() {
             let nlri: Vec<crate::evpn::EvpnNlri> = withdrawn
                 .iter()
-                .filter_map(|k| self.evpn_adj_rib_out.get(addr, k).map(|r| r.nlri.clone()))
+                .filter_map(|k| {
+                    self.evpn_adj_rib_out
+                        .get(addr, k)
+                        .map(|a| a.route.nlri.clone())
+                })
                 .collect();
             let mp = MpUnreachNlri::new(AfiSafi::L2VPN_EVPN, encode_evpn_nlri_list(&nlri));
             let pdu = BgpPdu::Update(BgpUpdateMessage::mp_withdraw(mp));
@@ -1826,14 +2410,14 @@ impl BgpRouter {
         let four_octet = self.peers[idx].negotiated.four_octet_as;
         let mut groups: BTreeMap<(Ipv4Address, Vec<u8>), (BgpPathAttributes, Vec<EvpnRouteKey>)> =
             BTreeMap::new();
-        for (key, route) in &desired {
-            if self.evpn_adj_rib_out.get(addr, key) == Some(route) {
+        for (key, advert) in &desired {
+            if self.evpn_adj_rib_out.get(addr, key) == Some(advert) {
                 continue;
             }
-            let mut attrs = self.evpn_attributes_for(idx, route, four_octet);
+            let mut attrs = Self::evpn_attributes_for(advert, four_octet);
             attrs.mp_reach = None;
             groups
-                .entry((route.next_hop, attrs.encode_for(false)))
+                .entry((advert.route.next_hop, attrs.encode_for(false)))
                 .or_insert_with(|| (attrs, Vec::new()))
                 .1
                 .push(key.clone());
@@ -1842,8 +2426,12 @@ impl BgpRouter {
         for ((next_hop, _), (mut attrs, keys)) in groups {
             let nlri: Vec<crate::evpn::EvpnNlri> = keys
                 .iter()
-                .filter_map(|k| desired.get(k).map(|r| r.nlri.clone()))
+                .filter_map(|k| desired.get(k).map(|a| a.route.nlri.clone()))
                 .collect();
+            let reflected = keys
+                .iter()
+                .filter(|k| desired.get(*k).is_some_and(|a| a.is_reflected()))
+                .count();
             attrs.mp_reach = Some(MpReachNlri::with_ipv4_next_hop(
                 AfiSafi::L2VPN_EVPN,
                 next_hop,
@@ -1853,47 +2441,48 @@ impl BgpRouter {
             if self.send_pdu(idx, sockets, &pdu) {
                 self.peers[idx].counters.updates_sent += 1;
                 self.peers[idx].counters.evpn_advertised += keys.len() as u64;
+                self.peers[idx].counters.routes_reflected += reflected as u64;
                 for k in &keys {
-                    if let Some(route) = desired.get(k) {
-                        self.evpn_adj_rib_out.insert(addr, route.clone());
+                    if let Some(advert) = desired.get(k) {
+                        self.evpn_adj_rib_out.insert(addr, advert.clone());
                     }
                 }
                 self.log(
                     now_ms,
                     addr,
-                    format!("advertised {} EVPN route(s) in one UPDATE", keys.len()),
+                    format!(
+                        "advertised {} EVPN route(s) in one UPDATE ({} reflected)",
+                        keys.len(),
+                        reflected
+                    ),
                 );
             }
         }
     }
 
-    /// The attribute set for one EVPN route on one session.
-    fn evpn_attributes_for(
-        &self,
-        idx: usize,
-        route: &EvpnRoute,
-        four_octet: bool,
-    ) -> BgpPathAttributes {
-        let peer = &self.peers[idx];
-        let is_ebgp = peer.remote_as != self.local_as;
-        let best = self.evpn_loc_rib.get(&route.key());
-
-        let mut as_path = best.map(|p| p.as_path.clone()).unwrap_or_default();
-        if is_ebgp {
-            as_path.prepend(self.local_as);
-        }
-
-        let mut attrs = BgpPathAttributes::new(BgpOrigin::Igp, as_path, Ipv4Address::UNSPECIFIED);
+    /// The attribute set for one EVPN advertisement.
+    ///
+    /// Everything the wire needs was decided when the advertisement was computed,
+    /// so this does no policy of its own. In particular ORIGIN and AS_PATH come
+    /// from the path that was selected rather than being invented here: RFC 4456
+    /// section 10 requires a reflector to pass the attributes through unchanged,
+    /// and a route that entered the fabric as INCOMPLETE has to leave it that way.
+    fn evpn_attributes_for(advert: &EvpnAdvertisedRoute, four_octet: bool) -> BgpPathAttributes {
+        let mut attrs = BgpPathAttributes::new(
+            advert.origin,
+            advert.as_path.clone(),
+            Ipv4Address::UNSPECIFIED,
+        );
         attrs.four_octet_as = four_octet;
-        attrs.ext_communities = route.ext_communities();
-        if !is_ebgp {
-            attrs.local_pref = Some(best.map(|p| p.local_pref).unwrap_or(BGP_DEFAULT_LOCAL_PREF));
-        }
+        attrs.ext_communities = advert.route.ext_communities();
+        attrs.local_pref = advert.local_pref;
+        attrs.originator_id = advert.originator_id;
+        attrs.cluster_list = advert.cluster_list.clone();
         // The NLRI list is filled in by the caller once it knows which routes
         // share this attribute set; the next hop is what identifies the group.
         attrs.mp_reach = Some(MpReachNlri::with_ipv4_next_hop(
             AfiSafi::L2VPN_EVPN,
-            route.next_hop,
+            advert.route.next_hop,
             Vec::new(),
         ));
         attrs
@@ -1905,18 +2494,23 @@ impl BgpRouter {
     /// an eBGP IPv4 next hop is. In an EVPN fabric the next hop names the VTEP
     /// that owns the MAC, and rewriting it at every hop would make every leaf
     /// claim every host.
-    fn compute_evpn_adj_rib_out(&self, idx: usize) -> BTreeMap<EvpnRouteKey, EvpnRoute> {
+    fn compute_evpn_adj_rib_out(&self, idx: usize) -> BTreeMap<EvpnRouteKey, EvpnAdvertisedRoute> {
         let peer = &self.peers[idx];
         let is_ebgp_session = peer.remote_as != self.local_as;
         let mut out = BTreeMap::new();
 
-        for (key, best) in self.evpn_loc_rib.iter() {
+        // Computed from the advertisement RIB, not the Loc-RIB. A route reflector
+        // imports no tenant Route Target, so its Loc-RIB is empty; reading it here
+        // is what would make an EVPN reflector need a VNI it has no business owning.
+        for (key, best) in self.evpn_advertise_rib.iter() {
             // Never advertise a route back to the peer it came from.
             if !best.local && best.peer_addr == peer.addr {
                 continue;
             }
-            // A route learned over iBGP is not re-advertised to another iBGP peer.
-            if !is_ebgp_session && !best.local && best.peer_as == self.local_as {
+            let learned_over_ibgp = !best.local && best.peer_as == self.local_as;
+            let propagation =
+                self.propagation(idx, is_ebgp_session, learned_over_ibgp, best.from_client);
+            if propagation == Propagation::Deny {
                 continue;
             }
             let mut as_path = best.as_path.clone();
@@ -1926,18 +2520,80 @@ impl BgpRouter {
             if as_path.contains(peer.remote_as) {
                 continue;
             }
-            out.insert(key.clone(), best.route.clone());
+
+            let (originator_id, cluster_list) = if propagation == Propagation::Reflect {
+                self.reflection_metadata(
+                    best.originator_id,
+                    &best.cluster_list,
+                    best.peer_router_id,
+                )
+            } else {
+                (None, Vec::new())
+            };
+
+            out.insert(
+                key.clone(),
+                EvpnAdvertisedRoute {
+                    route: best.route.clone(),
+                    origin: best.origin,
+                    as_path,
+                    // LOCAL_PREF is internal-only, exactly as for IPv4 unicast.
+                    local_pref: if is_ebgp_session {
+                        None
+                    } else {
+                        Some(best.local_pref)
+                    },
+                    originator_id,
+                    cluster_list,
+                },
+            );
         }
         out
     }
 
-    /// `show bgp evpn summary`
+    /// How many EVPN routes this speaker is currently withholding from `peer`
+    /// because the RFC 4456 rules do not allow sending them.
+    ///
+    /// Recomputed on demand rather than tracked incrementally: it is a
+    /// diagnostic, and one derived from live state cannot drift away from what
+    /// the speaker is actually doing.
+    pub fn evpn_rr_suppressed(&self, peer: Ipv4Address) -> usize {
+        let Some(idx) = self.peers.iter().position(|p| p.addr == peer) else {
+            return 0;
+        };
+        let is_ebgp_session = self.peers[idx].remote_as != self.local_as;
+        self.evpn_advertise_rib
+            .iter()
+            .filter(|(_, best)| !best.local && best.peer_addr != self.peers[idx].addr)
+            .filter(|(_, best)| {
+                let learned_over_ibgp = !best.local && best.peer_as == self.local_as;
+                self.propagation(idx, is_ebgp_session, learned_over_ibgp, best.from_client)
+                    == Propagation::Deny
+            })
+            .count()
+    }
+
+    /// `show bgp evpn summary`: routes received, locally imported, originated.
     pub fn evpn_route_counts(&self) -> (usize, usize, usize) {
         (
             self.evpn_adj_rib_in.total_routes(),
             self.evpn_loc_rib.len(),
             self.evpn_originated.len(),
         )
+    }
+
+    /// EVPN routes this speaker holds but does not import, which is what a route
+    /// reflector carries for tenants it is not part of.
+    pub fn evpn_retained_not_imported(&self) -> usize {
+        self.evpn_adj_rib_in
+            .iter_paths()
+            .filter(|p| !p.importable)
+            .count()
+    }
+
+    /// The number of routes eligible for advertisement, whether imported or not.
+    pub fn evpn_advertisable_count(&self) -> usize {
+        self.evpn_advertise_rib.len()
     }
 
     // ========================================================================
@@ -2136,9 +2792,13 @@ impl BgpRouter {
 
         for (_, (route, prefixes)) in groups {
             let attrs = Self::attributes_for(&route, four_octet);
+            let reflected = route.originator_id.is_some() || !route.cluster_list.is_empty();
             let pdu = BgpPdu::Update(BgpUpdateMessage::announce(attrs, prefixes.clone()));
             if self.send_pdu(idx, sockets, &pdu) {
                 self.peers[idx].counters.updates_sent += 1;
+                if reflected {
+                    self.peers[idx].counters.routes_reflected += prefixes.len() as u64;
+                }
                 for p in &prefixes {
                     self.adj_rib_out.insert(addr, *p, route.clone());
                 }
@@ -2146,14 +2806,38 @@ impl BgpRouter {
                     now_ms,
                     addr,
                     format!(
-                        "advertised {} prefix(es) with AS_PATH [{}] next-hop {}",
+                        "advertised {} prefix(es) with AS_PATH [{}] next-hop {}{}",
                         prefixes.len(),
                         route.as_path,
-                        route.next_hop
+                        route.next_hop,
+                        if reflected { " (reflected)" } else { "" }
                     ),
                 );
             }
         }
+
+        // Suppression is recounted from scratch each run rather than accumulated,
+        // so the number always describes the fabric as it is now and not the sum
+        // of every transient state it passed through on the way here.
+        self.peers[idx].counters.rr_suppressed = self.rr_suppressed_count(idx) as u64;
+    }
+
+    /// How many IPv4 prefixes the RFC 4456 rules are currently withholding from
+    /// peer `idx`.
+    fn rr_suppressed_count(&self, idx: usize) -> usize {
+        let is_ebgp_session = self.peers[idx].remote_as != self.local_as;
+        self.loc_rib
+            .iter()
+            .filter(|(_, best)| best.peer_addr != self.peers[idx].addr)
+            .filter(|(_, best)| {
+                self.propagation(
+                    idx,
+                    is_ebgp_session,
+                    best.source == PathSource::Ibgp,
+                    best.from_client,
+                ) == Propagation::Deny
+            })
+            .count()
     }
 
     fn attributes_for(route: &AdvertisedRoute, four_octet_as: bool) -> BgpPathAttributes {
@@ -2167,13 +2851,15 @@ impl BgpRouter {
             ext_communities: Vec::new(),
             mp_reach: None,
             mp_unreach: None,
+            originator_id: route.originator_id,
+            cluster_list: route.cluster_list.clone(),
             four_octet_as,
         }
     }
 
     /// Builds the outbound view of the Loc-RIB for one peer, applying split horizon,
-    /// the iBGP re-advertisement rule, export policy, AS_PATH prepending, next-hop
-    /// selection, and outbound loop prevention.
+    /// the iBGP re-advertisement rule and its RFC 4456 exception, export policy,
+    /// AS_PATH prepending, next-hop selection, and outbound loop prevention.
     fn compute_adj_rib_out(&self, idx: usize) -> BTreeMap<Ipv4Prefix, AdvertisedRoute> {
         let peer = &self.peers[idx];
         let is_ebgp_session = peer.remote_as != self.local_as;
@@ -2184,8 +2870,13 @@ impl BgpRouter {
             if best.peer_addr == peer.addr {
                 continue;
             }
-            // A route learned over iBGP is not re-advertised to another iBGP peer.
-            if !is_ebgp_session && best.source == PathSource::Ibgp {
+            let propagation = self.propagation(
+                idx,
+                is_ebgp_session,
+                best.source == PathSource::Ibgp,
+                best.from_client,
+            );
+            if propagation == Propagation::Deny {
                 continue;
             }
 
@@ -2207,14 +2898,20 @@ impl BgpRouter {
                 continue;
             }
 
+            let reflecting = propagation == Propagation::Reflect;
             // An eBGP peer must forward through our own address on the shared subnet,
             // never through whatever we were told. An iBGP peer keeps the original
-            // NEXT_HOP unless next-hop-self is configured.
-            let next_hop = if is_ebgp_session || peer.next_hop_self || best.is_local() {
-                peer.local_addr
-            } else {
-                best.next_hop
-            };
+            // NEXT_HOP unless next-hop-self is configured - except when this speaker
+            // is reflecting, where RFC 4456 section 10 forbids touching the NEXT_HOP
+            // at all. A reflector that rewrote it would insert itself into a
+            // forwarding path it has no business being in, and the client would send
+            // traffic to a router that is only there to carry the control plane.
+            let next_hop =
+                if is_ebgp_session || best.is_local() || (peer.next_hop_self && !reflecting) {
+                    peer.local_addr
+                } else {
+                    best.next_hop
+                };
 
             let local_pref = if is_ebgp_session {
                 // LOCAL_PREF is not sent to external peers (RFC 4271 section 5.1.5).
@@ -2229,6 +2926,16 @@ impl BgpRouter {
                 policy_med.or(best.med)
             };
 
+            let (originator_id, cluster_list) = if reflecting {
+                self.reflection_metadata(
+                    best.originator_id,
+                    &best.cluster_list,
+                    best.peer_router_id,
+                )
+            } else {
+                (None, Vec::new())
+            };
+
             out.insert(
                 *prefix,
                 AdvertisedRoute {
@@ -2237,11 +2944,70 @@ impl BgpRouter {
                     next_hop,
                     med,
                     local_pref,
+                    originator_id,
+                    cluster_list,
                 },
             );
         }
 
         out
+    }
+
+    /// Whether a path may be sent to peer `idx`, and whether doing so is route
+    /// reflection (RFC 4456 section 5).
+    ///
+    /// The plain RFC 4271 rule - a route learned from an internal peer is not
+    /// passed to another internal peer - stays the default. Reflection is an
+    /// exception carved out of it, and only for the pairings the RFC names:
+    ///
+    /// * from a client:     to clients, to non-clients, to external peers
+    /// * from a non-client: to clients and to external peers only
+    /// * locally originated or externally learned: to everyone
+    fn propagation(
+        &self,
+        idx: usize,
+        is_ebgp_session: bool,
+        learned_over_ibgp: bool,
+        from_client: bool,
+    ) -> Propagation {
+        // Reflection metadata is non-transitive and describes this AS only, so an
+        // external session never reflects; it just advertises.
+        if is_ebgp_session || !learned_over_ibgp {
+            return Propagation::Plain;
+        }
+        if from_client || self.peers[idx].is_client() {
+            Propagation::Reflect
+        } else {
+            Propagation::Deny
+        }
+    }
+
+    /// The ORIGINATOR_ID and CLUSTER_LIST to put on a reflected advertisement.
+    ///
+    /// ORIGINATOR_ID is set once, by the first reflector to handle the route, to
+    /// the identifier of the speaker that advertised it. Every later reflector
+    /// passes it through untouched: the attribute names where the route entered
+    /// this AS, not the last router to move it.
+    ///
+    /// The local cluster ID goes on the front of CLUSTER_LIST, so the list reads
+    /// most-recent-reflector first and a receiver only has to find its own cluster
+    /// anywhere in it to know the route has been round already.
+    fn reflection_metadata(
+        &self,
+        received_originator: Option<Ipv4Address>,
+        received_clusters: &[Ipv4Address],
+        advertising_router_id: Ipv4Address,
+    ) -> (Option<Ipv4Address>, Vec<Ipv4Address>) {
+        let originator = Some(received_originator.unwrap_or(advertising_router_id));
+        let mut clusters = Vec::with_capacity(received_clusters.len() + 1);
+        clusters.push(self.cluster_id());
+        clusters.extend_from_slice(received_clusters);
+        // A list already at the accepted ceiling is truncated rather than grown
+        // past it, so this speaker can never emit an attribute its own parser
+        // would refuse. In practice the loop check on receipt stops a route long
+        // before it gets anywhere near here.
+        clusters.truncate(MAX_CLUSTER_LIST_LEN);
+        (originator, clusters)
     }
 
     // ========================================================================

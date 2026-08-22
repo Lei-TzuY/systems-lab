@@ -18,10 +18,16 @@
 //! then the same operation - the input set changed - so none of them can leave a
 //! stale entry behind.
 //!
-//! Second, import is a *filter on the way in*. A route whose Extended Communities
-//! carry no Route Target this speaker imports never reaches the Loc-RIB at all,
-//! which is what makes two VNIs on the same pair of leaves genuinely separate
-//! rather than merely differently labelled.
+//! Second, three things that are easy to conflate are kept apart: a route that
+//! was *received*, a route this speaker *locally imports*, and a route that is
+//! *eligible for advertisement*. On an ordinary leaf they coincide, because a
+//! route no local instance asked for is dropped at the edge of the Adj-RIB-In and
+//! that is what makes two VNIs on the same pair of leaves genuinely separate.
+//! On a route reflector they do not: the reflector owns no tenant, imports no
+//! tenant Route Target, and must still retain every route it hears so it can
+//! reflect it. `EvpnLocRib` therefore holds only what this speaker imports and
+//! programs, while the advertisement RIB holds the best path per route
+//! regardless of Route Target.
 
 use crate::bgp::{AsPath, BGP_DEFAULT_LOCAL_PREF, BgpOrigin, BgpParseError};
 use crate::bgp_ext_comm::{
@@ -148,6 +154,26 @@ pub fn mac_mobility_from_communities(raw: &[[u8; 8]]) -> Option<u32> {
         })
 }
 
+/// The extended communities that are neither a Route Target nor MAC Mobility.
+///
+/// [`EvpnRoute`] stores the two it understands as decoded fields and re-emits
+/// them from those. Anything else has to be kept verbatim, or re-advertising a
+/// route would quietly drop communities the sender attached and a downstream
+/// speaker may act on - which for a route reflector would be a straight
+/// violation of RFC 4456 section 10.
+pub fn other_ext_communities(raw: &[[u8; 8]]) -> Vec<[u8; 8]> {
+    raw.iter()
+        .filter(|c| {
+            RouteTarget::from_bytes(c).is_none()
+                && !matches!(
+                    BgpExtendedCommunity::parse(*c),
+                    Some(BgpExtendedCommunity::MacMobility { .. })
+                )
+        })
+        .copied()
+        .collect()
+}
+
 // ============================================================================
 // Route identity
 // ============================================================================
@@ -248,6 +274,16 @@ pub struct EvpnRoute {
     pub route_targets: Vec<RouteTarget>,
     /// MAC Mobility sequence number, present once a MAC has moved at least once.
     pub mobility_seq: Option<u32>,
+    /// Extended Communities that arrived with the route and are neither a Route
+    /// Target nor MAC Mobility.
+    ///
+    /// They are kept verbatim so that re-advertising - and in particular
+    /// reflecting - a route does not silently strip communities the receiver may
+    /// depend on. RFC 4456 section 10 is explicit that a reflector must not
+    /// modify the path attributes it passes on, and rebuilding the community
+    /// list from only the parts this speaker happens to understand would do
+    /// exactly that.
+    pub other_communities: Vec<[u8; 8]>,
 }
 
 impl EvpnRoute {
@@ -257,6 +293,7 @@ impl EvpnRoute {
             next_hop,
             route_targets,
             mobility_seq: None,
+            other_communities: Vec::new(),
         }
     }
 
@@ -304,6 +341,7 @@ impl EvpnRoute {
                 .serialize(),
             );
         }
+        out.extend_from_slice(&self.other_communities);
         out
     }
 
@@ -325,6 +363,19 @@ pub struct EvpnPath {
     pub origin: BgpOrigin,
     pub as_path: AsPath,
     pub local_pref: u32,
+    /// ORIGINATOR_ID as received (RFC 4456), when the route has been reflected.
+    pub originator_id: Option<Ipv4Address>,
+    /// CLUSTER_LIST as received (RFC 4456).
+    pub cluster_list: Vec<Ipv4Address>,
+    /// True when the peer that advertised this path is a route reflector client
+    /// of ours, which is what decides who it may be reflected on to.
+    pub from_client: bool,
+    /// True when one of this route's Route Targets is one this speaker imports.
+    ///
+    /// A route reflector retains routes it does not import - that is the whole
+    /// point of it - so "stored" and "usable here" are separate questions and
+    /// the answer to the second is recorded rather than re-derived.
+    pub importable: bool,
     pub received_at_ms: u64,
     pub local: bool,
 }
@@ -340,6 +391,10 @@ impl EvpnPath {
             origin: BgpOrigin::Igp,
             as_path: AsPath::empty(),
             local_pref: BGP_DEFAULT_LOCAL_PREF,
+            originator_id: None,
+            cluster_list: Vec::new(),
+            from_client: false,
+            importable: true,
             received_at_ms: now_ms,
             local: true,
         }
@@ -361,6 +416,10 @@ impl EvpnPath {
             origin,
             as_path,
             local_pref,
+            originator_id,
+            cluster_list,
+            from_client,
+            importable,
             received_at_ms: _,
             local,
         } = self;
@@ -372,6 +431,10 @@ impl EvpnPath {
             && *origin == other.origin
             && *as_path == other.as_path
             && *local_pref == other.local_pref
+            && *originator_id == other.originator_id
+            && *cluster_list == other.cluster_list
+            && *from_client == other.from_client
+            && *importable == other.importable
             && *local == other.local
     }
 }
@@ -411,6 +474,20 @@ pub fn compare_evpn_paths(a: &EvpnPath, b: &EvpnPath) -> Ordering {
         other => return other,
     }
     match a.origin.cmp(&b.origin) {
+        Ordering::Equal => {}
+        other => return other,
+    }
+    // Shortest CLUSTER_LIST (RFC 4456 section 9). A route that has been through
+    // no cluster has length zero and so beats any reflected copy of itself.
+    //
+    // Without this, two reflectors serving the same leaf each prefer the other's
+    // reflected copy over the leaf's own advertisement whenever the leaf's BGP
+    // identifier is the higher one - the tie-break below is what would decide it.
+    // Each reflector then withdraws from the other under split horizon, loses the
+    // path it had just preferred, and re-advertises, for ever. The fabric stays
+    // correct throughout but never goes quiet, which in an EVPN fabric means
+    // every leaf reprogramming its overlay on every cycle.
+    match a.cluster_list.len().cmp(&b.cluster_list.len()) {
         Ordering::Equal => {}
         other => return other,
     }
@@ -494,6 +571,15 @@ impl EvpnAdjRibIn {
     pub fn peer_table(&self, peer: Ipv4Address) -> Option<&BTreeMap<EvpnRouteKey, EvpnPath>> {
         self.tables.get(&peer)
     }
+
+    /// The stored paths from one peer, for in-place amendment when something
+    /// about the peer changes rather than about the routes it sent.
+    pub fn peer_table_mut(
+        &mut self,
+        peer: Ipv4Address,
+    ) -> Option<&mut BTreeMap<EvpnRouteKey, EvpnPath>> {
+        self.tables.get_mut(&peer)
+    }
 }
 
 /// The best EVPN path per route. This is the only thing the VTEP is programmed
@@ -540,10 +626,44 @@ impl EvpnLocRib {
     }
 }
 
+/// One EVPN route as advertised to one peer, together with the path attributes
+/// that went on the wire with it.
+///
+/// The attributes belong here rather than being recomputed at send time because
+/// two advertisements of the same route are not necessarily the same
+/// advertisement: the same MAC behind the same VTEP reached through a different
+/// route reflector carries a different CLUSTER_LIST, and a receiver that never
+/// heard the correction would keep loop-prevention state that no longer matches
+/// the path it is actually using.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EvpnAdvertisedRoute {
+    pub route: EvpnRoute,
+    pub origin: BgpOrigin,
+    pub as_path: AsPath,
+    /// LOCAL_PREF, sent on internal sessions only (RFC 4271 section 5.1.5).
+    pub local_pref: Option<u32>,
+    /// ORIGINATOR_ID, present only when this speaker is reflecting the route.
+    pub originator_id: Option<Ipv4Address>,
+    /// CLUSTER_LIST, with the local cluster ID already prepended when reflecting.
+    pub cluster_list: Vec<Ipv4Address>,
+}
+
+impl EvpnAdvertisedRoute {
+    pub fn key(&self) -> EvpnRouteKey {
+        self.route.key()
+    }
+
+    /// True when this advertisement carries RFC 4456 reflection metadata, which
+    /// is exactly when it was produced by reflecting somebody else's route.
+    pub fn is_reflected(&self) -> bool {
+        self.originator_id.is_some() || !self.cluster_list.is_empty()
+    }
+}
+
 /// What this speaker has advertised to each peer, so only differences are sent.
 #[derive(Debug, Clone, Default)]
 pub struct EvpnAdjRibOut {
-    tables: BTreeMap<Ipv4Address, BTreeMap<EvpnRouteKey, EvpnRoute>>,
+    tables: BTreeMap<Ipv4Address, BTreeMap<EvpnRouteKey, EvpnAdvertisedRoute>>,
 }
 
 impl EvpnAdjRibOut {
@@ -551,18 +671,18 @@ impl EvpnAdjRibOut {
         EvpnAdjRibOut::default()
     }
 
-    pub fn get(&self, peer: Ipv4Address, key: &EvpnRouteKey) -> Option<&EvpnRoute> {
+    pub fn get(&self, peer: Ipv4Address, key: &EvpnRouteKey) -> Option<&EvpnAdvertisedRoute> {
         self.tables.get(&peer).and_then(|t| t.get(key))
     }
 
-    pub fn insert(&mut self, peer: Ipv4Address, route: EvpnRoute) {
+    pub fn insert(&mut self, peer: Ipv4Address, advert: EvpnAdvertisedRoute) {
         self.tables
             .entry(peer)
             .or_default()
-            .insert(route.key(), route);
+            .insert(advert.key(), advert);
     }
 
-    pub fn remove(&mut self, peer: Ipv4Address, key: &EvpnRouteKey) -> Option<EvpnRoute> {
+    pub fn remove(&mut self, peer: Ipv4Address, key: &EvpnRouteKey) -> Option<EvpnAdvertisedRoute> {
         let removed = self.tables.get_mut(&peer).and_then(|t| t.remove(key));
         if self.tables.get(&peer).is_some_and(|t| t.is_empty()) {
             self.tables.remove(&peer);
@@ -585,7 +705,23 @@ impl EvpnAdjRibOut {
         self.tables.get(&peer).map(|t| t.len()).unwrap_or(0)
     }
 
-    pub fn peer_table(&self, peer: Ipv4Address) -> Option<&BTreeMap<EvpnRouteKey, EvpnRoute>> {
+    /// Total advertisements held across all peers.
+    pub fn total_routes(&self) -> usize {
+        self.tables.values().map(|t| t.len()).sum()
+    }
+
+    /// How many of the advertisements to `peer` carry reflection metadata.
+    pub fn reflected_count(&self, peer: Ipv4Address) -> usize {
+        self.tables
+            .get(&peer)
+            .map(|t| t.values().filter(|a| a.is_reflected()).count())
+            .unwrap_or(0)
+    }
+
+    pub fn peer_table(
+        &self,
+        peer: Ipv4Address,
+    ) -> Option<&BTreeMap<EvpnRouteKey, EvpnAdvertisedRoute>> {
         self.tables.get(&peer)
     }
 }
@@ -697,6 +833,10 @@ mod tests {
             origin: BgpOrigin::Igp,
             as_path: AsPath::sequence(vec![65002]),
             local_pref: BGP_DEFAULT_LOCAL_PREF,
+            originator_id: None,
+            cluster_list: Vec::new(),
+            from_client: false,
+            importable: true,
             received_at_ms: 0,
             local: false,
         }

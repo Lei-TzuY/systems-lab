@@ -361,6 +361,20 @@ pub const BGP_DEFAULT_LOCAL_PREF: u32 = 100;
 pub const BGP_ATTR_LOCAL_PREF: u8 = 5;
 pub const BGP_ATTR_ATOMIC_AGGREGATE: u8 = 6;
 pub const BGP_ATTR_AGGREGATOR: u8 = 7;
+/// ORIGINATOR_ID (RFC 4456 section 8): the BGP identifier of the speaker inside
+/// this AS that first advertised the route. Optional and non-transitive.
+pub const BGP_ATTR_ORIGINATOR_ID: u8 = 9;
+/// CLUSTER_LIST (RFC 4456 section 8): the cluster IDs of every route reflector
+/// the route has passed through. Optional and non-transitive.
+pub const BGP_ATTR_CLUSTER_LIST: u8 = 10;
+
+/// Largest CLUSTER_LIST this speaker will accept, in cluster IDs.
+///
+/// RFC 4456 puts no ceiling on the list, but an unbounded one is an attack
+/// surface: a peer could send a 4096-byte attribute of nothing but cluster IDs
+/// on every UPDATE and make every reflection hop copy it. A real hierarchy is a
+/// handful of levels deep, so anything past this is malformed rather than deep.
+pub const MAX_CLUSTER_LIST_LEN: usize = 32;
 
 pub const BGP_ATTR_FLAG_OPTIONAL: u8 = 0x80;
 pub const BGP_ATTR_FLAG_TRANSITIVE: u8 = 0x40;
@@ -849,6 +863,13 @@ pub struct BgpPathAttributes {
     pub ext_communities: Vec<[u8; 8]>,
     pub mp_reach: Option<MpReachNlri>,
     pub mp_unreach: Option<MpUnreachNlri>,
+    /// ORIGINATOR_ID (RFC 4456): the BGP identifier of the speaker that first
+    /// advertised this route inside the local AS. Set by a route reflector the
+    /// first time it reflects a route, and never rewritten afterwards.
+    pub originator_id: Option<Ipv4Address>,
+    /// CLUSTER_LIST (RFC 4456): the cluster IDs of the reflectors this route has
+    /// already traversed, most recent first.
+    pub cluster_list: Vec<Ipv4Address>,
     /// True when the AS_PATH on this UPDATE should be written with 4-octet ASNs,
     /// which is the case exactly when both speakers negotiated the capability.
     pub four_octet_as: bool,
@@ -866,6 +887,8 @@ impl BgpPathAttributes {
             ext_communities: Vec::new(),
             mp_reach: None,
             mp_unreach: None,
+            originator_id: None,
+            cluster_list: Vec::new(),
             four_octet_as: false,
         }
     }
@@ -951,6 +974,29 @@ impl BgpPathAttributes {
 
         if self.atomic_aggregate {
             out.extend_from_slice(&[BGP_ATTR_FLAG_TRANSITIVE, BGP_ATTR_ATOMIC_AGGREGATE, 0]);
+        }
+
+        // The two reflection attributes are optional *non-transitive*: they
+        // describe reflection inside one autonomous system, and an eBGP speaker
+        // that received them would have no cluster topology to interpret them
+        // against. The flag byte carries OPTIONAL and not TRANSITIVE, which is
+        // what tells a receiver to drop them rather than pass them on.
+        if let Some(id) = self.originator_id {
+            out.extend_from_slice(&[BGP_ATTR_FLAG_OPTIONAL, BGP_ATTR_ORIGINATOR_ID, 4]);
+            out.extend_from_slice(&id.0);
+        }
+
+        if !self.cluster_list.is_empty() {
+            let mut value = Vec::with_capacity(self.cluster_list.len() * 4);
+            for id in &self.cluster_list {
+                value.extend_from_slice(&id.0);
+            }
+            push_attribute(
+                &mut out,
+                BGP_ATTR_FLAG_OPTIONAL,
+                BGP_ATTR_CLUSTER_LIST,
+                &value,
+            );
         }
 
         if !self.ext_communities.is_empty() {
@@ -1187,6 +1233,8 @@ impl BgpUpdateMessage {
             ref mut ext_communities,
             ref mut mp_reach,
             ref mut mp_unreach,
+            ref mut originator_id,
+            ref mut cluster_list,
         } = parsed;
         let mut seen: Vec<u8> = Vec::new();
 
@@ -1347,6 +1395,61 @@ impl BgpUpdateMessage {
                         ext_communities.push(comm);
                     }
                 }
+                BGP_ATTR_ORIGINATOR_ID => {
+                    // Optional and non-transitive. A speaker that marks it
+                    // transitive would have it leak out of the AS it describes,
+                    // so the flags are checked, not just tolerated.
+                    if !optional || flags & BGP_ATTR_FLAG_TRANSITIVE != 0 {
+                        return Err(BgpParseError::update(
+                            BGP_SUB_ATTRIBUTE_FLAGS_ERROR,
+                            "ORIGINATOR_ID must be optional and non-transitive",
+                        ));
+                    }
+                    if value.len() != 4 {
+                        return Err(BgpParseError::update(
+                            BGP_SUB_ATTRIBUTE_LENGTH_ERROR,
+                            format!(
+                                "ORIGINATOR_ID is {} bytes, must be exactly four",
+                                value.len()
+                            ),
+                        ));
+                    }
+                    *originator_id = Some(Ipv4Address([value[0], value[1], value[2], value[3]]));
+                }
+                BGP_ATTR_CLUSTER_LIST => {
+                    if !optional || flags & BGP_ATTR_FLAG_TRANSITIVE != 0 {
+                        return Err(BgpParseError::update(
+                            BGP_SUB_ATTRIBUTE_FLAGS_ERROR,
+                            "CLUSTER_LIST must be optional and non-transitive",
+                        ));
+                    }
+                    // Every cluster ID is exactly four bytes. A length that is
+                    // not a multiple of four means the list is truncated, and a
+                    // truncated cluster list cannot be trusted for the one thing
+                    // it exists to do: detect a reflection loop.
+                    if value.is_empty() || !value.len().is_multiple_of(4) {
+                        return Err(BgpParseError::update(
+                            BGP_SUB_ATTRIBUTE_LENGTH_ERROR,
+                            format!(
+                                "CLUSTER_LIST is {} bytes, must be a non-zero multiple of 4",
+                                value.len()
+                            ),
+                        ));
+                    }
+                    if value.len() / 4 > MAX_CLUSTER_LIST_LEN {
+                        return Err(BgpParseError::update(
+                            BGP_SUB_ATTRIBUTE_LENGTH_ERROR,
+                            format!(
+                                "CLUSTER_LIST carries {} cluster IDs, more than the {} accepted",
+                                value.len() / 4,
+                                MAX_CLUSTER_LIST_LEN
+                            ),
+                        ));
+                    }
+                    for chunk in value.chunks_exact(4) {
+                        cluster_list.push(Ipv4Address([chunk[0], chunk[1], chunk[2], chunk[3]]));
+                    }
+                }
                 BGP_ATTR_MP_REACH_NLRI => {
                     if !optional {
                         return Err(BgpParseError::update(
@@ -1398,6 +1501,8 @@ struct ParsedAttributes {
     ext_communities: Vec<[u8; 8]>,
     mp_reach: Option<MpReachNlri>,
     mp_unreach: Option<MpUnreachNlri>,
+    originator_id: Option<Ipv4Address>,
+    cluster_list: Vec<Ipv4Address>,
 }
 
 impl ParsedAttributes {
@@ -1452,6 +1557,8 @@ impl ParsedAttributes {
             ext_communities: self.ext_communities,
             mp_reach: self.mp_reach,
             mp_unreach: self.mp_unreach,
+            originator_id: self.originator_id,
+            cluster_list: self.cluster_list,
             four_octet_as: false,
         })
     }
@@ -1831,6 +1938,35 @@ impl BgpFramer {
         Ok(Some(frame))
     }
 
+    /// Returns the next complete message *without* consuming it.
+    ///
+    /// Connection collision resolution (RFC 4271 section 6.8) needs the peer's
+    /// BGP identifier out of an OPEN before it knows which of two connections to
+    /// keep. If the connection that carried it wins, that OPEN still has to be
+    /// processed by the ordinary FSM, so it must still be in the buffer.
+    pub fn peek_frame(&self) -> Result<Option<&[u8]>, BgpParseError> {
+        if self.buf.len() < BGP_HEADER_LEN {
+            return Ok(None);
+        }
+        if self.buf[0..16] != BGP_MARKER {
+            return Err(BgpParseError::header(
+                BGP_SUB_CONNECTION_NOT_SYNCHRONIZED,
+                "marker is not the all-ones synchronisation pattern",
+            ));
+        }
+        let length = u16::from_be_bytes([self.buf[16], self.buf[17]]) as usize;
+        if !(BGP_HEADER_LEN..=BGP_MAX_MESSAGE_LEN).contains(&length) {
+            return Err(BgpParseError::header(
+                BGP_SUB_BAD_MESSAGE_LENGTH,
+                format!("length field {} is outside 19..=4096", length),
+            ));
+        }
+        if self.buf.len() < length {
+            return Ok(None);
+        }
+        Ok(Some(&self.buf[..length]))
+    }
+
     /// Bytes currently held awaiting the rest of a message.
     pub fn buffered(&self) -> usize {
         self.buf.len()
@@ -2017,5 +2153,150 @@ mod tests {
         assert_eq!(set_first.first_as(), Some(65002));
 
         assert_eq!(AsPath::empty().leading_as(), None);
+    }
+}
+
+#[cfg(test)]
+mod reflection_tests {
+    use super::*;
+
+    fn attrs_with(
+        originator: Option<Ipv4Address>,
+        clusters: Vec<Ipv4Address>,
+    ) -> BgpPathAttributes {
+        let mut a = BgpPathAttributes::new(
+            BgpOrigin::Igp,
+            AsPath::empty(),
+            Ipv4Address::new(10, 0, 0, 1),
+        );
+        a.local_pref = Some(100);
+        a.originator_id = originator;
+        a.cluster_list = clusters;
+        a
+    }
+
+    /// Walks an encoded attribute block, yielding `(flags, type, value)` for each
+    /// attribute.
+    ///
+    /// Scanning for a type byte with a sliding window would find one inside a
+    /// value - a cluster list of 10.0.0.x addresses is full of bytes that happen
+    /// to equal the CLUSTER_LIST type code - so the block is parsed rather than
+    /// searched.
+    fn walk_attributes(encoded: &[u8]) -> Vec<(u8, u8, Vec<u8>)> {
+        let mut out = Vec::new();
+        let mut i = 0usize;
+        while i + 3 <= encoded.len() {
+            let flags = encoded[i];
+            let type_code = encoded[i + 1];
+            let extended = flags & BGP_ATTR_FLAG_EXT_LEN != 0;
+            let (len, hdr) = if extended {
+                if i + 4 > encoded.len() {
+                    break;
+                }
+                (
+                    u16::from_be_bytes([encoded[i + 2], encoded[i + 3]]) as usize,
+                    4,
+                )
+            } else {
+                (encoded[i + 2] as usize, 3)
+            };
+            let end = i + hdr + len;
+            if end > encoded.len() {
+                break;
+            }
+            out.push((flags, type_code, encoded[i + hdr..end].to_vec()));
+            i = end;
+        }
+        out
+    }
+
+    fn round_trip(a: &BgpPathAttributes) -> BgpPathAttributes {
+        let nlri = vec![Ipv4Prefix::new(Ipv4Address::new(172, 16, 0, 0), 24)];
+        let frame = BgpPdu::Update(BgpUpdateMessage::announce(a.clone(), nlri)).serialize();
+        match BgpPdu::parse(&frame).expect("the UPDATE did not decode") {
+            BgpPdu::Update(u) => u.attributes.expect("no attributes came back"),
+            other => panic!("expected an UPDATE, got {}", other.type_name()),
+        }
+    }
+
+    #[test]
+    fn test_originator_id_and_cluster_list_survive_the_wire() {
+        let clusters = vec![
+            Ipv4Address::new(10, 0, 0, 254),
+            Ipv4Address::new(10, 0, 0, 253),
+        ];
+        let sent = attrs_with(Some(Ipv4Address::new(1, 1, 1, 1)), clusters.clone());
+        let back = round_trip(&sent);
+
+        assert_eq!(back.originator_id, Some(Ipv4Address::new(1, 1, 1, 1)));
+        assert_eq!(back.cluster_list, clusters, "the cluster order changed");
+        // The rest of the attribute set is untouched by carrying them.
+        assert_eq!(back.origin, sent.origin);
+        assert_eq!(back.next_hop, sent.next_hop);
+        assert_eq!(back.local_pref, sent.local_pref);
+    }
+
+    #[test]
+    fn test_a_route_with_no_reflection_metadata_encodes_none() {
+        let sent = attrs_with(None, Vec::new());
+        let encoded = sent.encode();
+        assert!(
+            !walk_attributes(&encoded)
+                .iter()
+                .any(|(_, t, _)| *t == BGP_ATTR_ORIGINATOR_ID || *t == BGP_ATTR_CLUSTER_LIST),
+            "reflection metadata was written for a route that has none"
+        );
+        let back = round_trip(&sent);
+        assert_eq!(back.originator_id, None);
+        assert!(back.cluster_list.is_empty());
+    }
+
+    #[test]
+    fn test_both_attributes_are_optional_and_non_transitive_on_the_wire() {
+        let sent = attrs_with(
+            Some(Ipv4Address::new(1, 1, 1, 1)),
+            vec![Ipv4Address::new(9, 9, 9, 9)],
+        );
+        let mut seen = 0;
+        for (flags, type_code, _) in walk_attributes(&sent.encode()) {
+            if type_code != BGP_ATTR_ORIGINATOR_ID && type_code != BGP_ATTR_CLUSTER_LIST {
+                continue;
+            }
+            seen += 1;
+            assert_ne!(
+                flags & BGP_ATTR_FLAG_OPTIONAL,
+                0,
+                "attribute {} was not marked optional",
+                type_code
+            );
+            assert_eq!(
+                flags & BGP_ATTR_FLAG_TRANSITIVE,
+                0,
+                "attribute {} was marked transitive; it must not leave the AS",
+                type_code
+            );
+        }
+        assert_eq!(seen, 2, "one of the two attributes was not encoded at all");
+    }
+
+    #[test]
+    fn test_a_long_cluster_list_uses_the_extended_length_form() {
+        // 64 cluster IDs is 256 bytes, one past what a single length octet can
+        // describe. Writing `len as u8` would truncate it to zero and leave the
+        // receiver's parser reading cluster IDs as attribute headers.
+        let clusters: Vec<Ipv4Address> = (0..64)
+            .map(|i| Ipv4Address::new(10, 0, 0, i as u8))
+            .collect();
+        let sent = attrs_with(None, clusters.clone());
+        let (flags, _, value) = walk_attributes(&sent.encode())
+            .into_iter()
+            .find(|(_, t, _)| *t == BGP_ATTR_CLUSTER_LIST)
+            .expect("no CLUSTER_LIST was encoded");
+        assert_ne!(
+            flags & BGP_ATTR_FLAG_EXT_LEN,
+            0,
+            "a 256-byte CLUSTER_LIST was written with the one-octet length form"
+        );
+        assert_eq!(value.len(), clusters.len() * 4);
     }
 }

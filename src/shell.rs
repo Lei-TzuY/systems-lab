@@ -5591,9 +5591,10 @@ impl NetworkShell {
                     continue;
                 }
                 for key in keys {
-                    if let Some(route) = bgp.evpn_adj_rib_out.get(peer.addr, &key) {
+                    if let Some(advert) = bgp.evpn_adj_rib_out.get(peer.addr, &key) {
+                        let route = &advert.route;
                         println!(
-                            "  to {}: [{}] {} {} vni {} next-hop {} rt [{}]{}",
+                            "  to {}: [{}] {} {} vni {} next-hop {} rt [{}]{}{}",
                             peer.addr,
                             key.route_type(),
                             key.rd(),
@@ -5609,7 +5610,8 @@ impl NetworkShell {
                             route
                                 .mobility_seq
                                 .map(|s| format!(" seq {}", s))
-                                .unwrap_or_default()
+                                .unwrap_or_default(),
+                            format_reflection(advert.originator_id, &advert.cluster_list)
                         );
                     }
                 }
@@ -10332,4 +10334,24 @@ fn http_respond(request: &str) -> String {
         body.len(),
         body
     )
+}
+
+/// Renders the RFC 4456 reflection metadata of one route for a diagnostic line.
+///
+/// Returns an empty string when there is none, so an ordinary un-reflected route
+/// prints exactly as it did before route reflection existed.
+fn format_reflection(originator: Option<Ipv4Address>, clusters: &[Ipv4Address]) -> String {
+    if originator.is_none() && clusters.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from(" [reflected");
+    if let Some(id) = originator {
+        out.push_str(&format!(" originator {}", id));
+    }
+    if !clusters.is_empty() {
+        let list: Vec<String> = clusters.iter().map(|c| c.to_string()).collect();
+        out.push_str(&format!(" cluster-list {}", list.join(" ")));
+    }
+    out.push(']');
+    out
 }

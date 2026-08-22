@@ -53,6 +53,17 @@ pub struct BgpPath {
     pub med: Option<u32>,
     pub local_pref: u32,
     pub atomic_aggregate: bool,
+    /// ORIGINATOR_ID as received (RFC 4456). Present when this path has already
+    /// been reflected at least once; the identifier is of the speaker that first
+    /// advertised the route inside this AS, not of the reflector that passed it on.
+    pub originator_id: Option<Ipv4Address>,
+    /// CLUSTER_LIST as received (RFC 4456): the reflectors already traversed.
+    pub cluster_list: Vec<Ipv4Address>,
+    /// True when this path was learned from a peer configured as a route
+    /// reflector client. It decides who the path may be reflected on to, so it
+    /// is a property of the path rather than something re-derived at export
+    /// time: the peer's role could change while the path is still stored.
+    pub from_client: bool,
     /// Simulated time at which this path was received or originated.
     pub received_at_ms: u64,
 }
@@ -73,6 +84,9 @@ impl BgpPath {
             med: None,
             local_pref: BGP_DEFAULT_LOCAL_PREF,
             atomic_aggregate: false,
+            originator_id: None,
+            cluster_list: Vec::new(),
+            from_client: false,
             received_at_ms: 0,
         }
     }
@@ -113,6 +127,9 @@ impl BgpPath {
             med,
             local_pref,
             atomic_aggregate,
+            originator_id,
+            cluster_list,
+            from_client,
             received_at_ms: _,
         } = self;
 
@@ -127,6 +144,9 @@ impl BgpPath {
             && *med == other.med
             && *local_pref == other.local_pref
             && *atomic_aggregate == other.atomic_aggregate
+            && *originator_id == other.originator_id
+            && *cluster_list == other.cluster_list
+            && *from_client == other.from_client
     }
 }
 
@@ -179,7 +199,25 @@ pub fn compare_paths(a: &BgpPath, b: &BgpPath) -> Ordering {
         _ => {}
     }
 
-    // 6. Lowest peer BGP identifier, then 7. lowest peer address.
+    // 6. Shortest CLUSTER_LIST (RFC 4456 section 9), a route with no CLUSTER_LIST
+    //    counting as length zero.
+    //
+    //    This step is not decoration. Without it a pair of route reflectors can
+    //    prefer each other's reflected copy of a client's route over the copy the
+    //    client advertised to them directly - which happens whenever the client's
+    //    BGP identifier is the higher one, since that is what the next step
+    //    compares. Each reflector then sees its best path as coming from the
+    //    other, stops advertising to it under split horizon, immediately loses
+    //    that path again, and re-advertises: a persistent oscillation that never
+    //    settles and never stops sending UPDATEs. Preferring the shorter cluster
+    //    list makes the client's own advertisement win every time, because it has
+    //    not been through a cluster at all.
+    match a.cluster_list.len().cmp(&b.cluster_list.len()) {
+        Ordering::Equal => {}
+        other => return other,
+    }
+
+    // 7. Lowest peer BGP identifier, then 8. lowest peer address.
     a.peer_router_id
         .cmp(&b.peer_router_id)
         .then(a.peer_addr.cmp(&b.peer_addr))
@@ -232,6 +270,18 @@ impl AdjRibIn {
 
     pub fn peer_table(&self, peer: Ipv4Address) -> Option<&BTreeMap<Ipv4Prefix, BgpPath>> {
         self.tables.get(&peer)
+    }
+
+    /// The stored paths from one peer, for in-place amendment.
+    ///
+    /// Used when something about the *peer* changes rather than the routes: a
+    /// neighbour promoted to route reflector client is still advertising exactly
+    /// what it was, but what may now be done with it has changed.
+    pub fn peer_table_mut(
+        &mut self,
+        peer: Ipv4Address,
+    ) -> Option<&mut BTreeMap<Ipv4Prefix, BgpPath>> {
+        self.tables.get_mut(&peer)
     }
 
     pub fn prefix_count(&self, peer: Ipv4Address) -> usize {
@@ -326,6 +376,12 @@ pub struct AdvertisedRoute {
     pub next_hop: Ipv4Address,
     pub med: Option<u32>,
     pub local_pref: Option<u32>,
+    /// ORIGINATOR_ID sent with this advertisement, present only when this
+    /// speaker is reflecting the route (RFC 4456).
+    pub originator_id: Option<Ipv4Address>,
+    /// CLUSTER_LIST sent with this advertisement, with the local cluster ID
+    /// already prepended when reflecting.
+    pub cluster_list: Vec<Ipv4Address>,
 }
 
 /// What this speaker has advertised to each peer.
@@ -535,6 +591,9 @@ mod tests {
             med: None,
             local_pref,
             atomic_aggregate: false,
+            originator_id: None,
+            cluster_list: Vec::new(),
+            from_client: false,
             received_at_ms: 0,
         }
     }
