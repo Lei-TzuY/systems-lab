@@ -76,7 +76,9 @@ use crate::ipv6::{Ipv6Address, Ipv6Packet, NEXT_HEADER_ICMPV6, NEXT_HEADER_UDP};
 use crate::isis::{ETHERTYPE_ISIS, IsisHelloPacket};
 use crate::l2tp::{IP_PROTO_L2TPV3, L2tpv3Packet};
 use crate::lab::{LabRouter, VirtualLab};
-use crate::lab::{build_bgp_demo_fabric, build_evpn_fabric, converge_bgp};
+use crate::lab::{
+    build_bgp_demo_fabric, build_evpn_dual_rr_fabric, build_evpn_fabric, converge_bgp,
+};
 use crate::lacp::{
     ETHERTYPE_SLOW_PROTOCOLS, LACP_STATE_ACTIVITY, LACP_STATE_AGGREGATION, LACP_STATE_COLLECTING,
     LACP_STATE_DISTRIBUTING, LACP_STATE_SYNCHRONIZATION, LacpPacket, LacpPortInfo,
@@ -220,6 +222,11 @@ pub struct NetworkShell {
     /// on first use, so the shell reports real session and RIB state rather than a
     /// hard-coded sample.
     bgp_fabric: Option<VirtualLab>,
+    /// Live two-reflector EVPN fabric backing the `bgp rr` diagnostics. Neither
+    /// reflector in it has a VTEP, a VNI, or an import Route Target, so what the
+    /// commands print about reflection is what a reflector really does rather
+    /// than what a leaf does while wearing the label.
+    rr_fabric: Option<VirtualLab>,
     lldp_table: LldpNeighborTable,
     cdp_table: CdpNeighborTable,
     ospf_lsdb: OspfLsdb,
@@ -1224,6 +1231,7 @@ impl NetworkShell {
             bgp_rib,
             evpn_fabric: None,
             bgp_fabric: None,
+            rr_fabric: None,
             lldp_table,
             cdp_table,
             ospf_lsdb,
@@ -5515,6 +5523,292 @@ impl NetworkShell {
         );
     }
 
+    /// Builds and converges the two-reflector EVPN fabric on first use.
+    ///
+    /// The tenant hosts exchange a packet so each leaf learns a local MAC and
+    /// originates a Type 2 route for it. Everything the `bgp rr` commands print
+    /// is then read out of that live fabric.
+    fn ensure_rr_fabric(&mut self) -> u64 {
+        if self.rr_fabric.is_none() {
+            let mut lab = build_evpn_dual_rr_fabric();
+            lab.run_until(250, 90_000, |l| {
+                l.routers
+                    .values()
+                    .filter_map(|r| r.bgp())
+                    .all(|b| b.peers().iter().all(|p| p.carries_evpn()))
+            });
+            for (host, dst) in [
+                ("host_a", Ipv4Address::new(192, 168, 10, 22)),
+                ("host_b", Ipv4Address::new(192, 168, 10, 11)),
+            ] {
+                if let Some(h) = lab.host_mut(host)
+                    && let Some(frame) = h.stack.ping4(dst, 1, 1, b"rr")
+                {
+                    lab.send_from_host(host, frame);
+                }
+                lab.run_until(250, 30_000, |_| false);
+            }
+            if lab
+                .routers
+                .values()
+                .filter_map(|r| r.vtep())
+                .any(|v| v.remote_mac_count() == 0)
+            {
+                println!("(warning: the route reflector fabric did not fully converge)");
+            }
+            self.rr_fabric = Some(lab);
+        }
+        self.rr_fabric
+            .as_ref()
+            .map(|l| l.current_time_ms)
+            .unwrap_or(0)
+    }
+
+    /// Router names in the reflector fabric, reflectors first then leaves, each
+    /// group in name order so the output is stable.
+    fn rr_fabric_routers(&self) -> Vec<String> {
+        let Some(lab) = self.rr_fabric.as_ref() else {
+            return Vec::new();
+        };
+        let mut reflectors: Vec<String> = Vec::new();
+        let mut leaves: Vec<String> = Vec::new();
+        for (name, r) in lab.routers.iter() {
+            let Some(b) = r.bgp() else { continue };
+            if b.is_route_reflector() {
+                reflectors.push(name.clone());
+            } else {
+                leaves.push(name.clone());
+            }
+        }
+        reflectors.sort();
+        leaves.sort();
+        reflectors.extend(leaves);
+        reflectors
+    }
+
+    /// `bgp rr` - reflection role, cluster identifier, and per-neighbour counts.
+    fn print_rr_summary(&self, now_ms: u64) {
+        let Some(lab) = self.rr_fabric.as_ref() else {
+            return;
+        };
+        println!(
+            "BGP route reflection (RFC 4456), simulated time {}ms",
+            now_ms
+        );
+        for name in self.rr_fabric_routers() {
+            let Some(bgp) = lab.router(&name).and_then(|r| r.bgp()) else {
+                continue;
+            };
+            let is_rr = bgp.is_route_reflector();
+            println!(
+                "\n== {} == router-id {}  AS {}  route-reflector {}",
+                name,
+                bgp.router_id,
+                bgp.local_as,
+                if is_rr { "enabled" } else { "disabled" }
+            );
+            if is_rr {
+                println!(
+                    "  cluster-id {}  clients [{}]",
+                    bgp.cluster_id(),
+                    bgp.route_reflector_clients()
+                        .iter()
+                        .map(|a| a.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+            let rts: Vec<String> = bgp
+                .import_route_targets()
+                .iter()
+                .map(|r| r.to_string())
+                .collect();
+            let (received, imported, originated) = bgp.evpn_route_counts();
+            println!(
+                "  import route-targets [{}]  retain-all-RTs {}",
+                rts.join(", "),
+                if bgp.retains_all_route_targets() {
+                    "yes"
+                } else {
+                    "no"
+                }
+            );
+            println!(
+                "  EVPN routes: received {}  locally imported {}  retained-not-imported {}  \
+                 advertisable {}  originated {}",
+                received,
+                imported,
+                bgp.evpn_retained_not_imported(),
+                bgp.evpn_advertisable_count(),
+                originated
+            );
+            println!(
+                "  VXLAN tenant forwarding: {}",
+                match lab.router(&name).and_then(|r| r.vtep()) {
+                    Some(v) => format!(
+                        "VTEP {} with {} remote MAC(s)",
+                        v.source_ip,
+                        v.remote_mac_count()
+                    ),
+                    None => "none (control plane only)".to_string(),
+                }
+            );
+
+            for peer in bgp.peers() {
+                let families: Vec<String> = peer
+                    .negotiated_families()
+                    .iter()
+                    .map(|f| f.name())
+                    .collect();
+                println!(
+                    "  neighbor {} role {:<10} state {:<11} up {}",
+                    peer.addr,
+                    peer.role.as_str(),
+                    peer.state,
+                    peer.uptime_ms(now_ms)
+                        .map(|u| format!("{}ms", u))
+                        .unwrap_or("down".into())
+                );
+                println!(
+                    "    AFI/SAFI [{}]  4-octet ASN {}",
+                    families.join(", "),
+                    if peer.negotiated.four_octet_as {
+                        "yes"
+                    } else {
+                        "no"
+                    }
+                );
+                println!(
+                    "    EVPN received {}  advertised {}  reflected {}  withheld-by-propagation-rules {}",
+                    peer.counters.evpn_received,
+                    peer.counters.evpn_advertised,
+                    peer.counters.routes_reflected,
+                    bgp.evpn_rr_suppressed(peer.addr)
+                );
+                println!(
+                    "    loops rejected: originator {}  cluster {}   collisions resolved {}",
+                    peer.counters.originator_loops_rejected,
+                    peer.counters.cluster_loops_rejected,
+                    peer.counters.collisions_resolved
+                );
+            }
+        }
+    }
+
+    /// `bgp rr clients` - who is a client of whom, and what that permits.
+    fn print_rr_clients(&self) {
+        let Some(lab) = self.rr_fabric.as_ref() else {
+            return;
+        };
+        println!("  Speaker   Neighbor         Role         Reflects to");
+        for name in self.rr_fabric_routers() {
+            let Some(bgp) = lab.router(&name).and_then(|r| r.bgp()) else {
+                continue;
+            };
+            for peer in bgp.peers() {
+                // What a route from this neighbour may be passed on to, which is
+                // the whole of RFC 4456 section 5 in one line.
+                let reflects_to = if !bgp.is_route_reflector() {
+                    "nothing (not a reflector)"
+                } else if peer.is_client() {
+                    "clients and non-clients"
+                } else {
+                    "clients only"
+                };
+                println!(
+                    "  {:<9} {:<16} {:<12} {}",
+                    name,
+                    peer.addr.to_string(),
+                    peer.role.as_str(),
+                    reflects_to
+                );
+            }
+        }
+    }
+
+    /// `bgp rr routes` - every EVPN path held, with where it came from and
+    /// whether this speaker can actually use it.
+    fn print_rr_routes(&self) {
+        let Some(lab) = self.rr_fabric.as_ref() else {
+            return;
+        };
+        for name in self.rr_fabric_routers() {
+            let Some(bgp) = lab.router(&name).and_then(|r| r.bgp()) else {
+                continue;
+            };
+            println!("== {} EVPN Adj-RIB-In ==", name);
+            let mut any = false;
+            for path in bgp.evpn_adj_rib_in.iter_paths() {
+                any = true;
+                let key = path.route.key();
+                println!(
+                    "  [{}] {:<19} {:<17} vni {:<6} next-hop {:<13} from {} ({}) {}{}",
+                    key.route_type(),
+                    key.rd().to_string(),
+                    key.mac().map(|m| m.to_string()).unwrap_or("-".into()),
+                    path.route.vni(),
+                    path.route.next_hop.to_string(),
+                    path.peer_addr,
+                    if path.from_client {
+                        "client"
+                    } else {
+                        "non-client"
+                    },
+                    if path.importable {
+                        "imported"
+                    } else {
+                        "retained-only"
+                    },
+                    format_reflection(path.originator_id, &path.cluster_list)
+                );
+            }
+            if !any {
+                println!("  (no EVPN routes received)");
+            }
+        }
+    }
+
+    /// `bgp rr advertised` - the EVPN Adj-RIB-Out, marking what was reflected.
+    fn print_rr_advertised(&self) {
+        let Some(lab) = self.rr_fabric.as_ref() else {
+            return;
+        };
+        for name in self.rr_fabric_routers() {
+            let Some(bgp) = lab.router(&name).and_then(|r| r.bgp()) else {
+                continue;
+            };
+            println!("== {} EVPN Adj-RIB-Out ==", name);
+            for peer in bgp.peers() {
+                let keys = bgp.evpn_adj_rib_out.keys(peer.addr);
+                if keys.is_empty() {
+                    println!("  to {} ({}): nothing advertised", peer.addr, peer.role);
+                    continue;
+                }
+                println!(
+                    "  to {} ({}): {} route(s), {} reflected",
+                    peer.addr,
+                    peer.role,
+                    keys.len(),
+                    bgp.evpn_adj_rib_out.reflected_count(peer.addr)
+                );
+                for key in keys {
+                    let Some(advert) = bgp.evpn_adj_rib_out.get(peer.addr, &key) else {
+                        continue;
+                    };
+                    println!(
+                        "    [{}] {:<19} {:<17} vni {:<6} next-hop {}{}",
+                        key.route_type(),
+                        key.rd().to_string(),
+                        key.mac().map(|m| m.to_string()).unwrap_or("-".into()),
+                        advert.route.vni(),
+                        advert.route.next_hop,
+                        format_reflection(advert.originator_id, &advert.cluster_list)
+                    );
+                }
+            }
+        }
+    }
+
     /// `bgp evpn routes` - the EVPN Loc-RIB and Adj-RIB-In on every leaf.
     fn print_evpn_routes(&self, adj_rib_in: bool) {
         for name in self.evpn_leaves() {
@@ -5684,6 +5978,7 @@ impl NetworkShell {
         for (label, fabric) in [
             ("EVPN fabric", self.evpn_fabric.as_ref()),
             ("IPv4 fabric", self.bgp_fabric.as_ref()),
+            ("route reflector fabric", self.rr_fabric.as_ref()),
         ] {
             let Some(lab) = fabric else { continue };
             let mut names: Vec<&String> = lab.routers.keys().collect();
@@ -5703,6 +5998,14 @@ impl NetworkShell {
                     println!("  neighbor {} ({})", peer.addr, peer.state);
                     println!("    peer offered : {}", peer.negotiated.peer);
                     println!("    negotiated   : {}", families.join(", "));
+                    // Route reflection needs no capability of its own, so the
+                    // role is printed beside the negotiated families rather than
+                    // among them: it is configuration, not something agreed.
+                    println!(
+                        "    reflection   : role {}, local cluster-id {}",
+                        peer.role.as_str(),
+                        bgp.cluster_id()
+                    );
                 }
             }
         }
@@ -7529,16 +7832,33 @@ impl NetworkShell {
                 println!("  events | log      - the control-plane event log");
                 println!("  capabilities      - what each speaker offers and each session agreed");
                 println!("  evpn [summary|routes|advertised|adj-rib-in] - the MP-BGP EVPN family");
+                println!(
+                    "  rr [clients|routes|advertised] - RFC 4456 route reflection, on a fabric"
+                );
+                println!(
+                    "                      whose reflectors have no VNI and no import Route Target"
+                );
                 println!("  open              - show the framing of a BGP OPEN message");
                 println!("  local-rib         - the static sample RIB kept for reference");
                 return;
             }
             "capabilities" | "caps" => {
-                // Both fabrics, so the output shows an IPv4-only session beside
-                // one that negotiated EVPN.
+                // Every fabric, so the output shows an IPv4-only session beside
+                // one that negotiated EVPN, and beside a reflector session.
                 self.ensure_bgp_fabric();
                 self.ensure_evpn_fabric();
+                self.ensure_rr_fabric();
                 self.print_bgp_capabilities();
+                return;
+            }
+            "rr" | "route-reflector" | "reflector" => {
+                let now = self.ensure_rr_fabric();
+                match args.get(1).copied().unwrap_or("summary") {
+                    "clients" | "peers" => self.print_rr_clients(),
+                    "routes" | "adj-rib-in" | "received" => self.print_rr_routes(),
+                    "advertised" | "adj-rib-out" | "reflected" => self.print_rr_advertised(),
+                    _ => self.print_rr_summary(now),
+                }
                 return;
             }
             "evpn" => {
