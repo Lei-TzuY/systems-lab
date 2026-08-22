@@ -409,6 +409,142 @@ fn test_flooding_reaches_only_real_tenant_vteps() {
 }
 
 // ============================================================================
+// The propagation rules, on the EVPN family
+// ============================================================================
+
+/// Brings the single-reflector fabric up with each leaf given the role named,
+/// then lets a host speak so there is something to reflect.
+fn fabric_with_roles(leaf1_client: bool, leaf2_client: bool) -> VirtualLab {
+    let mut lab = build_evpn_rr_fabric();
+    {
+        let rr = lab.router_mut("rr1").unwrap();
+        rr.set_bgp_route_reflector_client(LEAF1_VTEP, leaf1_client);
+        rr.set_bgp_route_reflector_client(LEAF2_VTEP, leaf2_client);
+    }
+    assert!(converge_sessions_evpn(&mut lab, 60_000));
+    ping_a_to_b(&mut lab, 0x5555, 1);
+    lab
+}
+
+#[test]
+fn test_an_evpn_route_from_a_non_client_never_reaches_another_non_client() {
+    // Both leaves demoted. The sessions are identical to the working fabric in
+    // every other way - same AS, same capability, same Route Targets - so the
+    // only thing that can stop leaf1's MAC reaching leaf2 is the propagation
+    // rule, which is the point.
+    let lab = fabric_with_roles(false, false);
+
+    let rr = lab.router("rr1").unwrap().bgp().unwrap();
+    assert!(
+        !rr.is_route_reflector(),
+        "a speaker with no clients is not a reflector"
+    );
+    for leaf in [LEAF1_VTEP, LEAF2_VTEP] {
+        assert_eq!(
+            rr.evpn_adj_rib_out.route_count(leaf),
+            0,
+            "an internally learned EVPN route was advertised to a non-client"
+        );
+    }
+    assert_eq!(
+        remote_mac(&lab, "leaf2", VNI, MAC_A),
+        None,
+        "host A crossed a speaker that was not a reflector"
+    );
+    assert_eq!(remote_mac(&lab, "leaf1", VNI, MAC_B), None);
+}
+
+#[test]
+fn test_an_evpn_route_from_a_client_reaches_a_non_client() {
+    // leaf1 is a client, leaf2 is not. A route from a client may go anywhere, so
+    // host A must still reach leaf2 - and because leaf2 is a client of nobody,
+    // its own route may go only to clients, which leaf1 is.
+    let lab = fabric_with_roles(true, false);
+
+    let rr = lab.router("rr1").unwrap().bgp().unwrap();
+    assert!(rr.is_route_reflector());
+    assert_eq!(
+        rr.peer_role(LEAF1_VTEP),
+        Some(BgpPeerRole::RouteReflectorClient)
+    );
+    assert_eq!(rr.peer_role(LEAF2_VTEP), Some(BgpPeerRole::Normal));
+
+    assert_eq!(
+        remote_mac(&lab, "leaf2", VNI, MAC_A),
+        Some(LEAF1_VTEP),
+        "client -> RR -> non-client was not reflected on the EVPN family"
+    );
+    assert_eq!(
+        remote_mac(&lab, "leaf1", VNI, MAC_B),
+        Some(LEAF2_VTEP),
+        "non-client -> RR -> client was not reflected on the EVPN family"
+    );
+
+    // Both directions carry the reflection metadata, whichever end was the client.
+    for (leaf, mac, originator) in [("leaf2", MAC_A, LEAF1_ID), ("leaf1", MAC_B, LEAF2_ID)] {
+        let path = lab
+            .router(leaf)
+            .unwrap()
+            .bgp()
+            .unwrap()
+            .evpn_adj_rib_in
+            .iter_paths()
+            .find(|p| p.route.mac() == Some(mac))
+            .unwrap_or_else(|| panic!("{} has no path for the far host", leaf))
+            .clone();
+        assert_eq!(path.originator_id, Some(originator));
+        assert_eq!(path.cluster_list, vec![RR1_ID]);
+    }
+}
+
+#[test]
+fn test_demoting_both_leaves_stops_a_working_evpn_fabric_and_promoting_restores_it() {
+    // The same fabric, reconfigured while it is running. What was reflected must
+    // be withdrawn, the overlay must forget it, and putting the roles back must
+    // bring it all the way to tenant forwarding again.
+    let mut lab = converged();
+    assert_eq!(remote_mac(&lab, "leaf2", VNI, MAC_A), Some(LEAF1_VTEP));
+
+    {
+        let rr = lab.router_mut("rr1").unwrap();
+        rr.set_bgp_route_reflector_client(LEAF1_VTEP, false);
+        rr.set_bgp_route_reflector_client(LEAF2_VTEP, false);
+    }
+    lab.run_until(250, lab.current_time_ms + 60_000, |_| false);
+
+    assert_eq!(
+        remote_mac(&lab, "leaf2", VNI, MAC_A),
+        None,
+        "demoting both clients did not withdraw what had been reflected"
+    );
+    assert!(
+        lab.router("leaf2")
+            .unwrap()
+            .vtep()
+            .unwrap()
+            .instance(VNI)
+            .unwrap()
+            .remote_vteps
+            .is_empty(),
+        "the flood list survived the reflector being switched off"
+    );
+
+    {
+        let rr = lab.router_mut("rr1").unwrap();
+        rr.set_bgp_route_reflector_client(LEAF1_VTEP, true);
+        rr.set_bgp_route_reflector_client(LEAF2_VTEP, true);
+    }
+    lab.run_until(250, lab.current_time_ms + 60_000, |_| false);
+
+    assert_eq!(
+        remote_mac(&lab, "leaf2", VNI, MAC_A),
+        Some(LEAF1_VTEP),
+        "promoting the clients back did not restore the overlay"
+    );
+    assert_eq!(remote_mac(&lab, "leaf1", VNI, MAC_B), Some(LEAF2_VTEP));
+}
+
+// ============================================================================
 // Attribute fidelity across reflection
 // ============================================================================
 
