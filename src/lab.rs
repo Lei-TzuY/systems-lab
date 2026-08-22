@@ -331,6 +331,34 @@ impl LabRouter {
         }
     }
 
+    /// Marks a configured neighbour as a route reflector client (RFC 4456).
+    ///
+    /// The role is what turns an ordinary iBGP speaker into a reflector; nothing
+    /// about the topology implies it.
+    pub fn set_bgp_route_reflector_client(&mut self, peer_ip: Ipv4Address, on: bool) -> bool {
+        self.bgp
+            .as_mut()
+            .map(|b| b.set_route_reflector_client(peer_ip, on))
+            .unwrap_or(false)
+    }
+
+    /// Sets the CLUSTER_LIST identifier this speaker prepends when it reflects.
+    /// Two reflectors serving one set of clients should share it.
+    pub fn set_bgp_cluster_id(&mut self, id: Ipv4Address) {
+        if let Some(b) = self.bgp.as_mut() {
+            b.set_cluster_id(id);
+        }
+    }
+
+    /// Turns this speaker into an EVPN route reflector: it offers the L2VPN EVPN
+    /// family so its clients can negotiate it, but configures no VTEP, no VNI and
+    /// no import Route Target, so it can never become a tenant forwarding endpoint.
+    pub fn enable_evpn_control_plane_only(&mut self) {
+        if let Some(b) = self.bgp.as_mut() {
+            b.enable_family(AfiSafi::L2VPN_EVPN);
+        }
+    }
+
     /// Originates a prefix into BGP from this router. The advertised next hop defaults
     /// to the interface address inside the prefix, falling back to the first interface.
     pub fn originate_bgp_prefix(&mut self, prefix: Ipv4Prefix) {
@@ -1682,6 +1710,552 @@ pub fn build_evpn_fabric(leaf1_as: u32, leaf2_as: u32) -> VirtualLab {
     lab.add_router(spine);
     lab.add_router(leaf2);
     lab
+}
+
+// ============================================================================
+// EVPN route reflector fabrics
+// ============================================================================
+
+/// The autonomous system every speaker in the route reflector fabrics belongs
+/// to. Route reflection is an iBGP mechanism, so there is only one.
+pub const RR_FABRIC_AS: u32 = 65000;
+/// The tenant VNI carried across the route reflector fabrics.
+pub const RR_FABRIC_VNI: u32 = 5001;
+
+/// Builds the single route reflector EVPN fabric:
+///
+/// ```text
+///  host_a 192.168.10.11              host_b 192.168.10.22
+///        |  tenant1                        |  tenant2
+///      leaf1                             leaf2
+///      VTEP 10.0.0.1                     VTEP 10.0.0.2
+///        \  10.1.0.1/30        10.2.0.2/30  /
+///         \------------ rr1 --------------/
+///                 VTEP-less, 10.0.0.254
+/// ```
+///
+/// `rr1` is the whole point of the topology. It is the IP underlay between the
+/// two leaves *and* the only BGP peer either of them has, but it is configured
+/// with:
+///
+/// * no VTEP,
+/// * no EVPN instance and no VNI,
+/// * no import Route Target.
+///
+/// It offers the L2VPN EVPN family so its clients can negotiate it, and both
+/// leaves are marked route reflector clients. Every EVPN route that reaches a
+/// leaf therefore has to have been retained and reflected by a router that owns
+/// no part of the tenant it is carrying - which is exactly what an EVPN route
+/// reflector is for, and what the old Route-Target-filter-on-import design made
+/// impossible.
+///
+/// There is no leaf-to-leaf BGP session.
+pub fn build_evpn_rr_fabric() -> VirtualLab {
+    let mut lab = VirtualLab::new();
+    for link in [
+        "tenant1", "tenant2", "leaf1rr1", "leaf2rr1", "lo1", "lo2", "lorr1",
+    ] {
+        lab.add_link(link);
+    }
+    add_rr_tenant_hosts(&mut lab);
+
+    let mut leaf1 = rr_leaf(
+        "leaf1",
+        1,
+        LEAF1_VTEP,
+        ip(1, 1, 1, 1),
+        "tenant1",
+        ip(192, 168, 10, 1),
+    );
+    leaf1.add_interface("eth1", rr_mac(0x01, 0x01), ip(10, 1, 0, 1), 30, "leaf1rr1");
+    leaf1.add_interface("lo0", rr_mac(0x01, 0xFF), LEAF1_VTEP, 32, "lo1");
+    for dst in [RR1_ID, LEAF2_VTEP] {
+        leaf1.routing_table.add_route_from(
+            dst,
+            32,
+            Some(ip(10, 1, 0, 2)),
+            "eth1",
+            RouteSource::Static,
+        );
+    }
+    leaf1.add_bgp_peer(RR1_ID, RR_FABRIC_AS, LEAF1_VTEP, BgpPeerMode::Active);
+    finish_rr_leaf(&mut leaf1, LEAF1_VTEP);
+
+    let mut leaf2 = rr_leaf(
+        "leaf2",
+        3,
+        LEAF2_VTEP,
+        ip(3, 3, 3, 3),
+        "tenant2",
+        ip(192, 168, 10, 2),
+    );
+    leaf2.add_interface("eth1", rr_mac(0x03, 0x01), ip(10, 2, 0, 2), 30, "leaf2rr1");
+    leaf2.add_interface("lo0", rr_mac(0x03, 0xFF), LEAF2_VTEP, 32, "lo2");
+    for dst in [RR1_ID, LEAF1_VTEP] {
+        leaf2.routing_table.add_route_from(
+            dst,
+            32,
+            Some(ip(10, 2, 0, 1)),
+            "eth1",
+            RouteSource::Static,
+        );
+    }
+    leaf2.add_bgp_peer(RR1_ID, RR_FABRIC_AS, LEAF2_VTEP, BgpPeerMode::Active);
+    finish_rr_leaf(&mut leaf2, LEAF2_VTEP);
+
+    let mut rr1 = LabRouter::new("rr1");
+    rr1.add_interface("eth0", rr_mac(0x09, 0x00), ip(10, 1, 0, 2), 30, "leaf1rr1");
+    rr1.add_interface("eth1", rr_mac(0x09, 0x01), ip(10, 2, 0, 1), 30, "leaf2rr1");
+    rr1.add_interface("lo0", rr_mac(0x09, 0xFF), RR1_ID, 32, "lorr1");
+    rr1.routing_table.add_route_from(
+        LEAF1_VTEP,
+        32,
+        Some(ip(10, 1, 0, 1)),
+        "eth0",
+        RouteSource::Static,
+    );
+    rr1.routing_table.add_route_from(
+        LEAF2_VTEP,
+        32,
+        Some(ip(10, 2, 0, 2)),
+        "eth1",
+        RouteSource::Static,
+    );
+    rr1.enable_bgp(RR_FABRIC_AS, RR1_ID).set_hold_time(9);
+    rr1.enable_evpn_control_plane_only();
+    for leaf in [LEAF1_VTEP, LEAF2_VTEP] {
+        rr1.add_bgp_peer(leaf, RR_FABRIC_AS, RR1_ID, BgpPeerMode::Passive);
+        rr1.set_bgp_route_reflector_client(leaf, true);
+    }
+
+    lab.add_router(leaf1);
+    lab.add_router(rr1);
+    lab.add_router(leaf2);
+    lab
+}
+
+/// Builds the redundant two-reflector EVPN fabric:
+///
+/// ```text
+///                    rr1  10.0.0.254
+///                  /     \
+///              leaf1     leaf2
+///                  \     /
+///                    rr2  10.0.0.253
+/// ```
+///
+/// Both leaves peer with both reflectors and with neither each other. The two
+/// reflectors also peer with one another as ordinary non-client iBGP neighbours,
+/// which is what makes this topology a loop test as well as a redundancy one: a
+/// route from leaf1 reaches rr2 twice over, directly and through rr1, and comes
+/// back towards leaf1 from a reflector leaf1 never gave it to.
+///
+/// The reflectors keep *distinct* cluster identifiers, so each accepts what the
+/// other reflects and both paths genuinely exist. Nothing stops them from being
+/// given the same one - and `set_bgp_cluster_id` is how - but then each would
+/// discard the other's reflections as its own cluster coming back, which is a
+/// different design with only one live path.
+pub fn build_evpn_dual_rr_fabric() -> VirtualLab {
+    dual_rr_fabric(ip(1, 1, 1, 1), ip(3, 3, 3, 3))
+}
+
+/// The same two-reflector fabric with the leaves' BGP identifiers numbered
+/// *above* both reflectors'.
+///
+/// The topology is identical and nothing about it is misconfigured; a fabric
+/// whose loopbacks happen to number that way is ordinary. What it is for is a
+/// regression: the decision process ends in a comparison of the advertising
+/// speaker's identifier, so a high leaf identifier is exactly the condition under
+/// which each reflector would otherwise prefer the *other* reflector's reflected
+/// copy of a leaf's route over the copy the leaf advertised to it directly.
+///
+/// Each reflector would then see its best path as coming from its peer, withdraw
+/// from it under split horizon, immediately lose the path that withdrawal
+/// removed, and re-advertise - for ever. The fabric stays correct throughout and
+/// never goes quiet. RFC 4456 section 9's shortest-CLUSTER_LIST tie-break is what
+/// stops it, and this fabric is how that stays true.
+pub fn build_evpn_rr_oscillation_fabric() -> VirtualLab {
+    dual_rr_fabric(ip(200, 1, 1, 1), ip(200, 3, 3, 3))
+}
+
+fn dual_rr_fabric(leaf1_id: Ipv4Address, leaf2_id: Ipv4Address) -> VirtualLab {
+    let mut lab = VirtualLab::new();
+    for link in [
+        "tenant1", "tenant2", "leaf1rr1", "leaf2rr1", "leaf1rr2", "leaf2rr2", "rr1rr2", "lo1",
+        "lo2", "lorr1", "lorr2",
+    ] {
+        lab.add_link(link);
+    }
+    add_rr_tenant_hosts(&mut lab);
+
+    // Leaf 1: one underlay link to each reflector, and a session to each.
+    let mut leaf1 = rr_leaf(
+        "leaf1",
+        1,
+        LEAF1_VTEP,
+        leaf1_id,
+        "tenant1",
+        ip(192, 168, 10, 1),
+    );
+    leaf1.add_interface("eth1", rr_mac(0x01, 0x01), ip(10, 1, 0, 1), 30, "leaf1rr1");
+    leaf1.add_interface("eth2", rr_mac(0x01, 0x02), ip(10, 3, 0, 1), 30, "leaf1rr2");
+    leaf1.add_interface("lo0", rr_mac(0x01, 0xFF), LEAF1_VTEP, 32, "lo1");
+    leaf1.routing_table.add_route_from(
+        RR1_ID,
+        32,
+        Some(ip(10, 1, 0, 2)),
+        "eth1",
+        RouteSource::Static,
+    );
+    leaf1.routing_table.add_route_from(
+        RR2_ID,
+        32,
+        Some(ip(10, 3, 0, 2)),
+        "eth2",
+        RouteSource::Static,
+    );
+    // The far leaf is reachable through either reflector; rr1 is the primary
+    // underlay path, which is deliberate: it means killing rr1's *sessions* does
+    // not by itself kill the VXLAN path, so a failover test measures the control
+    // plane rather than the wire.
+    leaf1.routing_table.add_route_from(
+        LEAF2_VTEP,
+        32,
+        Some(ip(10, 3, 0, 2)),
+        "eth2",
+        RouteSource::Static,
+    );
+    leaf1.add_bgp_peer(RR1_ID, RR_FABRIC_AS, LEAF1_VTEP, BgpPeerMode::Active);
+    leaf1.add_bgp_peer(RR2_ID, RR_FABRIC_AS, LEAF1_VTEP, BgpPeerMode::Active);
+    finish_rr_leaf(&mut leaf1, LEAF1_VTEP);
+
+    let mut leaf2 = rr_leaf(
+        "leaf2",
+        3,
+        LEAF2_VTEP,
+        leaf2_id,
+        "tenant2",
+        ip(192, 168, 10, 2),
+    );
+    leaf2.add_interface("eth1", rr_mac(0x03, 0x01), ip(10, 2, 0, 2), 30, "leaf2rr1");
+    leaf2.add_interface("eth2", rr_mac(0x03, 0x02), ip(10, 4, 0, 2), 30, "leaf2rr2");
+    leaf2.add_interface("lo0", rr_mac(0x03, 0xFF), LEAF2_VTEP, 32, "lo2");
+    leaf2.routing_table.add_route_from(
+        RR1_ID,
+        32,
+        Some(ip(10, 2, 0, 1)),
+        "eth1",
+        RouteSource::Static,
+    );
+    leaf2.routing_table.add_route_from(
+        RR2_ID,
+        32,
+        Some(ip(10, 4, 0, 1)),
+        "eth2",
+        RouteSource::Static,
+    );
+    leaf2.routing_table.add_route_from(
+        LEAF1_VTEP,
+        32,
+        Some(ip(10, 4, 0, 1)),
+        "eth2",
+        RouteSource::Static,
+    );
+    leaf2.add_bgp_peer(RR1_ID, RR_FABRIC_AS, LEAF2_VTEP, BgpPeerMode::Active);
+    leaf2.add_bgp_peer(RR2_ID, RR_FABRIC_AS, LEAF2_VTEP, BgpPeerMode::Active);
+    finish_rr_leaf(&mut leaf2, LEAF2_VTEP);
+
+    let mut rr1 = LabRouter::new("rr1");
+    rr1.add_interface("eth0", rr_mac(0x09, 0x00), ip(10, 1, 0, 2), 30, "leaf1rr1");
+    rr1.add_interface("eth1", rr_mac(0x09, 0x01), ip(10, 2, 0, 1), 30, "leaf2rr1");
+    rr1.add_interface("eth2", rr_mac(0x09, 0x02), ip(10, 5, 0, 1), 30, "rr1rr2");
+    rr1.add_interface("lo0", rr_mac(0x09, 0xFF), RR1_ID, 32, "lorr1");
+    rr1.routing_table.add_route_from(
+        LEAF1_VTEP,
+        32,
+        Some(ip(10, 1, 0, 1)),
+        "eth0",
+        RouteSource::Static,
+    );
+    rr1.routing_table.add_route_from(
+        LEAF2_VTEP,
+        32,
+        Some(ip(10, 2, 0, 2)),
+        "eth1",
+        RouteSource::Static,
+    );
+    rr1.routing_table.add_route_from(
+        RR2_ID,
+        32,
+        Some(ip(10, 5, 0, 2)),
+        "eth2",
+        RouteSource::Static,
+    );
+    rr1.enable_bgp(RR_FABRIC_AS, RR1_ID).set_hold_time(9);
+    rr1.enable_evpn_control_plane_only();
+    for leaf in [LEAF1_VTEP, LEAF2_VTEP] {
+        rr1.add_bgp_peer(leaf, RR_FABRIC_AS, RR1_ID, BgpPeerMode::Passive);
+        rr1.set_bgp_route_reflector_client(leaf, true);
+    }
+    // The reflectors are ordinary non-client peers to each other.
+    rr1.add_bgp_peer(RR2_ID, RR_FABRIC_AS, RR1_ID, BgpPeerMode::Active);
+
+    let mut rr2 = LabRouter::new("rr2");
+    rr2.add_interface("eth0", rr_mac(0x08, 0x00), ip(10, 3, 0, 2), 30, "leaf1rr2");
+    rr2.add_interface("eth1", rr_mac(0x08, 0x01), ip(10, 4, 0, 1), 30, "leaf2rr2");
+    rr2.add_interface("eth2", rr_mac(0x08, 0x02), ip(10, 5, 0, 2), 30, "rr1rr2");
+    rr2.add_interface("lo0", rr_mac(0x08, 0xFF), RR2_ID, 32, "lorr2");
+    rr2.routing_table.add_route_from(
+        LEAF1_VTEP,
+        32,
+        Some(ip(10, 3, 0, 1)),
+        "eth0",
+        RouteSource::Static,
+    );
+    rr2.routing_table.add_route_from(
+        LEAF2_VTEP,
+        32,
+        Some(ip(10, 4, 0, 2)),
+        "eth1",
+        RouteSource::Static,
+    );
+    rr2.routing_table.add_route_from(
+        RR1_ID,
+        32,
+        Some(ip(10, 5, 0, 1)),
+        "eth2",
+        RouteSource::Static,
+    );
+    rr2.enable_bgp(RR_FABRIC_AS, RR2_ID).set_hold_time(9);
+    rr2.enable_evpn_control_plane_only();
+    for leaf in [LEAF1_VTEP, LEAF2_VTEP] {
+        rr2.add_bgp_peer(leaf, RR_FABRIC_AS, RR2_ID, BgpPeerMode::Passive);
+        rr2.set_bgp_route_reflector_client(leaf, true);
+    }
+    rr2.add_bgp_peer(RR1_ID, RR_FABRIC_AS, RR2_ID, BgpPeerMode::Passive);
+
+    lab.add_router(leaf1);
+    lab.add_router(rr1);
+    lab.add_router(rr2);
+    lab.add_router(leaf2);
+    lab
+}
+
+/// Builds a deterministic control-plane scale fabric: two route reflectors and
+/// `leaf_count` leaves, all on one underlay subnet, with `vnis` tenants on every
+/// leaf.
+///
+/// ```text
+///   rr1 10.20.0.254 ----+----+----+---- ... ----+---- rr2 10.20.0.253
+///                       |    |    |             |
+///                    leaf1 leaf2 leaf3   ...  leafN     10.20.0.1 .. 10.20.0.N
+/// ```
+///
+/// Every leaf peers with both reflectors and with no other leaf; the reflectors
+/// peer with each other as non-clients. Neither reflector has a VTEP, an EVPN
+/// instance, or an import Route Target, so every route in the fabric is one a
+/// reflector is carrying purely on somebody else's behalf.
+///
+/// One shared subnet is what keeps this a *control-plane* test: every VTEP
+/// address is directly reachable, so nothing that happens depends on underlay
+/// routing, and a route that fails to arrive failed in BGP.
+///
+/// The tenants are VNIs `6001 ..= 6000 + vnis`, each with Route Target
+/// `65000:<vni>`, imported and exported by every leaf. Local MACs are learned
+/// with [`Vtep::learn_local`] on a logical access port per tenant, which is the
+/// same path a frame arriving on a real access port takes; what is skipped is
+/// generating the frames, because this test is about how many routes the control
+/// plane can carry correctly and not about the data plane.
+pub fn build_evpn_rr_scale_fabric(leaf_count: u8, vnis: u32) -> VirtualLab {
+    assert!(
+        (1..=200).contains(&leaf_count),
+        "leaf_count must fit the last octet of the underlay subnet"
+    );
+    let mut lab = VirtualLab::new();
+    lab.add_link("underlay");
+
+    let rr1 = ip(10, 20, 0, 254);
+    let rr2 = ip(10, 20, 0, 253);
+
+    let mut reflectors = Vec::new();
+    for (name, addr, id, tag) in [
+        ("rr1", rr1, ip(9, 9, 9, 1), 0xF1u8),
+        ("rr2", rr2, ip(9, 9, 9, 2), 0xF2u8),
+    ] {
+        let mut r = LabRouter::new(name);
+        r.add_interface("eth0", rr_mac(tag, 0x00), addr, 24, "underlay");
+        r.enable_bgp(RR_FABRIC_AS, id).set_hold_time(9);
+        r.enable_evpn_control_plane_only();
+        reflectors.push((name, addr, r));
+    }
+
+    for n in 1..=leaf_count {
+        let addr = ip(10, 20, 0, n);
+        let mut leaf = LabRouter::new(&format!("leaf{}", n));
+        leaf.add_interface("eth0", rr_mac(n, 0x00), addr, 24, "underlay");
+        leaf.enable_bgp(RR_FABRIC_AS, ip(1, 1, 1, n))
+            .set_hold_time(9);
+        leaf.add_bgp_peer(rr1, RR_FABRIC_AS, addr, BgpPeerMode::Active);
+        leaf.add_bgp_peer(rr2, RR_FABRIC_AS, addr, BgpPeerMode::Active);
+        leaf.enable_vtep(addr, "eth0");
+        for v in 0..vnis {
+            let vni = SCALE_BASE_VNI + v;
+            leaf.add_evpn_instance(
+                vni,
+                RouteDistinguisher::new(addr, vni as u16),
+                &[evpn_rt(65000, vni)],
+                &[evpn_rt(65000, vni)],
+            );
+            leaf.attach_evpn_access_port(vni, &scale_access_port(vni));
+        }
+        lab.add_router(leaf);
+
+        for (_, _, r) in reflectors.iter_mut() {
+            r.add_bgp_peer(addr, RR_FABRIC_AS, r.interfaces[0].ip, BgpPeerMode::Passive);
+            r.set_bgp_route_reflector_client(addr, true);
+        }
+    }
+
+    // The reflectors peer with each other as ordinary non-clients.
+    let mut it = reflectors.into_iter();
+    let (_, addr1, mut r1) = it.next().unwrap();
+    let (_, addr2, mut r2) = it.next().unwrap();
+    r1.add_bgp_peer(addr2, RR_FABRIC_AS, addr1, BgpPeerMode::Active);
+    r2.add_bgp_peer(addr1, RR_FABRIC_AS, addr2, BgpPeerMode::Passive);
+    lab.add_router(r1);
+    lab.add_router(r2);
+    lab
+}
+
+/// First VNI of the scale fabric's tenant range.
+pub const SCALE_BASE_VNI: u32 = 6001;
+
+/// The logical access port a scale-fabric tenant is attached to.
+pub fn scale_access_port(vni: u32) -> String {
+    format!("acc{}", vni)
+}
+
+/// A deterministic tenant MAC for leaf `leaf`, tenant `vni`, host `host`.
+///
+/// The leaf number is in the address, so a MAC that turns up behind the wrong
+/// VTEP is obvious, and the VNI is in it too, so a route that leaks between
+/// tenants is equally obvious.
+pub fn scale_mac(leaf: u8, vni: u32, host: u8) -> MacAddress {
+    MacAddress([0x02, 0x00, leaf, (vni >> 8) as u8, vni as u8, host])
+}
+
+/// Teaches every leaf `hosts` local MACs in every tenant, exactly as an access
+/// port would. Returns how many Type 2 routes that should produce fabric-wide.
+pub fn populate_scale_fabric(lab: &mut VirtualLab, leaf_count: u8, vnis: u32, hosts: u8) -> usize {
+    let mut total = 0usize;
+    for n in 1..=leaf_count {
+        let name = format!("leaf{}", n);
+        let Some(router) = lab.router_mut(&name) else {
+            continue;
+        };
+        let Some(vtep) = router.vtep_mut() else {
+            continue;
+        };
+        for v in 0..vnis {
+            let vni = SCALE_BASE_VNI + v;
+            let port = scale_access_port(vni);
+            for h in 1..=hosts {
+                if vtep.learn_local(&port, scale_mac(n, vni, h), None) {
+                    total += 1;
+                }
+            }
+        }
+    }
+    total
+}
+
+/// VTEP address of `leaf1` in the route reflector fabrics.
+pub const LEAF1_VTEP: Ipv4Address = Ipv4Address([10, 0, 0, 1]);
+/// VTEP address of `leaf2` in the route reflector fabrics.
+pub const LEAF2_VTEP: Ipv4Address = Ipv4Address([10, 0, 0, 2]);
+/// BGP identifier and session address of `rr1`. It is not a VTEP.
+pub const RR1_ID: Ipv4Address = Ipv4Address([10, 0, 0, 254]);
+/// BGP identifier and session address of `rr2`. It is not a VTEP.
+pub const RR2_ID: Ipv4Address = Ipv4Address([10, 0, 0, 253]);
+
+fn rr_mac(a: u8, b: u8) -> MacAddress {
+    MacAddress([0x02, 0x00, 0x00, 0x00, a, b])
+}
+
+fn ip(a: u8, b: u8, c: u8, d: u8) -> Ipv4Address {
+    Ipv4Address::new(a, b, c, d)
+}
+
+/// The two tenant hosts. They share a /24 and have no gateway, so nothing but the
+/// overlay can carry a packet between them.
+fn add_rr_tenant_hosts(lab: &mut VirtualLab) {
+    lab.add_host(
+        "host_a",
+        "tenant1",
+        NetStackConfig {
+            mac: rr_mac(0x0A, 0x0A),
+            ip: ip(192, 168, 10, 11),
+            ipv6: None,
+            subnet_mask: 24,
+            gateway: None,
+        },
+    );
+    lab.add_host(
+        "host_b",
+        "tenant2",
+        NetStackConfig {
+            mac: rr_mac(0x0B, 0x0B),
+            ip: ip(192, 168, 10, 22),
+            ipv6: None,
+            subnet_mask: 24,
+            gateway: None,
+        },
+    );
+}
+
+/// A leaf with its access interface and BGP speaker, before its underlay links.
+fn rr_leaf(
+    name: &str,
+    tag: u8,
+    _vtep: Ipv4Address,
+    router_id: Ipv4Address,
+    tenant_link: &str,
+    access_ip: Ipv4Address,
+) -> LabRouter {
+    let mut leaf = LabRouter::new(name);
+    leaf.add_interface("eth0", rr_mac(tag, 0x00), access_ip, 24, tenant_link);
+    leaf.enable_bgp(RR_FABRIC_AS, router_id).set_hold_time(9);
+    leaf
+}
+
+/// Gives a leaf its VTEP and its one tenant instance.
+fn finish_rr_leaf(leaf: &mut LabRouter, vtep: Ipv4Address) {
+    leaf.enable_vtep(vtep, "eth1");
+    leaf.add_evpn_instance(
+        RR_FABRIC_VNI,
+        RouteDistinguisher::new(vtep, RR_FABRIC_VNI as u16),
+        &[evpn_rt(65000, RR_FABRIC_VNI)],
+        &[evpn_rt(65000, RR_FABRIC_VNI)],
+    );
+    leaf.attach_evpn_access_port(RR_FABRIC_VNI, "eth0");
+}
+
+/// Drives `lab` until every BGP session carries EVPN and every VTEP has learned
+/// at least one remote MAC, or the simulated deadline passes.
+///
+/// Routers with no VTEP - the route reflectors - are held to the session half of
+/// that condition only. A reflector that had learned a remote MAC would be a bug,
+/// not progress.
+pub fn converge_rr_fabric(lab: &mut VirtualLab, max_sim_ms: u64) -> bool {
+    lab.run_until(250, max_sim_ms, |l| {
+        l.routers.values().all(|r| match (r.bgp(), r.vtep()) {
+            (Some(b), Some(v)) => {
+                b.peers().iter().all(|p| p.carries_evpn()) && v.remote_mac_count() > 0
+            }
+            (Some(b), None) => b.peers().iter().all(|p| p.carries_evpn()),
+            _ => true,
+        })
+    })
 }
 
 /// Drives `lab` until every configured BGP session is ESTABLISHED and every VTEP

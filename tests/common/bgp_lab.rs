@@ -773,3 +773,134 @@ impl RawBgpPeer {
         );
     }
 }
+
+// ============================================================================
+// Route reflector labs (IPv4 unicast)
+// ============================================================================
+
+/// The AS every speaker in the route reflector labs belongs to. Route reflection
+/// is an iBGP mechanism, so there is only one.
+pub const RR_AS: u32 = 65000;
+
+/// The hub-and-spoke route reflector lab, on one shared subnet:
+///
+/// ```text
+///   c1 10.0.0.1    c2 10.0.0.2   n1 10.0.0.11   n2 10.0.0.12
+///        \             |              |            /
+///         \------- rr 10.0.0.254 (AS65000) -------/
+/// ```
+///
+/// `c1` and `c2` are route reflector clients of `rr`; `n1` and `n2` are ordinary
+/// non-client iBGP neighbours. Every spoke peers with `rr` and with nothing else,
+/// and each originates one prefix of its own:
+///
+/// | speaker | prefix          |
+/// |---------|-----------------|
+/// | c1      | 172.16.1.0/24   |
+/// | c2      | 172.16.2.0/24   |
+/// | n1      | 172.16.11.0/24  |
+/// | n2      | 172.16.12.0/24  |
+///
+/// The four RFC 4456 outcomes are therefore all observable at once, from which
+/// prefixes turn up in which Loc-RIB, with nothing else able to explain the
+/// difference: same AS, same subnet, same session type, same everything but role.
+///
+/// Everything sits on one subnet so that a reflected NEXT_HOP - which a reflector
+/// must not rewrite - is directly reachable by whoever receives it. That is what
+/// makes the reflected routes usable rather than merely present.
+pub fn build_rr_lab() -> VirtualLab {
+    let mut lab = VirtualLab::new();
+    lab.add_link("core");
+
+    let spokes: [(&str, u8, u8, u8, bool); 4] = [
+        ("c1", 1, 1, 1, true),
+        ("c2", 2, 2, 2, true),
+        ("n1", 11, 11, 11, false),
+        ("n2", 12, 12, 12, false),
+    ];
+
+    let mut rr = LabRouter::new("rr");
+    rr.add_interface("eth0", mac(0x09, 0x00), ip(10, 0, 0, 254), 24, "core");
+    rr.enable_bgp(RR_AS, ip(9, 9, 9, 9))
+        .set_hold_time(LAB_HOLD_TIME);
+
+    for (name, host, id, net, client) in spokes {
+        let mut r = LabRouter::new(name);
+        r.add_interface("eth0", mac(host, 0x00), ip(10, 0, 0, host), 24, "core");
+        r.enable_bgp(RR_AS, ip(id, id, id, id))
+            .set_hold_time(LAB_HOLD_TIME);
+        r.add_bgp_peer(
+            ip(10, 0, 0, 254),
+            RR_AS,
+            ip(10, 0, 0, host),
+            BgpPeerMode::Active,
+        );
+        r.originate_bgp_prefix(prefix(172, 16, net, 0, 24));
+        lab.add_router(r);
+
+        rr.add_bgp_peer(
+            ip(10, 0, 0, host),
+            RR_AS,
+            ip(10, 0, 0, 254),
+            BgpPeerMode::Passive,
+        );
+        rr.set_bgp_route_reflector_client(ip(10, 0, 0, host), client);
+    }
+
+    lab.add_router(rr);
+    lab
+}
+
+/// The prefix a named spoke of [`build_rr_lab`] originates.
+pub fn rr_lab_prefix(spoke: &str) -> Ipv4Prefix {
+    match spoke {
+        "c1" => prefix(172, 16, 1, 0, 24),
+        "c2" => prefix(172, 16, 2, 0, 24),
+        "n1" => prefix(172, 16, 11, 0, 24),
+        "n2" => prefix(172, 16, 12, 0, 24),
+        other => panic!("no such spoke in the route reflector lab: {}", other),
+    }
+}
+
+/// The session address of a named spoke of [`build_rr_lab`].
+pub fn rr_lab_addr(spoke: &str) -> Ipv4Address {
+    match spoke {
+        "c1" => ip(10, 0, 0, 1),
+        "c2" => ip(10, 0, 0, 2),
+        "n1" => ip(10, 0, 0, 11),
+        "n2" => ip(10, 0, 0, 12),
+        "rr" => ip(10, 0, 0, 254),
+        other => panic!("no such router in the route reflector lab: {}", other),
+    }
+}
+
+/// Two iBGP speakers on one wire, *both* configured to open the connection.
+///
+/// Nothing here is passive, so each dials the other and each accepts the other's
+/// call: a genuine connection collision, on real TCP, every single run. RFC 4271
+/// section 6.8 says exactly one of the two connections may survive it, and which
+/// one is decided by comparing BGP identifiers - `left` is 1.1.1.1 and `right` is
+/// 2.2.2.2, so the connection `right` initiated is the one that must remain.
+pub fn build_collision_lab() -> VirtualLab {
+    let mut lab = VirtualLab::new();
+    lab.add_link("wire");
+
+    let mut left = LabRouter::new("left");
+    left.add_interface("eth0", mac(0x01, 0x00), ip(10, 9, 0, 1), 24, "wire");
+    left.enable_bgp(RR_AS, ip(1, 1, 1, 1))
+        .set_hold_time(LAB_HOLD_TIME);
+    left.add_bgp_peer(ip(10, 9, 0, 2), RR_AS, ip(10, 9, 0, 1), BgpPeerMode::Active);
+    left.originate_bgp_prefix(prefix(172, 20, 1, 0, 24));
+
+    let mut right = LabRouter::new("right");
+    right.add_interface("eth0", mac(0x02, 0x00), ip(10, 9, 0, 2), 24, "wire");
+    right
+        .enable_bgp(RR_AS, ip(2, 2, 2, 2))
+        .set_hold_time(LAB_HOLD_TIME);
+    right.add_bgp_peer(ip(10, 9, 0, 1), RR_AS, ip(10, 9, 0, 2), BgpPeerMode::Active);
+    right.originate_bgp_prefix(prefix(172, 20, 2, 0, 24));
+
+    lab.add_router(left);
+    lab.add_router(right);
+    lab
+}

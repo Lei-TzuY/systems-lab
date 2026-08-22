@@ -9,6 +9,8 @@
 
 /// Multi-AS BGP topologies used by the control-plane integration suites.
 pub mod bgp_lab;
+/// Capture decoding and convergence helpers for the route reflector suites.
+pub mod rr_lab;
 
 use toy_tcpip::ethernet::MacAddress;
 use toy_tcpip::ipv4::Ipv4Address;
