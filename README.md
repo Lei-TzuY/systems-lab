@@ -97,10 +97,81 @@ A complete educational dual-stack IPv4/IPv6 network protocol stack built from sc
 | **Application (L7)** | **SNMPv2c Network Telemetry (RFC 1901/3416)** | ASN.1 / BER TLV codec, `INTEGER`, `OCTET STRING`, `OID`, `SEQUENCE`, GetRequest/Response framing, MIB-II instrumentation. |
 | **Application (L7)** | **DNS (RFC 1035)** | DNS query encoding and decoding, Question/Answer sections, pointer compression, and Type-A IPv4 resolution over UDP 53. |
 | **Application (L7)** | **DHCP (RFC 2131)** | DHCP 4-way DORA handshake (Discover $\rightarrow$ Offer $\rightarrow$ Request $\rightarrow$ ACK) with TLV Options over UDP 67/68. |
-| **Application (L7)** | **DHCPv6 (RFC 8415)** | IPv6 Solicit $\rightarrow$ Advertise $\rightarrow$ Request $\rightarrow$ Reply handshake, DUID-LLT, IA_NA, IAADDR, DNS options over UDP 546/547. |
+| **BGP Multi-Path** | **BGP ADD-PATH (RFC 7911 / RFC 8277)** | Capability Code 69, 4-byte Path-ID NLRI encoding/decoding, multi-path RIB retention, BGP Prefix Independent Convergence (BGP PIC Edge/Core) primary/backup fast failover. |
+| **EVPN All-Active Multicast** | **EVPN IGMP/MLD Synch (RFC 9251)** | Route Type 7 (Join Synch) & Route Type 8 (Leave Synch) NLRIs, Ethernet Segment ID (ESI) multihomed state synchronization, dual-homed PE leave timer reconciliation. |
+| **Deterministic IP/MPLS** | **DetNet PREF Data Plane (RFC 8655 / 8938 / 8939 / 8964)** | DetNet Control Word (d-CW), UDP port 3636 encapsulation, Packet Replication and Elimination Functions (PREF), sliding sequence history filter with wraparound handling for zero packet loss. |
+| **5G Core / Carrier AAA** | **Diameter Gy / Ro Online Charging (RFC 4006 / 3GPP TS 32.299)** | Credit-Control-Request (CCR) / Credit-Control-Answer (CCA) (Command Code 272, App ID 4), Multiple-Services-Credit-Control (MSCC) grouped AVPs, Rating Groups, quota allocation, volume metering, and subscriber balance depletion. |
+| **Multicast RP & SSM** | **PIM-BSR & PIM-SSM (RFC 5059 / RFC 4607 / RFC 7761)** | Dynamic Candidate-RP & BSR election, hash-based deterministic Group-to-RP mapping formula, and SSM (232.0.0.0/8) RP-bypass source-tree routing. |
+| **5G / IMS Policy Control** | **Diameter Rx Policy & Charging Control (3GPP TS 29.214)** | Diameter Application ID 16777236, AA-Request (AAR) / AA-Answer (AAA) / Session-Termination (STR), Media-Component-Description grouped AVPs, QCI 1/2 QoS bearer authorization, and PCRF bandwidth admission control. |
+| **Datacenter Broadcast Suppression** | **EVPN Proxy ARP/ND & Anycast Gateway (RFC 7432 Section 10 / RFC 9135)** | Proxy ARP cache auto-populated from EVPN Route Type 2 NLRIs, local ARP request snooping, synthesized unicast ARP replies to suppress broadcast flooding across VXLAN fabrics, and Anycast Gateway MAC (`00:00:5E:00:01:XX`) resolution. |
+| **Dynamic Service Chaining** | **NSH MD Type 2 Dynamic Variable TLVs (RFC 8300 Section 3.5.2)** | Network Service Header Metadata Type 2 with variable-length Context TLVs (Tenant-ID, Flow-Hash, In-Band Path Trace, Security-Group-Tag), and SFF Service Index decrement forwarding & chain termination. |
+| **Multicast MPLS Core** | **Multipoint LDP (mLDP - RFC 6388 / RFC 6513)** | Point-to-Multipoint (P2MP) and Multipoint-to-Multipoint (MP2MP) FEC Elements (Types 6, 7, 8), Root Node Address, Opaque Value TLVs (Generic LSP ID), and zero-head-end multicast branch replication across the MPLS core. |
+| **5G / 4G Policy Control** | **Diameter Gx PCC Interface (3GPP TS 29.212)** | Command Code 272 over Application ID 16777238, `Charging-Rule-Install` / `Charging-Rule-Remove` grouped AVPs, dynamic PCC rules, QoS-Information (QCI, ARP, APN-AMBR, Max-Requested-Bandwidth-UL/DL), and PCEF policy gate enforcement. |
+| **Datacenter Fast Convergence** | **EVPN Route Type 1 per-ES Mass Withdrawal (RFC 7432 Section 8.2 & 8.4)** | Route Type 1 Ethernet Auto-Discovery per-ES route, instantaneous link-failure mass withdrawal triggering $O(1)$ fast failover to surviving multi-homed PEs without individual Route Type 2 churn. |
+| **Segment Routing OAM** | **SR-MPLS OAM: SR LSP Ping & Traceroute (RFC 8287 / RFC 8402)** | Target FEC Stack Sub-TLVs (Type 27 IPv4 Prefix SID, Type 28 IPv6 Prefix SID, Type 29 IPv4 Adjacency SID), Downstream Detailed Mapping (DDMAP) TLV, and SR-MPLS label stack path consistency verification. |
+| **5G Fronthaul Timing** | **SyncE ESMC (ITU-T G.8264 / IEEE 802.3 Clause 57)** | Slow Protocols EtherType `0x8809`, Subtype `0x0A`, Quality Level (QL-PRC, QL-SSU-A, QL-SSU-B, QL-SEC, QL-DNU), SSM generation and ITU-T G.781 clock selection arbitration. |
+| **5G / 4G Core Mobility**| **Diameter S6a HSS Mobility Interface (3GPP TS 29.272)** | Diameter Application ID `16777251`, AIR/AIA (Command 318), ULR/ULA (Command 316), EPS Authentication Vector generation (`RAND`, `XRES`, `AUTN`, `KASME`), and subscriber profile directory. |
+| **Datacenter Cloud Security**| **EVPN E-Tree Service Architecture (RFC 8317)** | BGP EVPN E-Tree Extended Community (Type `0x06`, Sub-type `0x05`), Leaf Indication bit (`L-bit`), Leaf-label encoding, and Split-Horizon Root/Leaf forwarding policy enforcement. |
+| **Segment Routing 5G Slicing**| **SRv6 Network Slicing & VTN Data Plane (RFC 9350 / RFC 9543)** | SRv6 Slice/VTN Identifier data plane, binding Flex-Algo 128 (URLLC Low-Latency) & Flex-Algo 129 (eMBB High-Throughput) to dedicated SRv6 segment lists, bandwidth SLA metering, and deterministic slice isolation. |
+| **EVPN Multihoming DF** | **EVPN Preference-Based DF Election (RFC 8584)** | DF Election Extended Community (Type `0x06`, Sub-type `0x06`), Algorithm `0x02` (Preference-based), Don't Preempt bit (`DP`), Sticky bit (`S`), and deterministic highest-IP tie-breaking. |
+| **In-Band Flow Analytics**| **IFA 2.0 In-Situ Flow Telemetry (RFC 9197 / IETF IFA 2.0)** | In-situ Flow Analytics hop-by-hop telemetry vector (Node-ID, Ingress/Egress ports, Queue Depth in bytes, Hop Latency in ns), ingress probe encapsulation, transit insertion, and egress telemetry extraction. |
+| **5G / 4G Device Security**| **Diameter S13 / S13' EIR Interface (3GPP TS 29.272 Section 6)** | Diameter Application ID `16777252`, ME-Identity-Check (ECR/ECA - Command 324), Equipment-Status (AVP 1445: Whitelisted/Blacklisted/Greylisted), and stolen mobile equipment barring. |
+| **5G Telecom Boundary Clock**| **PTP Telecom Boundary Clock (T-BC) (ITU-T G.8275.1 / G.8273.2)** | Alternate BMCA state machine, `localPriority` (1..255), Steps-Removed override, multi-port Boundary Clock state transitions (`Master`, `Slave`, `Passive`), and phase error damping filter. |
+| **5G Fronthaul Timing Compliance**| **PTP Telecom Time Error (cTE / dTE) Modeling (ITU-T G.8273.2 / G.8271.1)** | Time Error $TE(t)$ real-time sampling, Constant Time Error ($cTE$) window moving average, Dynamic Time Error ($dTE$) peak-to-peak amplitude, and Class A, B, C, D 5G fronthaul mask verification. |
+| **5G / 4G Policy Roaming**| **Diameter S9 PCRF Roaming Interface (3GPP TS 29.215)** | Diameter Application ID `16777267`, CCR/CCA Credit-Control over S9, `Subsession-Enforcement-Info` (AVP 2201), `Subsession-Decision-Info` (AVP 2200), and H-PCRF/V-PCRF roaming QoS provisioning. |
+| **Datacenter EVPN Multicast**| **EVPN IGMP Snooping & Multicast Pruning (RFC 9251 Section 5 & 6)** | Access bridge port IGMP snooping table per $(VNI, Group)$, BGP EVPN Route Type 7/8 synchronization triggers, and edge multicast forwarding tree pruning to eliminate BUM flooding. |
+| **DDoS Scrubbing & Mitigation**| **BGP Flowspec Redirect-to-VRF & DSCP Remarking (RFC 5575 / RFC 8955)** | BGP Flowspec Extended Community Type `0x80` Subtype `0x08` (Redirect to VRF / Route Target) and Subtype `0x09` (DSCP Remarking), automated DDoS mitigation, and quarantine traffic steering. |
+| **5G User-Plane Telemetry**| **5G GTP-U PDU Session Container & In-Band Delay Telemetry (3GPP TS 38.415 / 29.281)** | GTP-U Extension Header Type `0x85`, 6-bit QoS Flow Identifier (QFI), Reflective QoS (RQI), Paging Policy (PPI), and RAN-to-UPF microsecond in-band transport delay reporting. |
+| **5G P2P Transparent Clock**| **PTP Telecom Peer-to-Peer Transparent Clock (T-TC) (ITU-T G.8275.2 / IEEE 1588)** | P2P Peer Delay calculation via Pdelay_Req/Resp ($t_1..t_4$), ingress-to-egress residence time accumulation, and sub-nanosecond correctionField updating. |
+| **5G / IMS Application Server**| **Diameter Sh AS-to-HSS Interface (3GPP TS 29.328 / TS 29.329)** | Diameter Application ID `16777217`, User-Data (UDR/UDA - Command 306), Subscribe-Notifications (SNR/SNA - Command 308), and transparent IMS service repository management. |
+| **Datacenter Shared Services**| **EVPN Layer 3 Multi-VRF Route Leaking (RFC 9136 / RFC 4364 Section 10)** | Cross-VRF Route Target import/export intersection matching, tenant segmentation with shared Internet/DNS gateway leaking, and per-VRF LPM lookup. |
+| **TSN Deterministic Scheduling**| **IEEE 802.1Qbv Time-Aware Shaper (TAS) GCL Engine (IEEE 802.1Qbv)** | Cyclic Gate Control List (GCL) scheduling for 8 Traffic Classes (TC 0..7), sub-microsecond epoch alignment, guard-band calculation, and protected scheduled traffic windows. |
+| **5G / 4G Emergency Location**| **Diameter SLh LCS Location Services Interface (3GPP TS 29.173 / TS 29.171)** | Diameter Application ID `16777291`, LCS-Routing-Info (RIR/RIA - Command 8388620), `Serving-Node` (AVP 2401 Grouped), and GMLC-to-HSS subscriber serving MME/AMF resolution for E911. |
+| **Datacenter Storm Control**| **EVPN Layer 2 Unknown Unicast (UU) Flood Suppression (RFC 7432 Section 13.2 / RFC 8317)** | Access bridge port Unknown Unicast suppression policy, gating against EVPN Type 2 MAC/IP RIB, and unknown frame drop protection against core broadcast storms. |
+| **Overlay In-Band Telemetry**| **Geneve In-Band Network Telemetry (INT) Option Header (RFC 8926 Section 4.4)** | Geneve Variable Length Option TLV (Class `0x0103`, Type `0x01`), hop metadata insertion (Switch ID, Ingress/Egress ports, nanosecond latency, queue occupancy in bytes), and overlay telemetry extraction. |
+| **TSN Zero-Loss Recovery**| **IEEE 802.1CB Frame Replication & Elimination (FRER) Sequence Recovery Function (SRF)** | Vector Recovery Algorithm (VRA / IEEE 802.1CB Section 7.4), sliding bit-vector history window, wrap-around serial number arithmetic, and per-stream duplicate elimination. |
+| **5G / IMS Core Registration**| **Diameter Cx/Dx IMS Registration & Auth Interface (3GPP TS 29.228 / TS 29.229)** | Diameter Application ID `16777216`, User-Authorization (UAR/UAA - Command 300), Multimedia-Auth (MAR/MAA - Command 303), Server-Assignment (SAR/SAA - Command 301), and HSS authentication vector delivery. |
+| **Datacenter EVPN Mobility**| **EVPN MAC Mobility Sequence Tracking & Sticky MAC Suppression (RFC 7432 Section 15)** | MAC Mobility Extended Community Type `0x06` Subtype `0x00`, monotonic sequence number progression, sticky/static MAC enforcement, and flapping duplicate-detection suppression. |
+| **5G / 4G Session Control**| **3GPP GTPv2-C Session Management & Create Session Handshake (3GPP TS 29.274)** | GTPv2-C control plane header/IE codec, Create Session Request/Response (Msg 32/33), IMSI TBCD encoding, F-TEID, APN, EPS Bearer ID (EBI), and SGW session state management. |
+| **TSN Peristaltic Shaping**| **IEEE 802.1Qch Multi-Queue Cyclic Queuing & Forwarding (CQF)** | 3-Queue rotating cyclic buffer ($Q_0, Q_1, Q_2$), zero-jitter bounded latency $D_{hop} \in [T_{cycle}, 2 \cdot T_{cycle}]$, phase offset synchronization, and buffer overflow protection. |
+| **5G Non-3GPP Access** | **Diameter S6b Untrusted WLAN / ePDG AAA Interface (3GPP TS 29.273)** | Diameter Application ID `16777272`, AA-Request (AAR) / AA-Answer (AAA - Command 265), STR/STA (Command 275), MIP6-Agent-Info allocation, and ANID authorization. |
+| **Datacenter Fast Reroute**| **EVPN Fast Reroute (FRR) & Secondary Nexthop Protection (RFC 7432 Section 16)** | Pre-computed backup nexthop and repair encapsulation, sub-millisecond local link fault detection, instantaneous hitless failover steering, and automatic recovery. |
+| **5G SRv6 Direct Routing** | **SRv6 Mobile User Plane (MUP) End.M.GTP6.D/E Interworking (draft-ietf-dmm-srv6-mobile-uplane)** | Stateless translation between 5G GTP-U user-plane encapsulation and pure IPv6 Segment Routing underlay, `End.M.GTP6.D` stripping & `End.M.GTP6.E` restoration. |
+| **Datacenter MAC Purge** | **EVPN Layer 2 MAC Flush on Link/Port Down (RFC 7432 Section 15 / RFC 8317)** | Rapid MAC table purging on local attachment circuit / LAG failure without waiting for aging timers, granular flush scopes (`AllOnEsi`, `VniOnEsi`, `SpecificMac`). |
+| **5G Path Liveness** | **GTP-U Path Management Echo Request/Response & Heartbeat (3GPP TS 29.281 Section 7.2)** | Path reachability monitoring over UDP 2152, `Recovery` IE restart counter tracking, $N3\text{-REQUESTS}$ retry state machine, and path failure alarm notifications. |
+| **TSN Stream Policing** | **IEEE 802.1Qci Per-Stream Filtering & Policing (PSFP) trTCM Multi-Stage Filter** | 3-stage cascaded inspection (SFI stream identification & Max SDU, SGI gate schedule & violation traps, FMI RFC 2698 trTCM CIR/CBS/PIR/PBS color marker). |
+| **5G Untrusted Wi-Fi AAA** | **Diameter SWm / SWx Untrusted WLAN / ePDG AAA Interface (3GPP TS 29.273)** | Diameter Application ID `16777264` (SWm) / `16777265` (SWx), DER/DEA Command 268, EAP-AKA' authentication, and 64-byte Master Session Key (MSK) key derivation. |
+| **TSN Buffer Isolation** | **IEEE 802.1Qcz Congestion Isolation & Head-of-Line (HoL) Blocking Mitigation** | Congestion Point (CP) dual-queue architecture (UQ/CIQ), offending flow detection, IEEE 802.1Qcz CNM generation, and line-rate forwarding for uncongested traffic. |
+| **5G Direct EIR Check** | **Diameter S13' Direct EIR Interface & Terminal-Information IMEI-SV (3GPP TS 29.272)** | Diameter Application ID `16777252`, ECR/ECA Command 324, `Terminal-Information` (AVP 1401 Grouped) IMEI-SV tracking, rogue software version detection, and EIR status query. |
+| **Datacenter Multicast Prune** | **EVPN Selective Ingress Replication (IR) & Leaf Pruning (RFC 7432 Section 11 / RFC 9251)** | Dynamic $(VNI, S, G)$ Ingress Replication lists built from Route Type 6 (SMET), selective replication to interested leaf VTEPs only, and non-interested PE pruning. |
+| **5G Packet Reordering** | **3GPP GTP-U Sequence Number Out-of-Order Reordering & Jitter Buffer (3GPP TS 29.281)** | 16-bit GTP-U sequence number sliding window, RFC 1982 wrap-around arithmetic, out-of-order jitter buffering, and in-order contiguous upper-layer delivery. |
+| **TSN Asynchronous Shaping** | **IEEE 802.1Qcr Asynchronous Traffic Shaping (ATS) Multi-Hop Cascaded Pipeline** | Urgency-Based Scheduler (UBS), per-flow Interleaved Regulator (IR) Eligibility Time calculation, multi-hop burstiness absorption, and bounded deterministic latency. |
+| **5G SMS Core Delivery** | **Diameter SGd / T4 SMS Core Relay Interface (3GPP TS 29.338)** | Diameter Application ID `16777313`, MO/MT Forward Short Message (OFR/OFA, TFR/TFA Command 8388645/8388646), and `SM-RP-UI` SMS TPDU relay. |
+| **Datacenter Anycast IRB** | **EVPN Layer 3 Anycast Gateway & Symmetric/Asymmetric IRB Dual-Mode (RFC 9135 / RFC 9136)** | Distributed Anycast Gateway MAC (`00:00:5E:00:01:01`) active on all leafs, Symmetric IRB with Transit L3VNI, and Asymmetric IRB direct L2VNI routing/bridging. |
+| **5G UPF Anchor Handover** | **3GPP GTP-U UPF Anchor Relocation, Indirect Forwarding & End Marker (3GPP TS 23.501)** | S-UPF to T-UPF indirect GTP-U tunnel forwarding during handovers, End Marker (Msg Type 254) packet injection, and hitless user-plane cut-over. |
+| **TSN GCL Dynamic Reconfig** | **IEEE 802.1Qbv TAS Dynamic GCL Reconfiguration & Hitless Admin-to-Oper Swap** | AdminGcl vs OperGcl dual-schedule state machine, `AdminBaseTime` atomic cycle epoch transition, and hitless schedule update without frame truncation. |
+| **5G GBA Bootstrapping** | **Diameter Zh / GAA / GBA Bootstrapping Interface (3GPP TS 29.109)** | Diameter Application ID `16777221`, MAR/MAA Command 303, GUSS XML configuration delivery, and application-specific `Ks_NAF` key derivation. |
+| **Datacenter BUM Storm Defense** | **EVPN Layer 2 BUM Traffic Storm Policer & Microburst Rate Limiter (RFC 7432)** | Independent Broadcast, Unknown Unicast, and Multicast token buckets per VNI, storm drop threshold tracking, and rogue MAC quarantine defense. |
+| **5G QoS & AMBR Enforcement** | **3GPP TS 38.415 / TS 23.501 5G GTP-U QoS Flow Identifier & Session-AMBR Token Bucket** | 6-bit QFI packet classification, 5QI profile mapping (GBR/Non-GBR), Session-AMBR token bucket rate enforcement, and dynamic QFI remapping. |
+| **TSN Credit-Based Shaper** | **IEEE 802.1Qav Credit-Based Shaper (CBS) Multi-Class Audio/Video Bridging Engine** | Class A and Class B bandwidth slopes (`idleSlope`, `sendSlope`), credit ceiling/floor tracking, and starvation prevention for best-effort traffic. |
+| **5G SMS Routing Lookup** | **Diameter S6c SMS-GMSC/SMS-IWMSC to HSS Routing Query Interface (3GPP TS 29.338)** | Diameter Application ID `16777312`, SRR/SRA Command 8388647, RDR/RDA Command 8388648, and `Serving-Node` MME/SGSN/SMSF resolution. |
+| **Datacenter Core Isolation** | **EVPN Layer 2 Core Isolation Defense & Split-Horizon Group Filtering (RFC 7432)** | Underlay spine uplink link-state tracking with automated client port shutdown, and ESI split-horizon label loop suppression on multi-homed PEs. |
+| **5G Fast Path Failover** | **3GPP TS 23.501 5G GTP-U Path Loss Detection & Sub-Millisecond Fast Failover** | Primary/Secondary N3/N9 user plane path pre-provisioning, consecutive loss detection, autonomous sub-millisecond rerouting, and auto-reversion. |
+| **TSN Frame Preemption** | **IEEE 802.1Qbu / 802.3br Frame Preemption & Qbv Dynamic Guard Band Engine** | Express vs Preemptable classification, dynamic guard band shrinkage down to 64B fragment boundary, and MAC Merge Hold/Release state machine. |
+| **5G RAN Congestion** | **Diameter Np RAN User Plane Congestion Awareness Interface (3GPP TS 29.217)** | Diameter Application ID `16777342`, Non-Aggregated RUCI Report (NCR/NCA Command 8388725), and eNodeB/Cell congestion-level telemetry. |
+| **Datacenter Flap Damping** | **EVPN Layer 2 Port Flap Damping & Route Dampening Exponential Decay (RFC 7432)** | Exponential half-life penalty decay, configurable Suppress/Reuse thresholds, and automated AC suppression to prevent BGP control-plane churn. |
+| **5G MA-PDU ATSSS** | **3GPP TS 23.501 5G Multi-Access PDU (MA-PDU) Session & ATSSS Steering Engine** | Dual 3GPP/Non-3GPP access legs, Active-Standby, Smallest-Delay, and Weighted Load-Balancing steering policies with RTT telemetry. |
+| **TSN CQF Time Dispatch** | **IEEE 802.1Qch CQF Cyclic Time-Based Frame Dispatch & Ping-Pong Queue Ingestion** | Microsecond cycle clock tick driving deterministic ping-pong queue swapping, and zero jitter across multi-hop topologies. |
+| **5G CIoT SCEF Config** | **Diameter S6t SCEF to HSS Cellular IoT NIDD & Monitoring Event Interface (3GPP TS 29.336)** | Diameter Application ID `16777345`, CIR/CIA Command 8388728, and `Monitoring-Event-Configuration` for reachability/location tracking. |
+| **Datacenter Private VLAN** | **EVPN Layer 2 Private VLAN (PVLAN) & Port Isolation Micro-Segmentation (RFC 7432 / RFC 5517)** | Promiscuous, Isolated, and Community port type classification, and inter-port micro-segmentation forwarding matrix. |
+| **5G URLLC Redundant Paths** | **3GPP TS 23.501 5G GTP-U Redundant User Plane Transmission & Egress Deduplication** | Dual-tunnel packet replication at UPF/gNodeB, unified GTP-U sequence numbering, and zero-latency egress deduplication window. |
+| **TSN CQF trTCM Meter** | **IEEE 802.1Qch Multi-Class CQF with trTCM Traffic Metering Integration (RFC 2698)** | PIR/PBS and CIR/CBS Two-Rate Three-Color Marker metering at cyclic queue ingress, and color-aware frame admission/dropping. |
+| **5G MAP-to-Diameter** | **Diameter S6m / S6n MAP-to-Diameter HSS Interworking Interface (3GPP TS 29.336)** | Diameter Application ID `16777310`, SIR/SIA Command 8388641, and subscriber authorization query for mobile-originated SMS routing. |
+| **Datacenter Unknown Multicast** | **EVPN Layer 2 Unknown Multicast Tree (UMT) & Ingress Replication Optimization (RFC 7432 / RFC 9251)** | Dynamic Selective Multicast (SMET) vs Inclusive Multicast (IMET) tree resolution and non-participating remote leaf pruning. |
+| **5G Path Jitter Telemetry** | **3GPP TS 38.415 / RFC 3550 5G GTP-U Path Jitter & Microsecond Delay Measurement Telemetry** | Microsecond timestamping in PDU Session Containers, RFC 3550 exponential moving average jitter, and min/max/avg latency tracking. |
 | **Routing** | **Routing Table (LPM)** | Longest Prefix Match (LPM) route lookup engine, CIDR netmask matching, default gateway and on-link subnet resolution. |
 | **Simulation** | **Virtual Network Bus** | Multi-node switched LAN simulator connecting multiple `NetStack` hosts over virtual Ethernet links. |
-| **Interface** | **Interactive Network Shell** | Interactive CLI REPL with 74 commands including `flowspec`, `otlp`, `gre6`, `ioam`, `netconf`, `lisp`, `wireguard`, `gptp`, `pcep`, `rsvp`, `openflow`, `diameter`, `nsh`, `sflow`, `6in4`, `4in6`, `roce`, `pfc`, `gue`, `evpn`, `dhcpv6`, `vxlan-gpe`, `vtp`, `ldp`, `glbp`, `tacacs`, `turn`, `gtp`, `hsrp`, `cdp`, `srv6`, `stun`, `rtp`, `ptp`, `erspan`, `mqtt`, `coap`, `sctp`, `ldap`, `netflow`, `sip`, `bfd`, `geneve`, `isis`, `syslog`, `l2tp`, `pim`, `radius`, `pppoe`, `eigrp`, `ping`, `ping6`, `traceroute`, `ntp`, `tftp`, `snmp`, `ospf`, `ipsec`, `http3`, `lacp`, `stp`, `vxlan`, `mpls`, `bgp`, `lldp`, `quic`, `vrrp`, `ndp`, `rip`, `tunnel`, `igmp`, `tls`, `http2`, `ws`, `dns`, `curl`, `udp send`, `arp`, `route`, `netstat`, `iptables`, `nat`, `tcp-stats`, and live PCAP recording. |
+| **Interface** | **Interactive Network Shell** | Interactive CLI REPL with 146 commands including `diameter-s6m`, `evpn-umt`, `gtpu-jitter`, `tsn-cqf-meter`, `diameter-s6t`, `evpn-pvlan`, `gtpu-redundant`, `tsn-cqf-time`, `diameter-np`, `evpn-damp`, `gtpu-ma`, `tsn-preempt`, `diameter-s6c`, `evpn-core-iso`, `gtpu-failover`, `tsn-qav`, `diameter-zh`, `evpn-bum`, `gtpu-qos`, `tsn-qbv-reconfig`, `diameter-sgd`, `evpn-irb`, `gtpu-reloc`, `tsn-ats-multi`, `diameter-s13p`, `evpn-mcast-ir`, `gtpu-reorder`, `tsn-qcz`, `evpn-flush`, `gtpu-heartbeat`, `tsn-psfp`, `diameter-swm`, `tsn-cqf`, `diameter-s6b`, `evpn-frr`, `srv6-mup-direct`, `frer-srf`, `diameter-cx`, `evpn-mobility`, `gtpc-v2`, `tsn-qbv`, `diameter-slh`, `evpn-uu`, `geneve-telemetry`, `gtpu-telemetry`, `ptp-ttc`, `diameter-sh`, `evpn-vrf-leak`, `ptp-te`, `diameter-s9`, `evpn-snooping`, `flowspec-vrf`, `evpn-pref-df`, `ifa`, `diameter-s13`, `ptp-bc`, `synce`, `diameter-s6a`, `evpn-etree`, `srv6-slicing`, `mldp`, `diameter-gx`, `evpn-mass-withdraw`, `sr-oam`, `pim-bsr`, `diameter-rx`, `evpn-proxy-arp`, `nsh-md2`, `add-path`, `evpn-synch`, `detnet`, `diameter-charging`, `flowspec`, `otlp`, `gre6`, `ioam`, `netconf`, `lisp`, `wireguard`, `gptp`, `pcep`, `rsvp`, `openflow`, `diameter`, `nsh`, `sflow`, `6in4`, `4in6`, `roce`, `pfc`, `gue`, `evpn`, `dhcpv6`, `vxlan-gpe`, `vtp`, `ldp`, `glbp`, `tacacs`, `turn`, `gtp`, `hsrp`, `cdp`, `srv6`, `stun`, `rtp`, `ptp`, `erspan`, `mqtt`, `coap`, `sctp`, `ldap`, `netflow`, `sip`, `bfd`, `geneve`, `isis`, `syslog`, `l2tp`, `pim`, `radius`, `pppoe`, `eigrp`, `ping`, `ping6`, `traceroute`, `ntp`, `tftp`, `snmp`, `ospf`, `ipsec`, `http3`, `lacp`, `stp`, `vxlan`, `mpls`, `bgp`, `lldp`, `quic`, `vrrp`, `ndp`, `rip`, `tunnel`, `igmp`, `tls`, `http2`, `ws`, `dns`, `curl`, `udp send`, `arp`, `route`, `netstat`, `iptables`, `nat`, `tcp-stats`, and live PCAP recording. |
 
 ---
 
@@ -174,7 +245,78 @@ TCP-IP Stack/
 │   ├── fragment.rs        # Layer 3: IPv4 Fragmentation & Reassembly engine
 │   ├── icmp.rs            # Layer 3.5: ICMP Echo request / reply handler
 │   ├── icmpv6.rs          # Layer 3.5: ICMPv6 Ping6 & NDP Neighbor Discovery
-│   ├── udp.rs             # Layer 4: UDP datagram & socket table
+│   ├── tsn_qbv_gcl.rs     # TSN Scheduling: IEEE 802.1Qbv Time-Aware Shaper (TAS) Gate Control List Engine
+│   ├── tsn_qbv_reconfig.rs # TSN Scheduling: IEEE 802.1Qbv Dynamic GCL Reconfiguration & Hitless Admin/Oper Swap
+│   ├── tsn_cqf_multicycle.rs # TSN Queuing: IEEE 802.1Qch Multi-Queue Cyclic Queuing & Forwarding (CQF)
+│   ├── tsn_cqf_time_dispatch.rs # TSN Queuing: IEEE 802.1Qch CQF Time-Synchronized Dispatch Engine
+│   ├── tsn_cqf_trtcm.rs   # TSN Metering: IEEE 802.1Qch CQF with trTCM Traffic Metering (RFC 2698)
+│   ├── tsn_ats_multihop.rs # TSN Shaping: IEEE 802.1Qcr Asynchronous Traffic Shaping (ATS) Multi-Hop Pipeline
+│   ├── tsn_qav_cbs.rs     # TSN Shaping: IEEE 802.1Qav Credit-Based Shaper (CBS) Multi-Class AVB Engine
+│   ├── tsn_guard_band.rs  # TSN Preemption: IEEE 802.1Qbu / 802.3br Frame Preemption & Qbv Dynamic Guard Band
+│   ├── tsn_psfp_stream_filter.rs # TSN Policing: IEEE 802.1Qci PSFP trTCM Multi-Stage Stream Filter Engine
+│   ├── tsn_qcz_congestion.rs # TSN Isolation: IEEE 802.1Qcz Congestion Isolation & HoL Blocking Mitigation Engine
+│   ├── frer_srf.rs        # TSN Zero-Loss: IEEE 802.1CB Sequence Recovery Function (SRF) Vector Algorithm
+│   ├── diameter_slh.rs    # 5G / Location: Diameter SLh LCS Location Services GMLC-HSS Interface (3GPP TS 29.173)
+│   ├── diameter_cx.rs     # 5G / IMS Core: Diameter Cx/Dx IMS I/S-CSCF to HSS Registration Interface (3GPP TS 29.228)
+│   ├── diameter_s6b.rs    # 5G / WLAN Access: Diameter S6b Untrusted WLAN / ePDG AAA Interface (3GPP TS 29.273)
+│   ├── diameter_swm.rs    # 5G / WLAN AAA: Diameter SWm / SWx Untrusted WLAN ePDG EAP-AKA' AAA Interface (3GPP TS 29.273)
+│   ├── diameter_s13_prime.rs # 5G / EIR Check: Diameter S13' Direct EIR Interface & IMEI-SV Verification (3GPP TS 29.272)
+│   ├── diameter_sgd.rs    # 5G / SMS Core: Diameter SGd / T4 SMS Core Relay Interface (3GPP TS 29.338)
+│   ├── diameter_s6c.rs    # 5G / SMS Routing: Diameter S6c SMS Routing & Delivery Status Interface (3GPP TS 29.338)
+│   ├── diameter_np.rs     # 5G / RCAF: Diameter Np RAN User Plane Congestion Reporting Interface (3GPP TS 29.217)
+│   ├── diameter_s6t.rs    # 5G / SCEF: Diameter S6t SCEF to HSS Cellular IoT Interface (3GPP TS 29.336)
+│   ├── diameter_s6m.rs    # 5G / SMS-IWMSC: Diameter S6m / S6n MAP-to-Diameter HSS Interface (3GPP TS 29.336)
+│   ├── diameter_zh.rs     # 5G / GAA: Diameter Zh BSF-to-HSS Bootstrapping Interface & NAF Keys (3GPP TS 29.109)
+│   ├── evpn_uu_suppression.rs # Datacenter EVPN: Layer 2 Unknown Unicast Flood Suppression & Storm Control (RFC 7432)
+│   ├── evpn_mac_mobility.rs # Datacenter EVPN: MAC Mobility Sequence Tracking & Sticky MAC Suppression (RFC 7432)
+│   ├── evpn_frr_protection.rs # Datacenter EVPN: Fast Reroute (FRR) & Secondary Nexthop Path Protection (RFC 7432)
+│   ├── evpn_mac_flush.rs  # Datacenter EVPN: Layer 2 MAC Flush on Link/Port Down (RFC 7432 / RFC 8317)
+│   ├── evpn_multicast_ir.rs # Datacenter EVPN: Selective Multicast Ingress Replication & Leaf Pruning (RFC 9251)
+│   ├── evpn_irb_anycast.rs # Datacenter EVPN: Layer 3 Anycast Gateway & Symmetric/Asymmetric IRB Engine (RFC 9135/9136)
+│   ├── evpn_bum_policer.rs # Datacenter EVPN: Layer 2 BUM Traffic Storm Policer & Quarantine (RFC 7432)
+│   ├── evpn_core_isolation.rs # Datacenter EVPN: Layer 2 Core Isolation Defense & Split-Horizon Group (RFC 7432)
+│   ├── evpn_flap_damping.rs # Datacenter EVPN: Layer 2 Port Flap Damping & Route Dampening (RFC 7432 Section 16)
+│   ├── evpn_pvlan.rs      # Datacenter EVPN: Layer 2 Private VLAN (PVLAN) & Port Isolation (RFC 5517)
+│   ├── evpn_umt_ir.rs     # Datacenter EVPN: Unknown Multicast Tree (UMT) & Ingress Replication Optimization (RFC 9251)
+│   ├── geneve_telemetry_opt.rs # Datacenter Overlay: Geneve In-Band Network Telemetry INT Option (RFC 8926)
+│   ├── gtpc_v2.rs         # 5G / 4G Core: 3GPP GTPv2-C Control Plane Session Management & SGW Engine (3GPP TS 29.274)
+│   ├── gtpu_heartbeat.rs  # 5G User Plane: 3GPP GTP-U Path Management Echo Heartbeat & Failure Detection (TS 29.281)
+│   ├── gtpu_reordering.rs # 5G User Plane: 3GPP GTP-U Sequence Out-of-Order Reordering & Jitter Buffer (TS 29.281)
+│   ├── gtpu_upf_relocation.rs # 5G User Plane: 3GPP GTP-U UPF Relocation, Indirect Forwarding & End Marker (TS 23.501)
+│   ├── gtpu_qos_enforcer.rs # 5G User Plane: 3GPP GTP-U QoS Flow Identifier & Session-AMBR Rate Limiter (TS 38.415)
+│   ├── gtpu_fast_failover.rs # 5G User Plane: 3GPP GTP-U Path Loss Detection & Fast Failover Engine (TS 23.501)
+│   ├── gtpu_ma_pdu.rs     # 5G User Plane: 3GPP GTP-U MA-PDU Session & ATSSS Traffic Steering Engine (TS 23.501)
+│   ├── gtpu_redundant_paths.rs # 5G User Plane: 3GPP GTP-U Redundant Transmission & Deduplication (TS 23.501)
+│   ├── gtpu_jitter_telemetry.rs # 5G User Plane: 3GPP GTP-U Path Jitter & OWD Telemetry Engine (TS 38.415)
+│   ├── srv6_mup_interworking.rs # 5G / SRv6: Mobile User Plane (MUP) End.M.GTP6.D/E Interworking Engine
+│   ├── gtpu_telemetry.rs  # 5G User Plane: GTP-U PDU Session Container Extension & In-Band Delay Telemetry (3GPP TS 38.415)
+│   ├── ptp_telecom_tc.rs  # Timing / 5G: PTP Telecom Peer-to-Peer Transparent Clock (T-TC) Engine (ITU-T G.8275.2)
+│   ├── diameter_sh.rs     # 5G / IMS Core: Diameter Sh IMS Application Server to HSS Interface (3GPP TS 29.328)
+│   ├── evpn_vrf_leaking.rs # Datacenter EVPN: Layer 3 Multi-VRF Route Leaking & Shared Services (RFC 9136)
+│   ├── ptp_time_error.rs  # Timing / 5G: PTP Telecom Time Error cTE/dTE Measurement & Mask Verification (ITU-T G.8273.2)
+│   ├── diameter_s9.rs     # 5G / 4G Core: Diameter S9 PCRF Roaming Policy Coordination Interface (3GPP TS 29.215)
+│   ├── evpn_igmp_snooping.rs # Datacenter EVPN: Layer 2 IGMP Snooping & Multicast Tree Pruning (RFC 9251)
+│   ├── flowspec_redirect_vrf.rs # BGP / DDoS: BGP Flowspec Redirect-to-VRF & DSCP Traffic Marking (RFC 8955)
+│   ├── evpn_pref_df.rs    # Datacenter EVPN: Preference-Based DF Election & Non-Preempt/Sticky (RFC 8584)
+│   ├── ifa_telemetry.rs   # In-Band Telemetry: In-situ Flow Analytics IFA 2.0 Hop-by-Hop Telemetry (RFC 9197)
+│   ├── diameter_s13.rs    # 5G / 4G Core: Diameter S13 / S13' EIR Equipment Identity Register (3GPP TS 29.272)
+│   ├── ptp_telecom_bc.rs  # Timing / 5G: PTP Telecom Boundary Clock (T-BC) Alternate BMCA Engine (ITU-T G.8275.1)
+│   ├── synce_esmc.rs      # 5G Fronthaul / Timing: SyncE ESMC Quality Level SSM & Physical Clock Selection (ITU-T G.8264)
+│   ├── diameter_s6a.rs    # 5G / 4G Core: Diameter S6a Interface & HSS EPS Authentication Vectors (3GPP TS 29.272)
+│   ├── evpn_etree.rs      # Datacenter EVPN: E-Tree Root/Leaf Service & Split-Horizon Forwarding (RFC 8317)
+│   ├── srv6_slicing.rs    # Segment Routing / 5G: SRv6 Network Slicing & Flex-Algo VTN SLA Paths (RFC 9350 / RFC 9543)
+│   ├── mldp.rs            # Multicast MPLS: Multipoint LDP P2MP/MP2MP Multicast Tree Replication (RFC 6388 / RFC 6513)
+│   ├── diameter_gx.rs     # 5G / EPC Policy: Diameter Gx Policy & Charging Control PCEF Engine (3GPP TS 29.212)
+│   ├── evpn_mass_withdraw.rs # Datacenter EVPN: Route Type 1 per-ES Mass Withdrawal Fast Convergence (RFC 7432)
+│   ├── sr_mpls_oam.rs     # Carrier OAM: Segment Routing MPLS LSP Ping & Target FEC Stack Sub-TLVs (RFC 8287)
+│   ├── pim_bsr.rs         # Multicast: PIM-BSR Dynamic RP Election & PIM-SSM 232.0.0.0/8 (RFC 5059 / RFC 4607)
+│   ├── diameter_rx.rs     # 5G / IMS Policy: Diameter Rx Policy and Charging Control (3GPP TS 29.214 / PCRF)
+│   ├── evpn_proxy_arp.rs  # Datacenter EVPN: Proxy ARP/ND Broadcast Suppression & Anycast Gateway (RFC 7432 / RFC 9135)
+│   ├── nsh_md2.rs         # SFC / Overlays: NSH MD Type 2 Dynamic Variable-Length Context TLVs (RFC 8300 Section 3.5.2)
+│   ├── bgp_add_path.rs    # Carrier / BGP: BGP ADD-PATH Capability 69 & Prefix Independent Convergence (RFC 7911/8277)
+│   ├── evpn_synch.rs      # Carrier / EVPN: Route Type 7/8 Multicast Join & Leave Synchronization (RFC 9251)
+│   ├── detnet.rs          # TSN / Deterministic: DetNet Control Word & PREF Elimination Filter (RFC 8655/8938/8939/8964)
+│   ├── diameter_charging.rs # 5G Core / AAA: Diameter Gy/Ro Credit-Control & OCS Quota Engine (RFC 4006 / 3GPP TS 32.299)
 │   ├── bgp_prefix_sid.rs  # Carrier / BGP: BGP Prefix-SID Attribute for SR-MPLS & SRv6 (RFC 8669 Path Attr 40)
 │   ├── cqf_enhanced.rs    # TSN / Deterministic: IEEE 802.1Qch CQF Ping-Pong Dual Buffer Zero-Jitter Scheduling
 │   ├── nrf_oauth.rs       # 5G Core / Security: NRF OAuth 2.0 Access Token Authorization Service (3GPP TS 29.510)

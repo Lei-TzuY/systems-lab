@@ -14,6 +14,10 @@ pub const DIAMETER_FLAG_PROXIABLE: u8 = 0x40;
 pub const DIAMETER_FLAG_ERROR: u8 = 0x20;
 pub const DIAMETER_FLAG_RETRANSMITTED: u8 = 0x10;
 
+// AVP Flags
+pub const DIAMETER_FLAG_VENDOR_SPECIFIC: u8 = 0x80;
+pub const DIAMETER_FLAG_MANDATORY: u8 = 0x40;
+
 // Command Codes
 pub const DIAMETER_CMD_CAPABILITIES_EXCHANGE: u32 = 257; // CER / CEA
 pub const DIAMETER_CMD_DEVICE_WATCHDOG: u32 = 280; // DWR / DWA
@@ -41,6 +45,12 @@ pub struct DiameterHeader {
     pub application_id: u32,
     pub hop_by_hop_id: u32,
     pub end_to_end_id: u32,
+}
+
+impl DiameterHeader {
+    pub fn is_request(&self) -> bool {
+        (self.flags & DIAMETER_FLAG_REQUEST) != 0
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,6 +100,15 @@ impl DiameterAvp {
         }
     }
 
+    pub fn new_with_flags(code: u32, flags: u8, data: Vec<u8>) -> Self {
+        DiameterAvp {
+            code,
+            flags,
+            vendor_id: None,
+            data,
+        }
+    }
+
     pub fn new_u32(code: u32, val: u32) -> Self {
         Self::new(code, &val.to_be_bytes())
     }
@@ -98,10 +117,51 @@ impl DiameterAvp {
         Self::new(code, text.as_bytes())
     }
 
+    pub fn new_string(code: u32, text: &str) -> Self {
+        Self::new_utf8(code, text)
+    }
+
     pub fn new_ipv4(code: u32, ip: Ipv4Address) -> Self {
         let mut data = vec![0x00, 0x01]; // Address Family 1 = IPv4
         data.extend_from_slice(&ip.0);
         Self::new(code, &data)
+    }
+
+    pub fn new_vendor(code: u32, flags: u8, vendor_id: u32, data: &[u8]) -> Self {
+        DiameterAvp {
+            code,
+            flags,
+            vendor_id: Some(vendor_id),
+            data: data.to_vec(),
+        }
+    }
+
+    pub fn parse_all(mut data: &[u8]) -> Vec<DiameterAvp> {
+        let mut list = Vec::new();
+        while !data.is_empty() {
+            if let Some((avp, consumed)) = DiameterAvp::parse(data) {
+                if consumed == 0 {
+                    break;
+                }
+                list.push(avp);
+                data = &data[consumed..];
+            } else {
+                break;
+            }
+        }
+        list
+    }
+
+    pub fn as_u32(&self) -> Option<u32> {
+        if self.data.len() >= 4 {
+            Some(u32::from_be_bytes(self.data[..4].try_into().ok()?))
+        } else {
+            None
+        }
+    }
+
+    pub fn as_string(&self) -> Option<String> {
+        String::from_utf8(self.data.clone()).ok()
     }
 
     pub fn serialize(&self) -> Vec<u8> {
@@ -167,6 +227,54 @@ impl DiameterAvp {
 }
 
 impl DiameterMessage {
+    pub fn new_request(
+        command_code: u32,
+        application_id: u32,
+        hop_by_hop_id: u32,
+        end_to_end_id: u32,
+    ) -> Self {
+        DiameterMessage {
+            header: DiameterHeader {
+                version: DIAMETER_VERSION_1,
+                length: 0,
+                flags: DIAMETER_FLAG_REQUEST | DIAMETER_FLAG_PROXIABLE,
+                command_code,
+                application_id,
+                hop_by_hop_id,
+                end_to_end_id,
+            },
+            avps: Vec::new(),
+        }
+    }
+
+    pub fn new_answer(
+        command_code: u32,
+        application_id: u32,
+        hop_by_hop_id: u32,
+        end_to_end_id: u32,
+    ) -> Self {
+        DiameterMessage {
+            header: DiameterHeader {
+                version: DIAMETER_VERSION_1,
+                length: 0,
+                flags: DIAMETER_FLAG_PROXIABLE,
+                command_code,
+                application_id,
+                hop_by_hop_id,
+                end_to_end_id,
+            },
+            avps: Vec::new(),
+        }
+    }
+
+    pub fn add_avp(&mut self, avp: DiameterAvp) {
+        self.avps.push(avp);
+    }
+
+    pub fn get_avp(&self, code: u32) -> Option<&DiameterAvp> {
+        self.avps.iter().find(|a| a.code == code)
+    }
+
     pub fn build_cer(
         origin_host: &str,
         origin_realm: &str,
