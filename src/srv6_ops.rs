@@ -25,6 +25,8 @@ pub enum Srv6Behavior {
     EndDt4 { vrf_id: u32 },
     /// End.DT6: Decapsulate outer IPv6 header and lookup inner IPv6 in VRF table
     EndDt6 { vrf_id: u32 },
+    /// End.DT46: Decapsulate outer IPv6 header and lookup inner IPv4 or IPv6 in VRF table (RFC 8986)
+    EndDt46 { vrf_id: u32 },
     /// End.DX2: Decapsulate outer IPv6 header and forward inner Layer-2 Ethernet frame
     EndDx2 { out_if: String },
 }
@@ -136,10 +138,41 @@ impl Srv6Engine {
                     vrf_id: Some(*vrf_id),
                     payload: inner_payload.to_vec(),
                 },
-                Srv6Behavior::EndDt6 { vrf_id } => Srv6ExecutionResult::DecapIpv6 {
-                    vrf_id: Some(*vrf_id),
-                    payload: inner_payload.to_vec(),
-                },
+                Srv6Behavior::EndDt6 { vrf_id } => {
+                    if !inner_payload.is_empty() {
+                        let version = inner_payload[0] >> 4;
+                        if version == 6 {
+                            Srv6ExecutionResult::DecapIpv6 {
+                                vrf_id: Some(*vrf_id),
+                                payload: inner_payload.to_vec(),
+                            }
+                        } else {
+                            Srv6ExecutionResult::Drop("End.DT6: Non-IPv6 inner payload".to_string())
+                        }
+                    } else {
+                        Srv6ExecutionResult::Drop("End.DT6: Empty payload".to_string())
+                    }
+                }
+                Srv6Behavior::EndDt46 { vrf_id } => {
+                    if !inner_payload.is_empty() {
+                        let version = inner_payload[0] >> 4;
+                        if version == 4 {
+                            Srv6ExecutionResult::DecapIpv4 {
+                                vrf_id: Some(*vrf_id),
+                                payload: inner_payload.to_vec(),
+                            }
+                        } else if version == 6 {
+                            Srv6ExecutionResult::DecapIpv6 {
+                                vrf_id: Some(*vrf_id),
+                                payload: inner_payload.to_vec(),
+                            }
+                        } else {
+                            Srv6ExecutionResult::Drop("End.DT46: Unknown inner IP version".to_string())
+                        }
+                    } else {
+                        Srv6ExecutionResult::Drop("End.DT46: Empty payload".to_string())
+                    }
+                }
                 Srv6Behavior::EndDx2 { out_if } => Srv6ExecutionResult::DecapEthernet {
                     out_if: out_if.clone(),
                     frame: inner_payload.to_vec(),

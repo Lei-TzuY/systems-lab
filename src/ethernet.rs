@@ -34,6 +34,14 @@ impl MacAddress {
     pub fn is_unicast(&self) -> bool {
         !self.is_multicast() && !self.is_broadcast()
     }
+
+    pub fn bytes(&self) -> [u8; 6] {
+        self.0
+    }
+
+    pub fn octets(&self) -> [u8; 6] {
+        self.0
+    }
 }
 
 impl fmt::Debug for MacAddress {

@@ -26,7 +26,7 @@ fn host() -> NetStack {
     stack
 }
 
-fn ra_frame(stack: &NetStack, current_hop_limit: u8, outer_hop_limit: u8) -> Vec<u8> {
+fn ra_frame(_stack: &NetStack, current_hop_limit: u8, outer_hop_limit: u8) -> Vec<u8> {
     let router_ip = ip6("fe80::1");
     let router_mac = mac(0x01);
     let dst = Ipv6Address::LINK_LOCAL_ALL_NODES;

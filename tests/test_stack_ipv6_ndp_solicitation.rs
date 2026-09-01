@@ -1,6 +1,5 @@
 use std::str::FromStr;
-
-use toy_tcpip::ethernet::{ETHERTYPE_IPV6, EthernetFrame, MacAddress};
+use toy_tcpip::ethernet::{EthernetFrame, MacAddress};
 use toy_tcpip::icmpv6::{ICMPV6_TYPE_NEIGHBOR_SOLICIT, Icmpv6Packet, ipv6_multicast_mac};
 use toy_tcpip::ipv4::Ipv4Address;
 use toy_tcpip::ipv6::{Ipv6Address, Ipv6Packet, NEXT_HEADER_ICMPV6};

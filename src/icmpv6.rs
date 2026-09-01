@@ -22,8 +22,52 @@ pub const ICMPV6_TYPE_REDIRECT: u8 = 137;
 pub const NDP_OPT_SRC_LINK_LAYER_ADDR: u8 = 1;
 pub const NDP_OPT_TARGET_LINK_LAYER_ADDR: u8 = 2;
 pub const NDP_OPT_PREFIX_INFORMATION: u8 = 3;
-pub const NDP_OPT_ROUTE_INFORMATION: u8 = 24;
 pub const NDP_OPT_REDIRECTED_HEADER: u8 = 4;
+pub const NDP_OPT_MTU: u8 = 5;
+pub const NDP_OPT_ROUTE_INFORMATION: u8 = 24;
+pub const NDP_OPT_RDNSS: u8 = 25;
+pub const NDP_OPT_DNSSL: u8 = 31;
+
+/// RFC 8106 Recursive DNS Server (RDNSS) Option.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RdnssOption {
+    pub lifetime: u32,
+    pub servers: Vec<Ipv6Address>,
+}
+
+impl RdnssOption {
+    pub fn new(lifetime: u32, servers: Vec<Ipv6Address>) -> Self {
+        RdnssOption { lifetime, servers }
+    }
+}
+
+/// RFC 8106 DNS Search List (DNSSL) Option.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DnsslOption {
+    pub lifetime: u32,
+    pub search_list: Vec<String>,
+}
+
+impl DnsslOption {
+    pub fn new(lifetime: u32, search_list: Vec<String>) -> Self {
+        DnsslOption {
+            lifetime,
+            search_list,
+        }
+    }
+}
+
+/// RFC 4861 MTU Option.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MtuOption {
+    pub mtu: u32,
+}
+
+impl MtuOption {
+    pub fn new(mtu: u32) -> Self {
+        MtuOption { mtu }
+    }
+}
 
 /// RFC 4861 Neighbor Unreachability Detection defaults. Reachable Time is
 /// normally randomized around BaseReachableTime; this deterministic simulator
@@ -155,6 +199,9 @@ pub struct RouterAdvertisement {
     pub retrans_timer: u32,
     pub prefixes: Vec<PrefixInformationOption>,
     pub routes: Vec<RouteInformationOption>,
+    pub mtu: Option<u32>,
+    pub rdnss: Vec<RdnssOption>,
+    pub dnssl: Vec<DnsslOption>,
 }
 
 /// Parsed RFC 4861 Redirect information. The Redirected Header option is
@@ -820,13 +867,64 @@ impl<'a> Icmpv6Packet<'a> {
         routes: &[RouteInformationOption],
         source_mac: Option<MacAddress>,
     ) -> Vec<u8> {
+        Self::build_router_advertisement_full(
+            src_ip,
+            dst_ip,
+            current_hop_limit,
+            router_lifetime,
+            preference,
+            prefixes,
+            routes,
+            None,
+            &[],
+            &[],
+            source_mac,
+        )
+    }
+
+    /// Builds a full RFC 4861 / RFC 4191 / RFC 8106 Router Advertisement with MTU, RDNSS, and DNSSL options.
+    pub fn build_router_advertisement_full(
+        src_ip: Ipv6Address,
+        dst_ip: Ipv6Address,
+        current_hop_limit: u8,
+        router_lifetime: u16,
+        preference: RouterPreference,
+        prefixes: &[PrefixInformationOption],
+        routes: &[RouteInformationOption],
+        mtu: Option<u32>,
+        rdnss: &[RdnssOption],
+        dnssl: &[DnsslOption],
+        source_mac: Option<MacAddress>,
+    ) -> Vec<u8> {
         let route_bytes: usize = routes
             .iter()
             .copied()
             .map(|route| usize::from(route.length_units()) * 8)
             .sum();
+        let mtu_bytes = if mtu.is_some() { 8 } else { 0 };
+        let rdnss_bytes: usize = rdnss.iter().map(|r| 8 + r.servers.len() * 16).sum();
+        let mut dnssl_encoded_list = Vec::new();
+        let mut dnssl_bytes = 0usize;
+        for d in dnssl {
+            let mut name_buf = Vec::new();
+            for domain in &d.search_list {
+                encode_qname_slice(domain, &mut name_buf);
+            }
+            while name_buf.len() % 8 != 0 {
+                name_buf.push(0);
+            }
+            let opt_len = 8 + name_buf.len();
+            dnssl_bytes += opt_len;
+            dnssl_encoded_list.push((d.lifetime, name_buf));
+        }
+
         let mut buf = Vec::with_capacity(
-            16 + prefixes.len() * 32 + route_bytes + usize::from(source_mac.is_some()) * 8,
+            16 + prefixes.len() * 32
+                + route_bytes
+                + mtu_bytes
+                + rdnss_bytes
+                + dnssl_bytes
+                + usize::from(source_mac.is_some()) * 8,
         );
         buf.push(ICMPV6_TYPE_ROUTER_ADVERT);
         buf.push(0);
@@ -841,6 +939,13 @@ impl<'a> Icmpv6Packet<'a> {
             buf.push(NDP_OPT_SRC_LINK_LAYER_ADDR);
             buf.push(1);
             buf.extend_from_slice(&mac.0);
+        }
+
+        if let Some(m) = mtu {
+            buf.push(NDP_OPT_MTU);
+            buf.push(1);
+            buf.extend_from_slice(&[0, 0]);
+            buf.extend_from_slice(&m.to_be_bytes());
         }
 
         for prefix in prefixes {
@@ -863,6 +968,26 @@ impl<'a> Icmpv6Packet<'a> {
 
         for route in routes {
             route.append_to(&mut buf);
+        }
+
+        for r in rdnss {
+            let units = 1 + r.servers.len() * 2;
+            buf.push(NDP_OPT_RDNSS);
+            buf.push(units as u8);
+            buf.extend_from_slice(&[0, 0]);
+            buf.extend_from_slice(&r.lifetime.to_be_bytes());
+            for s in &r.servers {
+                buf.extend_from_slice(&s.0);
+            }
+        }
+
+        for (lifetime, name_buf) in dnssl_encoded_list {
+            let units = (8 + name_buf.len()) / 8;
+            buf.push(NDP_OPT_DNSSL);
+            buf.push(units as u8);
+            buf.extend_from_slice(&[0, 0]);
+            buf.extend_from_slice(&lifetime.to_be_bytes());
+            buf.extend_from_slice(&name_buf);
         }
 
         let csum = compute_ipv6_transport_checksum(src_ip, dst_ip, NEXT_HEADER_ICMPV6, &buf);
@@ -1003,6 +1128,34 @@ impl<'a> Icmpv6Packet<'a> {
     }
 }
 
+fn encode_qname_slice(domain: &str, buf: &mut Vec<u8>) {
+    for label in domain.split('.') {
+        if !label.is_empty() {
+            buf.push(label.len() as u8);
+            buf.extend_from_slice(label.as_bytes());
+        }
+    }
+    buf.push(0x00);
+}
+
+fn decode_qname_slice(data: &[u8], mut offset: usize) -> Result<(String, usize), ()> {
+    let mut labels = Vec::new();
+    while offset < data.len() {
+        let len = data[offset] as usize;
+        if len == 0 {
+            offset += 1;
+            break;
+        }
+        if len > 63 || offset + 1 + len > data.len() {
+            return Err(());
+        }
+        let label = String::from_utf8_lossy(&data[offset + 1..offset + 1 + len]).to_string();
+        labels.push(label);
+        offset += 1 + len;
+    }
+    Ok((labels.join("."), offset))
+}
+
 impl RouterAdvertisement {
     /// Parses the body of an already checksum-validated ICMPv6 Router Advertisement.
     /// Unknown NDP options are skipped according to their encoded length.
@@ -1019,6 +1172,9 @@ impl RouterAdvertisement {
         let retrans_timer = u32::from_be_bytes(payload[8..12].try_into().ok()?);
         let mut prefixes = Vec::new();
         let mut routes = Vec::new();
+        let mut mtu = None;
+        let mut rdnss = Vec::new();
+        let mut dnssl = Vec::new();
         let mut offset = 12usize;
         while offset < payload.len() {
             if offset + 2 > payload.len() {
@@ -1082,6 +1238,50 @@ impl RouterAdvertisement {
                         route_lifetime,
                     ));
                 }
+            } else if option_type == NDP_OPT_MTU {
+                if option_len == 8 {
+                    let option = &payload[offset..offset + option_len];
+                    let val = u32::from_be_bytes(option[4..8].try_into().ok()?);
+                    mtu = Some(val);
+                }
+            } else if option_type == NDP_OPT_RDNSS {
+                if units >= 3 && units % 2 == 1 {
+                    let option = &payload[offset..offset + option_len];
+                    let lifetime = u32::from_be_bytes(option[4..8].try_into().ok()?);
+                    let num_servers = (units - 1) / 2;
+                    let mut servers = Vec::with_capacity(num_servers);
+                    for i in 0..num_servers {
+                        let s_off = 8 + i * 16;
+                        let mut addr = [0u8; 16];
+                        addr.copy_from_slice(&option[s_off..s_off + 16]);
+                        servers.push(Ipv6Address(addr));
+                    }
+                    rdnss.push(RdnssOption { lifetime, servers });
+                }
+            } else if option_type == NDP_OPT_DNSSL {
+                if units >= 2 {
+                    let option = &payload[offset..offset + option_len];
+                    let lifetime = u32::from_be_bytes(option[4..8].try_into().ok()?);
+                    let mut search_list = Vec::new();
+                    let mut name_off = 8;
+                    while name_off < option_len {
+                        if option[name_off] == 0 {
+                            break;
+                        }
+                        if let Ok((domain, next_off)) = decode_qname_slice(option, name_off) {
+                            if !domain.is_empty() {
+                                search_list.push(domain);
+                            }
+                            name_off = next_off;
+                        } else {
+                            break;
+                        }
+                    }
+                    dnssl.push(DnsslOption {
+                        lifetime,
+                        search_list,
+                    });
+                }
             }
             offset += option_len;
         }
@@ -1095,6 +1295,9 @@ impl RouterAdvertisement {
             retrans_timer,
             prefixes,
             routes,
+            mtu,
+            rdnss,
+            dnssl,
         })
     }
 }
@@ -1124,6 +1327,9 @@ struct NudMetadata {
 pub struct NdpTable {
     entries: HashMap<Ipv6Address, MacAddress>,
     nud: HashMap<Ipv6Address, NudMetadata>,
+    rdnss_servers: HashMap<Ipv6Address, u64>,
+    dnssl_domains: HashMap<String, u64>,
+    link_mtu: Option<u32>,
     // RFC 4861 interface variables. ReachableTime normally includes a random
     // factor; this deterministic simulator deliberately uses factor 1.0.
     reachable_time_ms: u64,
@@ -1141,9 +1347,86 @@ impl NdpTable {
         NdpTable {
             entries: HashMap::new(),
             nud: HashMap::new(),
+            rdnss_servers: HashMap::new(),
+            dnssl_domains: HashMap::new(),
+            link_mtu: None,
             reachable_time_ms: NDP_REACHABLE_TIME_MS,
             retrans_timer_ms: NDP_RETRANS_TIMER_MS,
         }
+    }
+
+    /// Applies RDNSS, DNSSL, MTU, and NUD parameters from a Router Advertisement.
+    pub fn apply_router_advertisement(&mut self, ra: &RouterAdvertisement, now_ms: u64) {
+        self.apply_router_advertisement_timers(ra.reachable_time, ra.retrans_timer);
+        if let Some(mtu) = ra.mtu {
+            if mtu >= 1280 {
+                self.link_mtu = Some(mtu);
+            }
+        }
+        for rdnss in &ra.rdnss {
+            if rdnss.lifetime == 0 {
+                for server in &rdnss.servers {
+                    self.rdnss_servers.remove(server);
+                }
+            } else {
+                let expiry = now_ms.saturating_add((rdnss.lifetime as u64) * 1000);
+                for server in &rdnss.servers {
+                    self.rdnss_servers.insert(*server, expiry);
+                }
+            }
+        }
+        for dnssl in &ra.dnssl {
+            if dnssl.lifetime == 0 {
+                for domain in &dnssl.search_list {
+                    self.dnssl_domains.remove(&domain.to_lowercase());
+                }
+            } else {
+                let expiry = now_ms.saturating_add((dnssl.lifetime as u64) * 1000);
+                for domain in &dnssl.search_list {
+                    self.dnssl_domains.insert(domain.to_lowercase(), expiry);
+                }
+            }
+        }
+    }
+
+    /// Returns active learned recursive DNS servers from RDNSS options.
+    pub fn learned_dns_servers(&self, now_ms: u64) -> Vec<Ipv6Address> {
+        let mut servers: Vec<Ipv6Address> = self
+            .rdnss_servers
+            .iter()
+            .filter(|(_, expiry)| now_ms < **expiry)
+            .map(|(ip, _)| *ip)
+            .collect();
+        servers.sort_by_key(|a| a.0);
+        servers
+    }
+
+    /// Returns active learned search domains from DNSSL options.
+    pub fn learned_search_domains(&self, now_ms: u64) -> Vec<String> {
+        let mut domains: Vec<String> = self
+            .dnssl_domains
+            .iter()
+            .filter(|(_, expiry)| now_ms < **expiry)
+            .map(|(domain, _)| domain.clone())
+            .collect();
+        domains.sort();
+        domains
+    }
+
+    /// Returns the learned link MTU, if advertised by Router Advertisements.
+    pub fn learned_mtu(&self) -> Option<u32> {
+        self.link_mtu
+    }
+
+    /// Sets or clears the link MTU manually.
+    pub fn set_link_mtu(&mut self, mtu: Option<u32>) {
+        self.link_mtu = mtu;
+    }
+
+    /// Purges expired DNS servers and search domains.
+    pub fn purge_expired_dns(&mut self, now_ms: u64) {
+        self.rdnss_servers.retain(|_, expiry| now_ms < *expiry);
+        self.dnssl_domains.retain(|_, expiry| now_ms < *expiry);
     }
 
     /// Applies the RFC 4861 fixed-header NUD parameters from a valid Router

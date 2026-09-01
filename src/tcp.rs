@@ -39,11 +39,14 @@ pub const TCP_FLAG_PSH: u8 = 0x08;
 pub const TCP_FLAG_ACK: u8 = 0x10;
 pub const TCP_FLAG_URG: u8 = 0x20;
 
-// TCP Option Kinds (RFC 793, RFC 7323)
+// TCP Option Kinds (RFC 793, RFC 7323, RFC 2018)
 pub const TCP_OPT_EOL: u8 = 0;
 pub const TCP_OPT_NOP: u8 = 1;
 pub const TCP_OPT_MSS: u8 = 2;
 pub const TCP_OPT_WSCALE: u8 = 3;
+pub const TCP_OPT_SACK_PERMITTED: u8 = 4;
+pub const TCP_OPT_SACK: u8 = 5;
+pub const TCP_OPT_TIMESTAMP: u8 = 8;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TcpOption {
@@ -51,6 +54,9 @@ pub enum TcpOption {
     Nop,
     Mss(u16),
     WindowScale(u8),
+    SackPermitted,
+    Sack(Vec<(u32, u32)>),
+    Timestamp { val: u32, ecr: u32 },
     Unknown { kind: u8, data: Vec<u8> },
 }
 
@@ -294,6 +300,45 @@ impl<'a> TcpSegment<'a> {
                 TCP_OPT_WSCALE if len == 3 => {
                     options.push(TcpOption::WindowScale(data[opt_offset + 2]));
                 }
+                TCP_OPT_SACK_PERMITTED if len == 2 => {
+                    options.push(TcpOption::SackPermitted);
+                }
+                TCP_OPT_SACK if len >= 10 && (len - 2) % 8 == 0 => {
+                    let num_blocks = (len - 2) / 8;
+                    let mut blocks = Vec::with_capacity(num_blocks);
+                    for i in 0..num_blocks {
+                        let b_off = opt_offset + 2 + i * 8;
+                        let left = u32::from_be_bytes([
+                            data[b_off],
+                            data[b_off + 1],
+                            data[b_off + 2],
+                            data[b_off + 3],
+                        ]);
+                        let right = u32::from_be_bytes([
+                            data[b_off + 4],
+                            data[b_off + 5],
+                            data[b_off + 6],
+                            data[b_off + 7],
+                        ]);
+                        blocks.push((left, right));
+                    }
+                    options.push(TcpOption::Sack(blocks));
+                }
+                TCP_OPT_TIMESTAMP if len == 10 => {
+                    let val = u32::from_be_bytes([
+                        data[opt_offset + 2],
+                        data[opt_offset + 3],
+                        data[opt_offset + 4],
+                        data[opt_offset + 5],
+                    ]);
+                    let ecr = u32::from_be_bytes([
+                        data[opt_offset + 6],
+                        data[opt_offset + 7],
+                        data[opt_offset + 8],
+                        data[opt_offset + 9],
+                    ]);
+                    options.push(TcpOption::Timestamp { val, ecr });
+                }
                 other => {
                     let opt_data = data[opt_offset + 2..opt_offset + len].to_vec();
                     options.push(TcpOption::Unknown {
@@ -373,6 +418,26 @@ impl<'a> TcpSegment<'a> {
                     opt_bytes.push(TCP_OPT_WSCALE);
                     opt_bytes.push(3);
                     opt_bytes.push(*scale);
+                }
+                TcpOption::SackPermitted => {
+                    opt_bytes.push(TCP_OPT_SACK_PERMITTED);
+                    opt_bytes.push(2);
+                }
+                TcpOption::Sack(blocks) => {
+                    let count = blocks.len().min(4);
+                    let len = 2 + count * 8;
+                    opt_bytes.push(TCP_OPT_SACK);
+                    opt_bytes.push(len as u8);
+                    for &(left, right) in &blocks[..count] {
+                        opt_bytes.extend_from_slice(&left.to_be_bytes());
+                        opt_bytes.extend_from_slice(&right.to_be_bytes());
+                    }
+                }
+                TcpOption::Timestamp { val, ecr } => {
+                    opt_bytes.push(TCP_OPT_TIMESTAMP);
+                    opt_bytes.push(10);
+                    opt_bytes.extend_from_slice(&val.to_be_bytes());
+                    opt_bytes.extend_from_slice(&ecr.to_be_bytes());
                 }
                 TcpOption::Unknown { kind, data } => {
                     opt_bytes.push(*kind);
@@ -479,6 +544,10 @@ pub struct TcpStats {
     pub invalid_segments: u64,
     /// Window probes emitted while the peer advertised a zero receive window.
     pub zero_window_probes: u64,
+    pub sack_blocks_received: u64,
+    pub sack_blocks_sent: u64,
+    /// Segments dropped by the RFC 7323 section 5.3 PAWS check as old duplicates.
+    pub paws_discards: u64,
 }
 
 /// An unacknowledged segment tracked in flight for retransmission.
@@ -491,6 +560,7 @@ pub struct RetransmitSegment {
     pub first_sent_ms: u64,
     pub last_sent_ms: u64,
     pub retransmits: u32,
+    pub sacked: bool,
 }
 
 /// Manages a single TCP connection state machine, out-of-order reassembly queue,
@@ -530,6 +600,16 @@ pub struct TcpConnection {
     /// Receive window most recently advertised to the peer, used to detect when the
     /// window reopens so an unsolicited window update can be sent.
     pub last_advertised_wnd: u16,
+    pub sack_permitted: bool,
+    pub peer_sack_permitted: bool,
+    pub ts_enabled: bool,
+    pub ts_recent: u32,
+    pub last_ts_ack: u32,
+    /// RFC 7323 `Last.ACK.sent`: the acknowledgement number carried by the most recent
+    /// segment this connection transmitted. The TS.Recent update rule in section 4.3
+    /// uses it to tell a segment that covers already-acknowledged data from one that
+    /// runs ahead of the cumulative acknowledgement.
+    pub last_ack_sent: u32,
 }
 
 impl TcpConnection {
@@ -563,6 +643,12 @@ impl TcpConnection {
             aborted: false,
             persist_deadline_ms: None,
             last_advertised_wnd: 65535,
+            sack_permitted: false,
+            peer_sack_permitted: false,
+            ts_enabled: false,
+            ts_recent: 0,
+            last_ts_ack: 0,
+            last_ack_sent: 0,
         }
     }
 
@@ -596,6 +682,12 @@ impl TcpConnection {
             aborted: false,
             persist_deadline_ms: None,
             last_advertised_wnd: 65535,
+            sack_permitted: false,
+            peer_sack_permitted: false,
+            ts_enabled: false,
+            ts_recent: 0,
+            last_ts_ack: 0,
+            last_ack_sent: 0,
         }
     }
 
@@ -735,22 +827,72 @@ impl TcpConnection {
         }
     }
 
-    /// Builds a bare ACK carrying the current cumulative acknowledgement and receive window.
+    /// Computes up to 4 contiguous SACK blocks for currently buffered out-of-order data.
+    pub fn build_sack_blocks(&self) -> Vec<(u32, u32)> {
+        let mut blocks: Vec<(u32, u32)> = Vec::new();
+        for (seq, payload) in &self.ooo_segments {
+            let left = *seq;
+            let right = seq.wrapping_add(payload.len() as u32);
+            if let Some(last) = blocks.last_mut() {
+                if last.1 == left {
+                    last.1 = right;
+                    continue;
+                }
+            }
+            blocks.push((left, right));
+        }
+        blocks.truncate(4);
+        blocks
+    }
+
+    /// Builds an ACK carrying cumulative acknowledgement, receive window, and optional SACK / Timestamp options.
     fn build_ack(&mut self) -> Vec<u8> {
         self.stats.segments_sent += 1;
+        self.last_ack_sent = self.rcv_nxt;
         let wnd = self.current_rcv_wnd();
         self.last_advertised_wnd = wnd;
-        TcpSegment::serialize(
-            self.local.ip,
-            self.remote.ip,
-            self.local.port,
-            self.remote.port,
-            self.snd_nxt,
-            self.rcv_nxt,
-            TcpFlags::ack(),
-            wnd,
-            &[],
-        )
+
+        let mut options = Vec::new();
+        if self.sack_permitted && !self.ooo_segments.is_empty() {
+            let blocks = self.build_sack_blocks();
+            if !blocks.is_empty() {
+                self.stats.sack_blocks_sent += blocks.len() as u64;
+                options.push(TcpOption::Sack(blocks));
+            }
+        }
+        if self.ts_enabled {
+            options.push(TcpOption::Timestamp {
+                val: self.current_time_ms as u32,
+                ecr: self.ts_recent,
+            });
+        }
+
+        if options.is_empty() {
+            TcpSegment::serialize(
+                self.local.ip,
+                self.remote.ip,
+                self.local.port,
+                self.remote.port,
+                self.snd_nxt,
+                self.rcv_nxt,
+                TcpFlags::ack(),
+                wnd,
+                &[],
+            )
+        } else {
+            TcpSegment::serialize_with_options(
+                self.local.ip,
+                self.remote.ip,
+                self.local.port,
+                self.remote.port,
+                self.snd_nxt,
+                self.rcv_nxt,
+                TcpFlags::ack(),
+                wnd,
+                &options,
+                &[],
+            )
+        }
     }
 
     /// True when an inbound RST may tear down the connection. RFC 5961 requires the reset
@@ -785,6 +927,7 @@ impl TcpConnection {
             first_sent_ms: now_ms,
             last_sent_ms: now_ms,
             retransmits: 0,
+            sacked: false,
         });
         self.congestion.record_sent(len);
     }
@@ -852,7 +995,13 @@ impl TcpConnection {
         let syn_seq = self.snd_nxt;
         self.snd_nxt = self.snd_nxt.wrapping_add(1);
 
-        let options = vec![TcpOption::Mss(self.local_mss)];
+        let mut options = vec![TcpOption::Mss(self.local_mss), TcpOption::SackPermitted];
+        if self.ts_enabled {
+            options.push(TcpOption::Timestamp {
+                val: now_ms as u32,
+                ecr: 0,
+            });
+        }
         let packet = TcpSegment::serialize_with_options(
             self.local.ip,
             self.remote.ip,
@@ -925,6 +1074,7 @@ impl TcpConnection {
         let fin_seq = self.snd_nxt;
         self.snd_nxt = self.snd_nxt.wrapping_add(1);
         self.fin_sent = true;
+        self.last_ack_sent = self.rcv_nxt;
 
         let packet = TcpSegment::serialize(
             self.local.ip,
@@ -954,11 +1104,93 @@ impl TcpConnection {
         self.current_time_ms = now_ms;
         self.stats.segments_received += 1;
 
-        // Inspect options for MSS
+        // Inspect options for MSS, SACK, Timestamp. The timestamp is captured rather
+        // than applied inline because RFC 7323 gates it on connection state.
+        let mut seg_timestamp = None;
         for opt in &seg.options {
-            if let TcpOption::Mss(m) = opt {
-                self.peer_mss = *m;
-                self.congestion.mss = *m as u32;
+            match opt {
+                TcpOption::Mss(m) => {
+                    self.peer_mss = *m;
+                    self.congestion.mss = *m as u32;
+                }
+                TcpOption::SackPermitted => {
+                    self.peer_sack_permitted = true;
+                    self.sack_permitted = true;
+                }
+                TcpOption::Sack(blocks) => {
+                    for &(left, right) in blocks {
+                        self.stats.sack_blocks_received += 1;
+                        for entry in &mut self.retransmit_queue {
+                            if seq_ge(entry.seq_num, left) && seq_le(entry.end_seq, right) {
+                                entry.sacked = true;
+                            }
+                        }
+                    }
+                }
+                TcpOption::Timestamp { val, ecr } => {
+                    seg_timestamp = Some((*val, *ecr));
+                }
+                _ => {}
+            }
+        }
+
+        // A connection is "synchronized" once the handshake is past: from that point the
+        // RFC 7323 rules below switch from negotiating the option to policing it.
+        let synchronized = !matches!(
+            self.state,
+            TcpState::Closed | TcpState::Listen | TcpState::SynSent
+        );
+
+        // RFC 7323 section 3.2: Timestamps are in use only when the option appeared on
+        // both halves of the SYN exchange. The SYN decides it, and only while the
+        // connection is still being set up -- a spurious SYN injected into an established
+        // connection must not be able to switch the option off or reseed TS.Recent. A
+        // TSopt arriving later on a connection that never negotiated the option is
+        // likewise ignored, so a peer cannot turn timestamps on mid-stream.
+        if seg.flags.syn && !synchronized {
+            self.ts_enabled = seg_timestamp.is_some();
+            // The SYN seeds TS.Recent directly. The section 4.3 window rules below only
+            // apply once the connection is synchronized, and at this point there is no
+            // Last.ACK.sent for the peer's initial sequence number to be compared with.
+            if let Some((tsval, _)) = seg_timestamp {
+                self.ts_recent = tsval;
+                self.last_ack_sent = seg.seq_num.wrapping_add(1);
+            }
+        }
+        if !self.ts_enabled {
+            seg_timestamp = None;
+        }
+
+        if let Some((tsval, ecr)) = seg_timestamp {
+            // RFC 7323 section 5.3 (PAWS). On a synchronized connection a segment whose
+            // TSval predates TS.Recent is an old duplicate -- possibly one from an
+            // earlier incarnation whose sequence numbers have since wrapped back into
+            // the current receive window, which is precisely the corruption PAWS exists
+            // to stop. Discard it and re-advertise our state instead of feeding it to
+            // the reassembly queue. RST is exempt so a genuine reset is never swallowed,
+            // and SYN is exempt because a new incarnation legitimately restarts the
+            // peer's timestamp clock.
+            if synchronized && !seg.flags.rst && !seg.flags.syn && seq_lt(tsval, self.ts_recent) {
+                self.stats.paws_discards += 1;
+                self.stats.invalid_segments += 1;
+                return Some(self.build_ack());
+            }
+
+            // RFC 7323 section 4.3: TS.Recent advances only on a segment that is no older
+            // than the value it replaces and that covers the last byte we acknowledged.
+            // Updating unconditionally let a reordered or duplicated segment drag
+            // TS.Recent backwards (or jump it forwards); the wrong value was then echoed
+            // in our ACKs and corrupted the peer's RTT estimate.
+            if seq_ge(tsval, self.ts_recent) && seq_le(seg.seq_num, self.last_ack_sent) {
+                self.ts_recent = tsval;
+            }
+
+            self.last_ts_ack = ecr;
+            if ecr != 0 {
+                let sample = (now_ms as u32).saturating_sub(ecr) as f64;
+                if sample > 0.0 {
+                    self.rtt.update_sample(sample);
+                }
             }
         }
 
@@ -986,8 +1218,17 @@ impl TcpConnection {
                     self.snd_nxt = self.snd_nxt.wrapping_add(1);
                     self.state = TcpState::SynReceived;
 
-                    // Send SYN-ACK with our MSS option
-                    let options = vec![TcpOption::Mss(self.local_mss)];
+                    // Send SYN-ACK with our MSS option and SackPermitted if negotiated
+                    let mut options = vec![TcpOption::Mss(self.local_mss)];
+                    if self.peer_sack_permitted {
+                        options.push(TcpOption::SackPermitted);
+                    }
+                    if self.ts_enabled {
+                        options.push(TcpOption::Timestamp {
+                            val: now_ms as u32,
+                            ecr: self.ts_recent,
+                        });
+                    }
                     let syn_ack = TcpSegment::serialize_with_options(
                         self.local.ip,
                         self.remote.ip,
@@ -1008,6 +1249,7 @@ impl TcpConnection {
                         Vec::new(),
                         now_ms,
                     );
+                    self.last_ack_sent = self.rcv_nxt;
                     self.stats.segments_sent += 1;
 
                     Some(syn_ack)
@@ -1045,6 +1287,7 @@ impl TcpConnection {
                             self.current_rcv_wnd(),
                             &[],
                         );
+                        self.last_ack_sent = self.rcv_nxt;
                         self.stats.segments_sent += 1;
                         Some(ack)
                     } else {
@@ -1065,6 +1308,7 @@ impl TcpConnection {
                         self.current_rcv_wnd(),
                         &[],
                     );
+                    self.last_ack_sent = self.rcv_nxt;
                     self.stats.segments_sent += 1;
                     Some(syn_ack)
                 } else {
@@ -1243,6 +1487,7 @@ impl TcpConnection {
                         self.current_rcv_wnd(),
                         &[],
                     );
+                    self.last_ack_sent = self.rcv_nxt;
                     self.stats.segments_sent += 1;
                     return Some(ack);
                 }
@@ -1260,7 +1505,7 @@ impl TcpConnection {
         let rcv_wnd = self.current_rcv_wnd();
         let local_mss = self.local_mss;
 
-        let oldest = self.retransmit_queue.first_mut()?;
+        let oldest = self.retransmit_queue.iter_mut().find(|s| !s.sacked)?;
         if oldest.retransmits >= MAX_RETRANSMITS {
             return None;
         }
@@ -1281,7 +1526,10 @@ impl TcpConnection {
         // A SYN or SYN-ACK must carry the MSS option again; it is not remembered by the peer
         // from a segment it never received.
         let packet = if is_syn {
-            let options = vec![TcpOption::Mss(local_mss)];
+            let mut options = vec![TcpOption::Mss(local_mss)];
+            if self.sack_permitted {
+                options.push(TcpOption::SackPermitted);
+            }
             TcpSegment::serialize_with_options(
                 self.local.ip,
                 self.remote.ip,
@@ -1295,17 +1543,45 @@ impl TcpConnection {
                 &payload,
             )
         } else {
-            TcpSegment::serialize(
-                self.local.ip,
-                self.remote.ip,
-                self.local.port,
-                self.remote.port,
-                seq,
-                rcv_nxt,
-                flags,
-                rcv_wnd,
-                &payload,
-            )
+            let mut options = Vec::new();
+            if self.sack_permitted && !self.ooo_segments.is_empty() {
+                let blocks = self.build_sack_blocks();
+                if !blocks.is_empty() {
+                    options.push(TcpOption::Sack(blocks));
+                }
+            }
+            if self.ts_enabled {
+                options.push(TcpOption::Timestamp {
+                    val: now_ms as u32,
+                    ecr: self.ts_recent,
+                });
+            }
+            if options.is_empty() {
+                TcpSegment::serialize(
+                    self.local.ip,
+                    self.remote.ip,
+                    self.local.port,
+                    self.remote.port,
+                    seq,
+                    rcv_nxt,
+                    flags,
+                    rcv_wnd,
+                    &payload,
+                )
+            } else {
+                TcpSegment::serialize_with_options(
+                    self.local.ip,
+                    self.remote.ip,
+                    self.local.port,
+                    self.remote.port,
+                    seq,
+                    rcv_nxt,
+                    flags,
+                    rcv_wnd,
+                    &options,
+                    &payload,
+                )
+            }
         };
         Some(packet)
     }
@@ -1378,6 +1654,7 @@ impl TcpConnection {
                     &chunk,
                 );
 
+                self.last_ack_sent = self.rcv_nxt;
                 self.stats.bytes_sent += chunk.len() as u64;
                 self.stats.segments_sent += 1;
                 self.track_for_retransmit(seq, chunk.len() as u32, flags, chunk, now_ms);
@@ -1474,6 +1751,7 @@ impl TcpConnection {
                         wnd,
                         &chunk,
                     );
+                    self.last_ack_sent = self.rcv_nxt;
                     self.stats.bytes_sent += 1;
                     self.track_for_retransmit(seq, 1, flags, chunk, now_ms);
                     packets.push(probe);

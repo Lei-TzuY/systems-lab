@@ -30,6 +30,10 @@ impl Ipv6Address {
     pub const LINK_LOCAL_ALL_ROUTERS: Ipv6Address =
         Ipv6Address([0xff, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2]);
 
+    pub fn from_bytes(bytes: [u8; 16]) -> Self {
+        Ipv6Address(bytes)
+    }
+
     pub fn new(words: [u16; 8]) -> Self {
         let mut bytes = [0u8; 16];
         for (i, &w) in words.iter().enumerate() {
@@ -208,6 +212,22 @@ pub struct Ipv6Header {
     pub hop_limit: u8,
     pub src_ip: Ipv6Address,
     pub dst_ip: Ipv6Address,
+}
+
+impl Ipv6Header {
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(IPV6_HEADER_LEN);
+        let v_tc_fl = ((self.version as u32 & 0x0f) << 28)
+            | ((self.traffic_class as u32) << 20)
+            | (self.flow_label & 0x000f_ffff);
+        buf.extend_from_slice(&v_tc_fl.to_be_bytes());
+        buf.extend_from_slice(&self.payload_length.to_be_bytes());
+        buf.push(self.next_header);
+        buf.push(self.hop_limit);
+        buf.extend_from_slice(&self.src_ip.0);
+        buf.extend_from_slice(&self.dst_ip.0);
+        buf
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
