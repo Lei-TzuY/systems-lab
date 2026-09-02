@@ -320,6 +320,7 @@ pub mod tftp;
 pub mod ti_lfa;
 pub mod tls;
 pub mod transition;
+pub mod tsn_8021cm_fronthaul;
 pub mod tsn_ats_multihop;
 pub mod tsn_cnc;
 pub mod tsn_cqf_burst_absorb;
@@ -1344,5 +1345,9 @@ pub use ptp_phc::{
 pub use ptp_5g_tdd_sync::{
     AbsoluteCellSyncReport, AntennaPortMeasurement, BudgetDiagnosticReport, FronthaulBudgetPartition,
     NrTddSyncCategory, NrTddSyncEngine, TaeEvaluationReport,
+};
+pub use tsn_8021cm_fronthaul::{
+    EcpriTrafficClass, FronthaulBridgeHop, FronthaulPathEvaluation, Ieee8021CmEngine,
+    Ieee8021CmProfile,
 };
 
