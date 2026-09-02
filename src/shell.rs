@@ -14388,6 +14388,18 @@ impl NetworkShell {
                     FlowspecVrfAction::Pass => {
                         println!("    ==> MATCHED ACTION: PASS (Clean Traffic)");
                     }
+                    FlowspecVrfAction::RateLimitBytesPerSec(bps) => {
+                        println!("    ==> MATCHED ACTION: RATE LIMIT TO {} B/s", bps);
+                    }
+                    FlowspecVrfAction::RedirectAndRemark { vrf, dscp } => {
+                        println!(
+                            "    ==> MATCHED ACTION: REDIRECT TO '{}' AND REMARK DSCP TO 0x{:02X}",
+                            vrf, dscp
+                        );
+                    }
+                    FlowspecVrfAction::SampleAndMirror(target) => {
+                        println!("    ==> MATCHED ACTION: SAMPLE AND MIRROR TO '{}'", target);
+                    }
                 }
             }
             _ => println!(

@@ -102,4 +102,170 @@ impl PtpTimeErrorEngine {
 
         true
     }
+
+    /// Calculates Maximum Time Interval Error (MTIE) over an observation interval of `n` samples (ITU-T G.810 / G.8271.1).
+    ///
+    /// MTIE(n) = max_{1 <= k <= N - n + 1} [ max_{k <= i < k + n} x[i] - min_{k <= i < k + n} x[i] ]
+    pub fn calculate_mtie(&self, tau_samples: usize) -> Option<f64> {
+        let n = tau_samples;
+        let total = self.samples.len();
+        if n == 0 || n > total {
+            return None;
+        }
+
+        let mut max_diff: i64 = 0;
+        for k in 0..=(total - n) {
+            let window = &self.samples[k..k + n];
+            let max_val = *window.iter().max().unwrap();
+            let min_val = *window.iter().min().unwrap();
+            let diff = max_val - min_val;
+            if diff > max_diff {
+                max_diff = diff;
+            }
+        }
+
+        Some(max_diff as f64)
+    }
+
+    /// Calculates Time Deviation (TDEV) over an observation interval of `n` samples (ITU-T G.810).
+    ///
+    /// TDEV(n) = sqrt( 1 / (6 * n^2 * (N - 3n + 1)) * sum_{j=0}^{N - 3n} ( sum_{i=j}^{j + n - 1} (x[i+2n] - 2*x[i+n] + x[i]) )^2 )
+    pub fn calculate_tdev(&self, tau_samples: usize) -> Option<f64> {
+        let n = tau_samples;
+        let total = self.samples.len();
+        if n == 0 || 3 * n > total {
+            return None; // Requires at least 3*n samples
+        }
+
+        let outer_limit = total - 3 * n + 1;
+        let mut sum_sq: f64 = 0.0;
+
+        for j in 0..outer_limit {
+            let mut inner_sum: f64 = 0.0;
+            for i in j..(j + n) {
+                let x_i = self.samples[i] as f64;
+                let x_in = self.samples[i + n] as f64;
+                let x_i2n = self.samples[i + 2 * n] as f64;
+                let second_diff = x_i2n - 2.0 * x_in + x_i;
+                inner_sum += second_diff;
+            }
+            sum_sq += inner_sum * inner_sum;
+        }
+
+        let denom = 6.0 * (n as f64) * (n as f64) * (outer_limit as f64);
+        let variance = sum_sq / denom;
+        Some(variance.sqrt())
+    }
+
+    /// Computes MTIE values across multiple observation intervals (tau steps).
+    pub fn compute_mtie_curve(&self, tau_steps: &[usize]) -> Vec<MtiePoint> {
+        let mut results = Vec::new();
+        for &tau in tau_steps {
+            if let Some(val) = self.calculate_mtie(tau) {
+                results.push(MtiePoint {
+                    tau_samples: tau,
+                    mtie_ns: val,
+                });
+            }
+        }
+        results
+    }
+
+    /// Computes TDEV values across multiple observation intervals (tau steps).
+    pub fn compute_tdev_curve(&self, tau_steps: &[usize]) -> Vec<TdevPoint> {
+        let mut results = Vec::new();
+        for &tau in tau_steps {
+            if let Some(val) = self.calculate_tdev(tau) {
+                results.push(TdevPoint {
+                    tau_samples: tau,
+                    tdev_ns: val,
+                });
+            }
+        }
+        results
+    }
+
+    /// Verifies whether the calculated MTIE curve satisfies a standard telecom mask limit.
+    pub fn verify_mtie_mask(
+        &self,
+        mask: &TelecomSyncMask,
+        tau_steps: &[usize],
+        sample_interval_sec: f64,
+    ) -> bool {
+        for &tau in tau_steps {
+            if let Some(mtie) = self.calculate_mtie(tau) {
+                let tau_sec = tau as f64 * sample_interval_sec;
+                let limit = mask.max_allowed_mtie_ns(tau_sec);
+                if mtie > limit {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+}
+
+/// Point on an MTIE curve.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MtiePoint {
+    pub tau_samples: usize,
+    pub mtie_ns: f64,
+}
+
+/// Point on a TDEV curve.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TdevPoint {
+    pub tau_samples: usize,
+    pub tdev_ns: f64,
+}
+
+/// Standard Telecom Synchronization Mask for MTIE verification (ITU-T G.8273.2 / G.8262).
+#[derive(Debug, Clone, PartialEq)]
+pub enum TelecomSyncMask {
+    /// ITU-T G.8273.2 Class C Dynamic Time Error (dTE) mask (22 ns for tau <= 100s).
+    G8273_2ClassC,
+    /// ITU-T G.8273.2 Class D Dynamic Time Error (dTE) mask (10 ns for tau <= 100s).
+    G8273_2ClassD,
+    /// Custom threshold with constant ceiling (ns).
+    ConstantLimitNs(f64),
+    /// Piecewise linear limit: (tau_threshold_sec, limit_below_ns, limit_above_ns).
+    PiecewiseTwoStage {
+        threshold_sec: f64,
+        limit_below_ns: f64,
+        limit_above_ns: f64,
+    },
+}
+
+impl TelecomSyncMask {
+    /// Computes the maximum allowable MTIE in nanoseconds for a given observation interval in seconds.
+    pub fn max_allowed_mtie_ns(&self, tau_sec: f64) -> f64 {
+        match self {
+            TelecomSyncMask::G8273_2ClassC => {
+                if tau_sec <= 100.0 {
+                    22.0
+                } else {
+                    22.0 + 0.05 * (tau_sec - 100.0)
+                }
+            }
+            TelecomSyncMask::G8273_2ClassD => {
+                if tau_sec <= 100.0 {
+                    10.0
+                } else {
+                    10.0 + 0.02 * (tau_sec - 100.0)
+                }
+            }
+            TelecomSyncMask::ConstantLimitNs(limit) => *limit,
+            TelecomSyncMask::PiecewiseTwoStage {
+                threshold_sec,
+                limit_below_ns,
+                limit_above_ns,
+            } => {
+                if tau_sec <= *threshold_sec {
+                    *limit_below_ns
+                } else {
+                    *limit_above_ns
+                }
+            }
+        }
+    }
 }

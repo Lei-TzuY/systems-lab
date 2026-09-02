@@ -724,8 +724,10 @@ pub use flowspec::{
     FlowspecRule,
 };
 pub use flowspec_redirect_vrf::{
-    FLOWSPEC_ACTION_REDIRECT_VRF, FLOWSPEC_ACTION_TRAFFIC_MARKING, FlowspecVrfAction,
-    FlowspecVrfRule, FlowspecVrfScrubbingEngine,
+    FLOWSPEC_ACTION_REDIRECT_VRF, FLOWSPEC_ACTION_TRAFFIC_ACTION, FLOWSPEC_ACTION_TRAFFIC_MARKING,
+    FLOWSPEC_ACTION_TRAFFIC_RATE, FlowspecVrfAction, FlowspecVrfAdvancedRule, FlowspecVrfRule,
+    FlowspecVrfScrubbingEngine, PacketLengthMatch, PortRangeMatch, TCP_FLAG_ACK, TCP_FLAG_FIN,
+    TCP_FLAG_PSH, TCP_FLAG_RST, TCP_FLAG_SYN, TCP_FLAG_URG, TcpFlagsMatch,
 };
 pub use flowspec_v6::{
     BGP_AFI_IPV6, BGP_SAFI_FLOWSPEC_IPV6, FlowspecV6Action, FlowspecV6Decision, FlowspecV6Engine,
@@ -862,8 +864,10 @@ pub use icmpv6::{
     NDP_OPT_ROUTE_INFORMATION, NDP_OPT_SRC_LINK_LAYER_ADDR, NDP_OPT_TARGET_LINK_LAYER_ADDR,
 };
 pub use ifa_telemetry::{
-    IFA_REQ_LATENCY, IFA_REQ_NODE_ID, IFA_REQ_PORTS, IFA_REQ_QUEUE_DEPTH, IFA_VERSION_2, IfaHeader,
-    IfaHopRecord, IfaPacket, IfaTelemetryEngine,
+    IFA_REQ_BUFFER_OCCUPANCY, IFA_REQ_DROP_REASON, IFA_REQ_LATENCY, IFA_REQ_NODE_ID,
+    IFA_REQ_PORTS, IFA_REQ_QUEUE_DEPTH, IFA_REQ_TIMESTAMPS, IFA_VERSION_2, IfaAlert, IfaAlertType,
+    IfaAnomalyDetector, IfaDropReason, IfaExtendedHopRecord, IfaExtendedPacket, IfaHeader,
+    IfaHopRecord, IfaIpfixExporter, IfaPacket, IfaTelemetryEngine,
 };
 pub use igmp::{
     ALL_HOSTS_MULTICAST_IP, ALL_ROUTERS_MULTICAST_IP, IgmpPacket, MulticastGroupTable,
@@ -1003,7 +1007,9 @@ pub use ptp_telecom_bc::{
     TelecomBoundaryClockEngine, TelecomClockQuality, TelecomPortConfig, TelecomPortState,
 };
 pub use ptp_telecom_tc::TelecomPeerTransparentClockEngine;
-pub use ptp_time_error::{PtpTimeErrorEngine, TelecomClockClass};
+pub use ptp_time_error::{
+    MtiePoint, PtpTimeErrorEngine, TdevPoint, TelecomClockClass, TelecomSyncMask,
+};
 pub use qos::{PacketPriority, PriorityScheduler, TokenBucket};
 pub use quic::{QUIC_PKT_INITIAL, QUIC_VERSION_1, QuicPacket, decode_vint, encode_vint};
 pub use quic_datagram::{
