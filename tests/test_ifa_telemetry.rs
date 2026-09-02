@@ -163,3 +163,65 @@ fn test_ifa_ipfix_export_formatting() {
     // Sequence number increments
     assert_eq!(exporter.sequence_number, 2);
 }
+
+#[test]
+fn test_ifa_packet_anomaly_inspection_and_excessive_hops() {
+    use toy_tcpip::ifa_telemetry::{
+        IfaAlertType, IfaAnomalyDetector, IfaDropReason, IfaExtendedHopRecord, IfaExtendedPacket,
+        IfaHeader,
+    };
+
+    let mut detector = IfaAnomalyDetector::new(500, 32768, 80).with_max_hop_count(2);
+
+    let rec1 = IfaExtendedHopRecord::new(
+        0x01, 1, 2, 1000, 1200, 4096, 20, IfaDropReason::None,
+    );
+    let rec2 = IfaExtendedHopRecord::new(
+        0x02, 2, 3, 1000, 1800, 8192, 40, IfaDropReason::None, // Latency 800 > 500
+    );
+    let rec3 = IfaExtendedHopRecord::new(
+        0x03, 3, 4, 1000, 1200, 4096, 20, IfaDropReason::None,
+    );
+
+    let mut pkt = IfaExtendedPacket::new(IfaHeader::new(8, 0x3F), b"test-payload".to_vec());
+    pkt.records.push(rec1);
+    pkt.records.push(rec2);
+    pkt.records.push(rec3);
+    pkt.header.current_hop_count = 3; // Hop count 3 > max 2
+
+    let alerts = detector.inspect_packet(&pkt);
+    assert_eq!(alerts.len(), 2);
+    // 1. Excessive hop count alert
+    assert_eq!(alerts[0].alert_type, IfaAlertType::ExcessiveHopCount);
+    assert_eq!(alerts[0].observed_value, 3);
+    // 2. Latency SLA violation from rec2
+    assert_eq!(alerts[1].alert_type, IfaAlertType::LatencySlaViolation);
+    assert_eq!(alerts[1].observed_value, 800);
+}
+
+#[test]
+fn test_ifa_ipfix_batch_packet_export() {
+    use toy_tcpip::ifa_telemetry::{
+        IfaDropReason, IfaExtendedHopRecord, IfaExtendedPacket, IfaHeader, IfaIpfixExporter,
+    };
+
+    let mut exporter = IfaIpfixExporter::new(500, 301);
+
+    let rec1 = IfaExtendedHopRecord::new(
+        0x10, 1, 2, 1000, 1300, 4096, 20, IfaDropReason::None,
+    );
+    let rec2 = IfaExtendedHopRecord::new(
+        0x20, 2, 3, 2000, 2450, 8192, 30, IfaDropReason::None,
+    );
+
+    let mut pkt = IfaExtendedPacket::new(IfaHeader::new(5, 0x1F), b"batch".to_vec());
+    pkt.records.push(rec1);
+    pkt.records.push(rec2);
+
+    let ipfix_msg = exporter.export_packet_records(&pkt, 1725350000);
+    // 16 (Header) + 4 (Set Header) + 20 * 2 (Records) = 60 bytes
+    assert_eq!(ipfix_msg.len(), 60);
+    assert_eq!(u16::from_be_bytes([ipfix_msg[2], ipfix_msg[3]]), 60); // Total length
+    assert_eq!(u16::from_be_bytes([ipfix_msg[16], ipfix_msg[17]]), 301); // Set ID
+    assert_eq!(u16::from_be_bytes([ipfix_msg[18], ipfix_msg[19]]), 44); // Set length (4 + 40)
+}

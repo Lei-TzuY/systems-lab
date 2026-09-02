@@ -168,3 +168,80 @@ fn test_flowspec_rate_limiting_and_packet_length_scrubbing() {
     );
     assert_eq!(small_act, FlowspecVrfAction::Pass);
 }
+
+#[test]
+fn test_flowspec_fragment_matching_mitigation() {
+    use toy_tcpip::flowspec_redirect_vrf::{
+        FlowspecVrfAction, FlowspecVrfAdvancedRule, FlowspecVrfScrubbingEngine, FragmentMatch,
+    };
+
+    let mut engine = FlowspecVrfScrubbingEngine::new();
+    let victim_ip = Ipv4Address::new(198, 51, 100, 20);
+
+    // Drop all IP fragments targeting victim (Fragment Flood / Teardrop attack mitigation)
+    let mut frag_rule = FlowspecVrfAdvancedRule::new(301, FlowspecVrfAction::Drop);
+    frag_rule.match_dst_ip = Some(victim_ip);
+    frag_rule.match_fragment = Some(FragmentMatch::IsFragment);
+
+    engine.add_advanced_rule(frag_rule);
+
+    let attacker = Ipv4Address::new(203, 0, 113, 99);
+
+    // 1. First fragment (offset = 0, more_frags = true) -> dropped
+    let act1 = engine.evaluate_packet_full(
+        attacker, victim_ip, 17, 4000, 5000, 0, 1400, true, 0, true, None,
+    );
+    assert_eq!(act1, FlowspecVrfAction::Drop);
+    assert_eq!(engine.dropped_packets_count, 1);
+
+    // 2. Middle/Last fragment (offset = 185, more_frags = false) -> dropped
+    let act2 = engine.evaluate_packet_full(
+        attacker, victim_ip, 17, 4000, 5000, 0, 800, true, 185, false, None,
+    );
+    assert_eq!(act2, FlowspecVrfAction::Drop);
+    assert_eq!(engine.dropped_packets_count, 2);
+
+    // 3. Normal unfragmented packet (offset = 0, more_frags = false, is_fragment = false) -> Pass
+    let act3 = engine.evaluate_packet_full(
+        attacker, victim_ip, 17, 4000, 5000, 0, 500, false, 0, false, None,
+    );
+    assert_eq!(act3, FlowspecVrfAction::Pass);
+}
+
+#[test]
+fn test_flowspec_icmp_echo_flood_mitigation() {
+    use toy_tcpip::flowspec_redirect_vrf::{
+        FlowspecVrfAction, FlowspecVrfAdvancedRule, FlowspecVrfScrubbingEngine, IcmpMatch,
+    };
+
+    let mut engine = FlowspecVrfScrubbingEngine::new();
+    let victim_ip = Ipv4Address::new(203, 0, 113, 88);
+
+    // Scrub ICMP Echo Requests (Ping Flood: Type 8, Code 0) to Scrubbing VRF
+    let mut icmp_rule = FlowspecVrfAdvancedRule::new(
+        401,
+        FlowspecVrfAction::RedirectVrf("VRF_ICMP_SCRUBBER".to_string()),
+    );
+    icmp_rule.match_dst_ip = Some(victim_ip);
+    icmp_rule.match_protocol = Some(1); // ICMP
+    icmp_rule.match_icmp = Some(IcmpMatch::new(8, Some(0)));
+
+    engine.add_advanced_rule(icmp_rule);
+
+    let sender = Ipv4Address::new(192, 0, 2, 55);
+
+    // Ping request (Type 8, Code 0) -> redirected
+    let act1 = engine.evaluate_packet_full(
+        sender, victim_ip, 1, 0, 0, 0, 64, false, 0, false, Some((8, 0)),
+    );
+    assert_eq!(
+        act1,
+        FlowspecVrfAction::RedirectVrf("VRF_ICMP_SCRUBBER".to_string())
+    );
+
+    // ICMP Destination Unreachable (Type 3, Code 1) -> passes through
+    let act2 = engine.evaluate_packet_full(
+        sender, victim_ip, 1, 0, 0, 0, 56, false, 0, false, Some((3, 1)),
+    );
+    assert_eq!(act2, FlowspecVrfAction::Pass);
+}

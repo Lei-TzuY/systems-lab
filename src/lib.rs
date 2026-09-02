@@ -732,8 +732,9 @@ pub use flowspec::{
 pub use flowspec_redirect_vrf::{
     FLOWSPEC_ACTION_REDIRECT_VRF, FLOWSPEC_ACTION_TRAFFIC_ACTION, FLOWSPEC_ACTION_TRAFFIC_MARKING,
     FLOWSPEC_ACTION_TRAFFIC_RATE, FlowspecVrfAction, FlowspecVrfAdvancedRule, FlowspecVrfRule,
-    FlowspecVrfScrubbingEngine, PacketLengthMatch, PortRangeMatch, TCP_FLAG_ACK, TCP_FLAG_FIN,
-    TCP_FLAG_PSH, TCP_FLAG_RST, TCP_FLAG_SYN, TCP_FLAG_URG, TcpFlagsMatch,
+    FlowspecVrfScrubbingEngine, FragmentMatch, IcmpMatch, PacketLengthMatch, PortRangeMatch,
+    TCP_FLAG_ACK, TCP_FLAG_FIN, TCP_FLAG_PSH, TCP_FLAG_RST, TCP_FLAG_SYN, TCP_FLAG_URG,
+    TcpFlagsMatch,
 };
 pub use flowspec_v6::{
     BGP_AFI_IPV6, BGP_SAFI_FLOWSPEC_IPV6, FlowspecV6Action, FlowspecV6Decision, FlowspecV6Engine,

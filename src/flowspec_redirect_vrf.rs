@@ -78,6 +78,53 @@ impl PacketLengthMatch {
     }
 }
 
+/// Flowspec Fragment Matching (RFC 8955 Section 4.2.10).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FragmentMatch {
+    DontFragment,
+    IsFragment,
+    FirstFragment,
+    LastFragment,
+    NotFragment,
+}
+
+impl FragmentMatch {
+    pub fn matches(&self, is_fragment: bool, frag_offset: u16, more_frags: bool) -> bool {
+        match self {
+            FragmentMatch::DontFragment => !is_fragment && !more_frags,
+            FragmentMatch::IsFragment => is_fragment || more_frags || frag_offset > 0,
+            FragmentMatch::FirstFragment => frag_offset == 0 && more_frags,
+            FragmentMatch::LastFragment => frag_offset > 0 && !more_frags,
+            FragmentMatch::NotFragment => frag_offset == 0 && !more_frags,
+        }
+    }
+}
+
+/// ICMP Matching Condition (RFC 8955 Section 4.2.7 & 4.2.8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IcmpMatch {
+    pub icmp_type: u8,
+    pub icmp_code: Option<u8>,
+}
+
+impl IcmpMatch {
+    pub fn new(icmp_type: u8, icmp_code: Option<u8>) -> Self {
+        IcmpMatch { icmp_type, icmp_code }
+    }
+
+    pub fn matches(&self, icmp_type: u8, icmp_code: u8) -> bool {
+        if self.icmp_type != icmp_type {
+            return false;
+        }
+        if let Some(code) = self.icmp_code {
+            if code != icmp_code {
+                return false;
+            }
+        }
+        true
+    }
+}
+
 /// Flowspec Traffic Action.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FlowspecVrfAction {
@@ -100,7 +147,7 @@ pub struct FlowspecVrfRule {
     pub action: FlowspecVrfAction,
 }
 
-/// Flowspec Advanced Rule supporting Port Ranges, TCP Flags, Length, and Source IP.
+/// Flowspec Advanced Rule supporting Port Ranges, TCP Flags, Length, Fragment, and ICMP.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FlowspecVrfAdvancedRule {
     pub rule_id: u32,
@@ -111,6 +158,8 @@ pub struct FlowspecVrfAdvancedRule {
     pub match_dst_port: Option<PortRangeMatch>,
     pub match_tcp_flags: Option<TcpFlagsMatch>,
     pub match_packet_len: Option<PacketLengthMatch>,
+    pub match_fragment: Option<FragmentMatch>,
+    pub match_icmp: Option<IcmpMatch>,
     pub action: FlowspecVrfAction,
 }
 
@@ -125,6 +174,8 @@ impl FlowspecVrfAdvancedRule {
             match_dst_port: None,
             match_tcp_flags: None,
             match_packet_len: None,
+            match_fragment: None,
+            match_icmp: None,
             action,
         }
     }
@@ -138,6 +189,35 @@ impl FlowspecVrfAdvancedRule {
         dst_port: u16,
         tcp_flags: u8,
         packet_len: u16,
+    ) -> bool {
+        self.matches_full(
+            src_ip,
+            dst_ip,
+            protocol,
+            src_port,
+            dst_port,
+            tcp_flags,
+            packet_len,
+            false,
+            0,
+            false,
+            None,
+        )
+    }
+
+    pub fn matches_full(
+        &self,
+        src_ip: Ipv4Address,
+        dst_ip: Ipv4Address,
+        protocol: u8,
+        src_port: u16,
+        dst_port: u16,
+        tcp_flags: u8,
+        packet_len: u16,
+        is_fragment: bool,
+        frag_offset: u16,
+        more_frags: bool,
+        icmp_type_code: Option<(u8, u8)>,
     ) -> bool {
         if let Some(sip) = self.match_src_ip {
             if sip != src_ip {
@@ -171,6 +251,20 @@ impl FlowspecVrfAdvancedRule {
         }
         if let Some(ref pl) = self.match_packet_len {
             if !pl.matches(packet_len) {
+                return false;
+            }
+        }
+        if let Some(ref frag) = self.match_fragment {
+            if !frag.matches(is_fragment, frag_offset, more_frags) {
+                return false;
+            }
+        }
+        if let Some(ref icmp_cond) = self.match_icmp {
+            if let Some((itype, icode)) = icmp_type_code {
+                if !icmp_cond.matches(itype, icode) {
+                    return false;
+                }
+            } else {
                 return false;
             }
         }
@@ -321,6 +415,66 @@ impl FlowspecVrfScrubbingEngine {
         }
 
         // 2. Fall back to basic rules evaluation
+        self.evaluate_packet(dst_ip, protocol, dst_port)
+    }
+
+    /// Evaluates an incoming packet with full IP fragment and ICMP attributes.
+    pub fn evaluate_packet_full(
+        &mut self,
+        src_ip: Ipv4Address,
+        dst_ip: Ipv4Address,
+        protocol: u8,
+        src_port: u16,
+        dst_port: u16,
+        tcp_flags: u8,
+        packet_len: u16,
+        is_fragment: bool,
+        frag_offset: u16,
+        more_frags: bool,
+        icmp_type_code: Option<(u8, u8)>,
+    ) -> FlowspecVrfAction {
+        for r in &self.advanced_rules {
+            if r.matches_full(
+                src_ip,
+                dst_ip,
+                protocol,
+                src_port,
+                dst_port,
+                tcp_flags,
+                packet_len,
+                is_fragment,
+                frag_offset,
+                more_frags,
+                icmp_type_code,
+            ) {
+                match &r.action {
+                    FlowspecVrfAction::RedirectVrf(_) => {
+                        self.redirected_packets_count += 1;
+                        self.total_bytes_diverted += packet_len as u64;
+                    }
+                    FlowspecVrfAction::RemarkDscp(_) => {
+                        self.remarked_packets_count += 1;
+                    }
+                    FlowspecVrfAction::Drop => {
+                        self.dropped_packets_count += 1;
+                    }
+                    FlowspecVrfAction::RateLimitBytesPerSec(_) => {
+                        self.rate_limited_packets_count += 1;
+                    }
+                    FlowspecVrfAction::RedirectAndRemark { .. } => {
+                        self.redirected_packets_count += 1;
+                        self.remarked_packets_count += 1;
+                        self.total_bytes_diverted += packet_len as u64;
+                    }
+                    FlowspecVrfAction::SampleAndMirror(_) => {
+                        self.sampled_packets_count += 1;
+                    }
+                    FlowspecVrfAction::Pass => {}
+                }
+                return r.action.clone();
+            }
+        }
+
         self.evaluate_packet(dst_ip, protocol, dst_port)
     }
 }

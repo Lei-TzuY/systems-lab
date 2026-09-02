@@ -439,6 +439,7 @@ pub struct IfaAnomalyDetector {
     pub latency_threshold_ns: u64,
     pub queue_threshold_bytes: u32,
     pub buffer_occupancy_threshold_pct: u8,
+    pub max_hop_count: u8,
     pub alerts_generated: Vec<IfaAlert>,
 }
 
@@ -452,8 +453,37 @@ impl IfaAnomalyDetector {
             latency_threshold_ns,
             queue_threshold_bytes,
             buffer_occupancy_threshold_pct,
+            max_hop_count: 16,
             alerts_generated: Vec::new(),
         }
+    }
+
+    pub fn with_max_hop_count(mut self, max_hop: u8) -> Self {
+        self.max_hop_count = max_hop;
+        self
+    }
+
+    /// Inspects an entire extended IFA packet, verifying hop limit and all hop records.
+    pub fn inspect_packet(&mut self, pkt: &IfaExtendedPacket) -> Vec<IfaAlert> {
+        let mut triggered = Vec::new();
+
+        if pkt.header.current_hop_count > self.max_hop_count {
+            let alert = IfaAlert {
+                node_id: pkt.records.last().map(|r| r.node_id).unwrap_or(0),
+                alert_type: IfaAlertType::ExcessiveHopCount,
+                observed_value: pkt.header.current_hop_count as u64,
+                threshold_value: self.max_hop_count as u64,
+            };
+            triggered.push(alert.clone());
+            self.alerts_generated.push(alert);
+        }
+
+        for rec in &pkt.records {
+            let rec_alerts = self.inspect_record(rec);
+            triggered.extend(rec_alerts);
+        }
+
+        triggered
     }
 
     /// Inspects an extended hop record and generates alerts if thresholds are breached.
@@ -547,6 +577,43 @@ impl IfaIpfixExporter {
         msg.extend_from_slice(&rec.egress_port.to_be_bytes());
         msg.extend_from_slice(&rec.transit_latency_ns().to_be_bytes());
         msg.extend_from_slice(&rec.queue_depth_bytes.to_be_bytes());
+
+        self.sequence_number += 1;
+        msg
+    }
+
+    /// Serializes all hop records in an extended IFA packet into an IPFIX message set.
+    pub fn export_packet_records(
+        &mut self,
+        pkt: &IfaExtendedPacket,
+        export_time_sec: u32,
+    ) -> Vec<u8> {
+        let record_len = 20usize;
+        let total_records_len = record_len * pkt.records.len();
+        let set_len = 4 + total_records_len;
+        let total_len = 16 + set_len;
+
+        let mut msg = Vec::with_capacity(total_len);
+
+        // IPFIX Message Header
+        msg.extend_from_slice(&0x000Au16.to_be_bytes());
+        msg.extend_from_slice(&(total_len as u16).to_be_bytes());
+        msg.extend_from_slice(&export_time_sec.to_be_bytes());
+        msg.extend_from_slice(&self.sequence_number.to_be_bytes());
+        msg.extend_from_slice(&self.observation_domain_id.to_be_bytes());
+
+        // IPFIX Set Header
+        msg.extend_from_slice(&self.template_id.to_be_bytes());
+        msg.extend_from_slice(&(set_len as u16).to_be_bytes());
+
+        // Data Records
+        for rec in &pkt.records {
+            msg.extend_from_slice(&rec.node_id.to_be_bytes());
+            msg.extend_from_slice(&rec.ingress_port.to_be_bytes());
+            msg.extend_from_slice(&rec.egress_port.to_be_bytes());
+            msg.extend_from_slice(&rec.transit_latency_ns().to_be_bytes());
+            msg.extend_from_slice(&rec.queue_depth_bytes.to_be_bytes());
+        }
 
         self.sequence_number += 1;
         msg
