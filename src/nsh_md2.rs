@@ -284,21 +284,55 @@ pub enum SffForwardingAction {
         inner_protocol: u8,
     },
     DropServiceIndexZero,
+    DropUnsupportedCriticalTlv {
+        class: u16,
+        tlv_type: u8,
+    },
+    DropSecurityViolation {
+        tenant_id: u32,
+        security_group: u32,
+    },
 }
 
-/// Service Function Chaining (SFC) Forwarding Engine.
-#[derive(Debug, Clone, Default)]
+/// Service Function Chaining (SFC) Forwarding & Context Engine (RFC 8300 / RFC 7665).
+#[derive(Debug, Clone)]
 pub struct NshMd2SffEngine {
     pub service_paths: std::collections::HashMap<(u32, u8), u32>, // (SPI, SI) -> Next Node ID
+    pub supported_tlvs: std::collections::HashSet<(u16, u8)>,      // (Class, TLV Type)
+    pub security_group_acls: std::collections::HashMap<(u32, u32), bool>, // (Tenant, SecGroup) -> Allowed
+}
+
+impl Default for NshMd2SffEngine {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 pub type NshMd2ForwarderEngine = NshMd2SffEngine;
 
 impl NshMd2SffEngine {
     pub fn new() -> Self {
+        let mut supported = std::collections::HashSet::new();
+        // Standard IETF TLVs supported by default
+        supported.insert((NSH_TLV_CLASS_IETF, NSH_TLV_TYPE_TENANT_ID));
+        supported.insert((NSH_TLV_CLASS_IETF, NSH_TLV_TYPE_SOURCE_INTERFACE));
+        supported.insert((NSH_TLV_CLASS_IETF, NSH_TLV_TYPE_FLOW_HASH));
+        supported.insert((NSH_TLV_CLASS_IETF, NSH_TLV_TYPE_SECURITY_GROUP_TAG));
+        supported.insert((NSH_TLV_CLASS_IETF, NSH_TLV_TYPE_INBAND_PATH_TRACE));
+
         NshMd2SffEngine {
             service_paths: std::collections::HashMap::new(),
+            supported_tlvs: supported,
+            security_group_acls: std::collections::HashMap::new(),
         }
+    }
+
+    pub fn register_supported_tlv(&mut self, class: u16, tlv_type: u8) {
+        self.supported_tlvs.insert((class, tlv_type));
+    }
+
+    pub fn set_security_group_allowed(&mut self, tenant_id: u32, security_group: u32, allowed: bool) {
+        self.security_group_acls.insert((tenant_id, security_group), allowed);
     }
 
     pub fn add_path_hop(&mut self, spi: u32, si: u8, next_node_id: u32) {
@@ -307,6 +341,31 @@ impl NshMd2SffEngine {
 
     /// Advances the Service Index (SI) and returns the next forwarding action.
     pub fn process_packet(&self, pkt: &mut NshMd2Packet) -> SffForwardingAction {
+        // 1. Critical TLV Enforcement (RFC 8300 Section 3.5.2)
+        for tlv in &pkt.header.tlvs {
+            if tlv.critical && !self.supported_tlvs.contains(&(tlv.class, tlv.tlv_type)) {
+                return SffForwardingAction::DropUnsupportedCriticalTlv {
+                    class: tlv.class,
+                    tlv_type: tlv.tlv_type,
+                };
+            }
+        }
+
+        // 2. Security Group ACL Validation
+        let tenant_opt = NshMetadataExtractor::extract_tenant_id(&pkt.header);
+        let secgroup_opt = NshMetadataExtractor::extract_security_group_tag(&pkt.header);
+        if let (Some(tenant), Some(secgroup)) = (tenant_opt, secgroup_opt) {
+            if let Some(&allowed) = self.security_group_acls.get(&(tenant, secgroup)) {
+                if !allowed {
+                    return SffForwardingAction::DropSecurityViolation {
+                        tenant_id: tenant,
+                        security_group: secgroup,
+                    };
+                }
+            }
+        }
+
+        // 3. Service Index Bounds Check
         if pkt.header.service_index == 0 {
             return SffForwardingAction::DropServiceIndexZero;
         }
@@ -337,5 +396,51 @@ impl NshMd2SffEngine {
                 next_hop_node_id: 0,
             }
         }
+    }
+}
+
+/// Utility for extracting standard context metadata from NSH MD2 headers.
+pub struct NshMetadataExtractor;
+
+impl NshMetadataExtractor {
+    pub fn extract_tenant_id(hdr: &NshMd2Header) -> Option<u32> {
+        for tlv in &hdr.tlvs {
+            if tlv.class == NSH_TLV_CLASS_IETF && tlv.tlv_type == NSH_TLV_TYPE_TENANT_ID && tlv.data.len() >= 4 {
+                return Some(u32::from_be_bytes([tlv.data[0], tlv.data[1], tlv.data[2], tlv.data[3]]));
+            }
+        }
+        None
+    }
+
+    pub fn extract_source_interface(hdr: &NshMd2Header) -> Option<u32> {
+        for tlv in &hdr.tlvs {
+            if tlv.class == NSH_TLV_CLASS_IETF && tlv.tlv_type == NSH_TLV_TYPE_SOURCE_INTERFACE && tlv.data.len() >= 4 {
+                return Some(u32::from_be_bytes([tlv.data[0], tlv.data[1], tlv.data[2], tlv.data[3]]));
+            }
+        }
+        None
+    }
+
+    pub fn extract_flow_hash(hdr: &NshMd2Header) -> Option<u32> {
+        for tlv in &hdr.tlvs {
+            if tlv.class == NSH_TLV_CLASS_IETF && tlv.tlv_type == NSH_TLV_TYPE_FLOW_HASH && tlv.data.len() >= 4 {
+                return Some(u32::from_be_bytes([tlv.data[0], tlv.data[1], tlv.data[2], tlv.data[3]]));
+            }
+        }
+        None
+    }
+
+    pub fn extract_security_group_tag(hdr: &NshMd2Header) -> Option<u32> {
+        for tlv in &hdr.tlvs {
+            if tlv.class == NSH_TLV_CLASS_IETF && tlv.tlv_type == NSH_TLV_TYPE_SECURITY_GROUP_TAG && tlv.data.len() >= 4 {
+                return Some(u32::from_be_bytes([tlv.data[0], tlv.data[1], tlv.data[2], tlv.data[3]]));
+            }
+        }
+        None
+    }
+
+    /// Decapsulates an NSH packet at the tail of a service path, returning `(inner_next_protocol, payload)`.
+    pub fn decapsulate(pkt: NshMd2Packet) -> (u8, Vec<u8>) {
+        (pkt.header.next_protocol, pkt.payload)
     }
 }

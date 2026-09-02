@@ -81,3 +81,75 @@ fn test_nsh_md2_sfc_forwarding_and_chain_termination() {
         }
     );
 }
+
+#[test]
+fn test_nsh_md2_critical_tlv_enforcement() {
+    let engine = NshMd2SffEngine::new();
+    let spi = 0x003001;
+
+    // Build packet with an unknown vendor critical TLV (Class 0xF000, Type 0x99, Critical = true)
+    let unknown_critical_tlv = NshContextTlv::new(0xF000, 0x99, true, vec![1, 2, 3, 4]);
+    let hdr = NshMd2Header::new(spi, 5, NSH_NP_IPV4).with_tlv(unknown_critical_tlv);
+    let mut pkt = NshMd2Packet::new(hdr, b"Encapsulated Data".to_vec());
+
+    // SFF must drop packet because critical TLV is unsupported (RFC 8300 Section 3.5.2)
+    let action = engine.process_packet(&mut pkt);
+    assert_eq!(
+        action,
+        SffForwardingAction::DropUnsupportedCriticalTlv {
+            class: 0xF000,
+            tlv_type: 0x99
+        }
+    );
+
+    // If an unknown TLV has critical = false, SFF ignores it and forwards
+    let non_critical_unknown = NshContextTlv::new(0xF000, 0x99, false, vec![1, 2, 3, 4]);
+    let hdr2 = NshMd2Header::new(spi, 5, NSH_NP_IPV4).with_tlv(non_critical_unknown);
+    let mut pkt2 = NshMd2Packet::new(hdr2, b"Encapsulated Data".to_vec());
+
+    let action2 = engine.process_packet(&mut pkt2);
+    assert!(matches!(action2, SffForwardingAction::ForwardNextHop { .. }));
+}
+
+#[test]
+fn test_nsh_md2_security_group_acl_and_metadata_extraction() {
+    use toy_tcpip::nsh_md2::NshMetadataExtractor;
+
+    let mut engine = NshMd2SffEngine::new();
+    let spi = 0x004001;
+
+    // Deny tenant 1000 with security group 99
+    engine.set_security_group_allowed(1000, 99, false);
+    // Allow tenant 1000 with security group 10
+    engine.set_security_group_allowed(1000, 10, true);
+
+    let tlv_tenant = NshContextTlv::new_tenant_id(1000);
+    let tlv_secgroup_denied = NshContextTlv::new_security_group_tag(99);
+    let tlv_flow = NshContextTlv::new_flow_hash(0x1234_5678);
+
+    let hdr = NshMd2Header::new(spi, 5, NSH_NP_IPV4)
+        .with_tlv(tlv_tenant)
+        .with_tlv(tlv_secgroup_denied)
+        .with_tlv(tlv_flow);
+
+    assert_eq!(NshMetadataExtractor::extract_tenant_id(&hdr), Some(1000));
+    assert_eq!(NshMetadataExtractor::extract_security_group_tag(&hdr), Some(99));
+    assert_eq!(NshMetadataExtractor::extract_flow_hash(&hdr), Some(0x1234_5678));
+
+    let mut pkt = NshMd2Packet::new(hdr, b"Payload".to_vec());
+
+    // Should drop due to security group violation
+    let action = engine.process_packet(&mut pkt);
+    assert_eq!(
+        action,
+        SffForwardingAction::DropSecurityViolation {
+            tenant_id: 1000,
+            security_group: 99
+        }
+    );
+
+    // Decapsulation test
+    let (inner_proto, payload) = NshMetadataExtractor::decapsulate(pkt);
+    assert_eq!(inner_proto, NSH_NP_IPV4);
+    assert_eq!(payload, b"Payload");
+}

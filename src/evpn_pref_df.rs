@@ -99,12 +99,38 @@ pub struct CandidatePe {
     pub sticky: bool,
 }
 
+/// DF Election Timer State (RFC 8584 Section 3.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DfTimerState {
+    Idle,
+    Waiting { remaining_ms: u32 },
+    Elected,
+}
+
+/// Computes 32-bit Highest Random Weight (HRW) for a given Ethernet Tag / VLAN and Candidate PE (RFC 8584 Section 3.1).
+pub fn compute_hrw_weight(vlan_id: u32, pe_ip: Ipv4Address) -> u32 {
+    let mut h = (vlan_id as u64) ^ ((u32::from_be_bytes(pe_ip.0) as u64) << 16);
+    h = h.wrapping_mul(0x5bd1e995);
+    h ^= h >> 15;
+    h = h.wrapping_mul(0x5bd1e995);
+    h ^= h >> 15;
+    (h & 0xFFFFFFFF) as u32
+}
+
 /// EVPN Preference-Based DF Election Protocol Engine.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct EvpnPrefDfEngine {
     pub candidates: HashMap<EthernetSegmentId, Vec<CandidatePe>>,
     pub elected_df: HashMap<EthernetSegmentId, Ipv4Address>,
     pub elections_run_count: usize,
+    pub election_wait_time_ms: u32,
+    pub timer_state: HashMap<EthernetSegmentId, DfTimerState>,
+}
+
+impl Default for EvpnPrefDfEngine {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl EvpnPrefDfEngine {
@@ -113,6 +139,8 @@ impl EvpnPrefDfEngine {
             candidates: HashMap::new(),
             elected_df: HashMap::new(),
             elections_run_count: 0,
+            election_wait_time_ms: 3000, // Default 3 seconds (RFC 8584)
+            timer_state: HashMap::new(),
         }
     }
 
@@ -134,6 +162,37 @@ impl EvpnPrefDfEngine {
         if self.elected_df.get(&esi) == Some(&pe_ip) {
             self.elected_df.remove(&esi);
         }
+    }
+
+    /// Starts DF election wait timer for an ESI (RFC 8584 Section 3.2).
+    pub fn start_election_timer(&mut self, esi: EthernetSegmentId, wait_ms: u32) {
+        self.timer_state.insert(esi, DfTimerState::Waiting { remaining_ms: wait_ms });
+    }
+
+    /// Ticks election timers by `elapsed_ms`. If a timer reaches 0, runs election.
+    /// Returns a list of (ESI, Elected DF) that transitioned to Elected.
+    pub fn tick_timer(&mut self, elapsed_ms: u32) -> Vec<(EthernetSegmentId, Ipv4Address)> {
+        let mut newly_elected = Vec::new();
+        let esis: Vec<EthernetSegmentId> = self.timer_state.keys().copied().collect();
+
+        for esi in esis {
+            let state = self.timer_state.get_mut(&esi).unwrap();
+            match state {
+                DfTimerState::Waiting { remaining_ms } => {
+                    if *remaining_ms <= elapsed_ms {
+                        *state = DfTimerState::Elected;
+                        if let Some(df) = self.elect_df(esi) {
+                            newly_elected.push((esi, df));
+                        }
+                    } else {
+                        *remaining_ms -= elapsed_ms;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        newly_elected
     }
 
     /// Performs Preference-based DF Election according to RFC 8584 Section 4.
@@ -182,5 +241,71 @@ impl EvpnPrefDfEngine {
         } else {
             None
         }
+    }
+
+    /// Performs Highest Random Weight (HRW) DF election for a specific VLAN / Ethernet Tag (RFC 8584 Algorithm 0x01).
+    pub fn elect_df_hrw(&self, esi: EthernetSegmentId, vlan_id: u32) -> Option<Ipv4Address> {
+        let list = self.candidates.get(&esi)?;
+        if list.is_empty() {
+            return None;
+        }
+
+        let mut best_pe: Option<(u32, Ipv4Address)> = None;
+        for c in list {
+            let weight = compute_hrw_weight(vlan_id, c.pe_ip);
+            match best_pe {
+                None => best_pe = Some((weight, c.pe_ip)),
+                Some((best_weight, best_ip)) => {
+                    if weight > best_weight {
+                        best_pe = Some((weight, c.pe_ip));
+                    } else if weight == best_weight {
+                        let c_val = u32::from_be_bytes(c.pe_ip.0);
+                        let b_val = u32::from_be_bytes(best_ip.0);
+                        if c_val > b_val {
+                            best_pe = Some((weight, c.pe_ip));
+                        }
+                    }
+                }
+            }
+        }
+
+        best_pe.map(|(_, ip)| ip)
+    }
+
+    /// Performs Default Modulo DF election for a specific VLAN / Ethernet Tag (RFC 8584 Algorithm 0x00 / RFC 7432).
+    pub fn elect_df_modulo(&self, esi: EthernetSegmentId, vlan_id: u32) -> Option<Ipv4Address> {
+        let list = self.candidates.get(&esi)?;
+        if list.is_empty() {
+            return None;
+        }
+
+        let mut sorted_ips: Vec<Ipv4Address> = list.iter().map(|c| c.pe_ip).collect();
+        sorted_ips.sort_by_key(|ip| u32::from_be_bytes(ip.0));
+
+        let index = (vlan_id as usize) % sorted_ips.len();
+        Some(sorted_ips[index])
+    }
+
+    /// Performs per-VLAN DF Carving across a list of Ethernet Tags (VLANs).
+    pub fn elect_df_per_vlan(
+        &self,
+        esi: EthernetSegmentId,
+        vlan_ids: &[u32],
+        algo: DfElectionAlgorithm,
+    ) -> HashMap<u32, Ipv4Address> {
+        let mut map = HashMap::new();
+        for &vlan in vlan_ids {
+            let winner = match algo {
+                DfElectionAlgorithm::HighestRandomWeight => self.elect_df_hrw(esi, vlan),
+                DfElectionAlgorithm::DefaultModulo => self.elect_df_modulo(esi, vlan),
+                DfElectionAlgorithm::PreferenceBased => {
+                    self.elected_df.get(&esi).copied()
+                }
+            };
+            if let Some(pe) = winner {
+                map.insert(vlan, pe);
+            }
+        }
+        map
     }
 }

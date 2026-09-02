@@ -675,8 +675,8 @@ pub use evpn_port_security::{
     StickyMacEntry,
 };
 pub use evpn_pref_df::{
-    BGP_EXT_COMM_SUBTYPE_DF_ELECTION, CandidatePe, DfElectionAlgorithm, EvpnDfElectionExtCommunity,
-    EvpnPrefDfEngine,
+    BGP_EXT_COMM_SUBTYPE_DF_ELECTION, CandidatePe, DfElectionAlgorithm, DfTimerState,
+    EvpnDfElectionExtCommunity, EvpnPrefDfEngine, compute_hrw_weight,
 };
 pub use evpn_proxy_arp::{
     AnycastGatewayConfig, ArpSuppressionAction, EvpnProxyArpEngine, ProxyArpEntry, ProxyArpState,
@@ -950,7 +950,8 @@ pub use nsh::{
 pub use nsh_md2::{
     NSH_MD_TYPE_2, NSH_TLV_CLASS_IETF, NSH_TLV_TYPE_FLOW_HASH, NSH_TLV_TYPE_INBAND_PATH_TRACE,
     NSH_TLV_TYPE_SECURITY_GROUP_TAG, NSH_TLV_TYPE_SOURCE_INTERFACE, NSH_TLV_TYPE_TENANT_ID,
-    NshContextTlv, NshMd2ForwarderEngine, NshMd2Header, NshMd2Packet, SffForwardingAction,
+    NshContextTlv, NshMd2ForwarderEngine, NshMd2Header, NshMd2Packet, NshMd2SffEngine,
+    NshMetadataExtractor, SffForwardingAction,
 };
 pub use nsh_md2_ext::{
     NSH_TLV_CLASS_IOAM, NSH_TLV_TYPE_IOAM_HOP_TELEMETRY, NSH_TLV_TYPE_ECN_CONGESTION,
@@ -1010,7 +1011,8 @@ pub use ptp_path_trace::{
     HoldoverTimingBudget, PathTraceRejectReason, PathTraceValidation,
 };
 pub use ptp_telecom_bc::{
-    TelecomBoundaryClockEngine, TelecomClockQuality, TelecomPortConfig, TelecomPortState,
+    DownstreamAnnounceDataset, TelecomBoundaryClockEngine, TelecomClockQuality, TelecomPortConfig,
+    TelecomPortState, TelecomSyncState,
 };
 pub use ptp_telecom_tc::TelecomPeerTransparentClockEngine;
 pub use ptp_time_error::{
