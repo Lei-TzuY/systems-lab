@@ -81,6 +81,7 @@ pub mod diameter_s6t;
 pub mod diameter_s9;
 pub mod diameter_sgd;
 pub mod diameter_sh;
+pub mod diameter_slg;
 pub mod diameter_slh;
 pub mod diameter_swm;
 pub mod diameter_sy;
@@ -237,6 +238,7 @@ pub mod ngap_5g;
 pub mod nrf_oauth;
 pub mod nsh;
 pub mod nsh_md2;
+pub mod nsh_md2_ext;
 pub mod ntp;
 pub mod openflow;
 pub mod optical_dom;
@@ -256,6 +258,7 @@ pub mod ptp;
 pub mod ptp_fiber_dispersion;
 pub mod ptp_high_accuracy;
 pub mod ptp_pdv_filter;
+pub mod ptp_path_trace;
 pub mod ptp_phy_asymmetry;
 pub mod ptp_tc;
 pub mod ptp_telecom;
@@ -580,6 +583,13 @@ pub use diameter_sy::{
     SpendingLimitAnswer, SpendingLimitRequest, SpendingStatusNotificationAnswer,
     SpendingStatusNotificationRequest, DIAMETER_APPLICATION_SY, DIAMETER_CMD_SPENDING_LIMIT,
     DIAMETER_CMD_SPENDING_STATUS_NOTIFICATION,
+};
+pub use diameter_slg::{
+    DIAMETER_APPLICATION_SLG, DIAMETER_CMD_PROVIDE_LOCATION, DIAMETER_CMD_LOCATION_REPORT,
+    GmlcSlgEngine, GmlcLocationSession, LocationSessionState, SlgLocationType,
+    ProvideLocationRequest, ProvideLocationAnswer, LocationReportRequest, LocationReportAnswer,
+    LocationEstimate, LocationEvent, LcsPriority, LcsQos, LcsResponseTime,
+    AccuracyFulfilmentIndicator, DeferredLocationType, PeriodicLdrInformation,
 };
 pub use dns::{
     DnsAnswer, DnsCache, DnsError, DnsMessage, DnsQuestion, DnsRecordData, DNS_CLASS_IN, DNS_PORT,
@@ -932,6 +942,11 @@ pub use nsh_md2::{
     NSH_TLV_TYPE_SECURITY_GROUP_TAG, NSH_TLV_TYPE_SOURCE_INTERFACE, NSH_TLV_TYPE_TENANT_ID,
     NshContextTlv, NshMd2ForwarderEngine, NshMd2Header, NshMd2Packet, SffForwardingAction,
 };
+pub use nsh_md2_ext::{
+    NSH_TLV_CLASS_IOAM, NSH_TLV_TYPE_IOAM_HOP_TELEMETRY, NSH_TLV_TYPE_ECN_CONGESTION,
+    NSH_TLV_TYPE_SUBSCRIBER_ID, IoamHopTelemetry, EcnCongestionTlv, SubscriberIdTlv,
+    SubscriberIdType, NshMd2ExtendedTransitEngine, SfcTelemetryCollector, SfcPathStats,
+};
 pub use ntp::{NtpPacket, NtpTimestamp, calculate_offset_and_delay};
 pub use openflow::{
     OFP_TCP_PORT, OFP_VERSION_1_3, OfpAction, OfpFlowEntry, OfpFlowTable, OfpHeader, OfpMatch,
@@ -977,6 +992,12 @@ pub use ptp_tc::{HopMeasurement, TransparentClockEngine, TransparentClockMode};
 pub use ptp_telecom::{
     ETHERTYPE_PTP_TELECOM, PTP_TELECOM_DEFAULT_LOCAL_PRIORITY, TelecomBmcaAttributes,
     TelecomClockType, TelecomProfileEngine,
+};
+pub use ptp_path_trace::{
+    PTP_TLV_TYPE_PATH_TRACE, MAX_PATH_TRACE_DEPTH, CLOCK_CLASS_LOCKED,
+    CLOCK_CLASS_HOLDOVER_IN_SPEC, CLOCK_CLASS_HOLDOVER_OUT_OF_SPEC, CLOCK_CLASS_FREERUN,
+    PathTraceTlv, TelecomAnnounce, PtpPathTraceEngine, UpstreamRefState,
+    HoldoverTimingBudget, PathTraceRejectReason, PathTraceValidation,
 };
 pub use ptp_telecom_bc::{
     TelecomBoundaryClockEngine, TelecomClockQuality, TelecomPortConfig, TelecomPortState,
