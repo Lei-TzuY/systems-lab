@@ -113,3 +113,65 @@ fn test_ptp_telecom_holdover_degradation_and_downstream_announce() {
     // Phase drift accumulated: 5.0 ppb * 15000s = 75,000 ns
     assert_eq!(bc.accumulated_phase_offset_ns, 75_000);
 }
+
+#[test]
+fn test_ptp_telecom_max_steps_removed_filtering() {
+    let mut bc = TelecomBoundaryClockEngine::new().with_max_steps_removed(15);
+    bc.add_port(1, 10, false); // Port 1 has lower local_priority (10 vs 20)
+    bc.add_port(2, 20, false);
+
+    // Port 1 receives Class 6 with 18 steps removed (exceeds limit 15 -> looping/excessive jitter)
+    bc.update_rx_announce(
+        1,
+        TelecomClockQuality {
+            clock_class: 6,
+            clock_accuracy: 0x20,
+            offset_scaled_log_variance: 0x4E5D,
+        },
+        18,
+        128,
+    );
+
+    // Port 2 receives Class 6 with 8 steps removed (within limit 15)
+    bc.update_rx_announce(
+        2,
+        TelecomClockQuality {
+            clock_class: 6,
+            clock_accuracy: 0x20,
+            offset_scaled_log_variance: 0x4E5D,
+        },
+        8,
+        128,
+    );
+
+    // BMCA should ignore Port 1 due to max_steps_removed violation and elect Port 2
+    let slave = bc.run_alternate_bmca().expect("elect slave port");
+    assert_eq!(slave, 2);
+    assert_eq!(bc.port_states.get(&2), Some(&TelecomPortState::Slave));
+}
+
+#[test]
+fn test_ptp_telecom_phase_step_detection_and_slew_limiting() {
+    let mut bc = TelecomBoundaryClockEngine::new().with_slew_limit(25); // 25 ns/s
+
+    // Phase step detection
+    assert!(bc.detect_phase_step(120, 100));
+    assert!(bc.detect_phase_step(-105, 100));
+    assert!(!bc.detect_phase_step(80, 100));
+
+    // Phase slew rate limiting:
+    // Jump of +100ns over 1 second: capped to +25ns
+    let adj1 = bc.slew_adjust_phase(100, 1);
+    assert_eq!(adj1, 25);
+    assert_eq!(bc.accumulated_phase_offset_ns, 25);
+
+    // Jump of -100ns over 2 seconds: max slew is 50ns -> capped to -50ns
+    let adj2 = bc.slew_adjust_phase(-100, 2);
+    assert_eq!(adj2, -50);
+    assert_eq!(bc.accumulated_phase_offset_ns, -25);
+
+    // Small jump within limit: +10ns over 1 second (limit 25ns) -> applied in full
+    let adj3 = bc.slew_adjust_phase(10, 1);
+    assert_eq!(adj3, 10);
+    assert_eq!(bc.accumulated_phase_offset_ns, -15);
+}

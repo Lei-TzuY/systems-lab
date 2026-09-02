@@ -68,6 +68,8 @@ pub struct TelecomBoundaryClockEngine {
     pub holdover_duration_secs: u64,
     pub max_holdover_within_spec_secs: u64,
     pub internal_oscillator_drift_ppb: f64,
+    pub max_steps_removed: u16,
+    pub slew_limit_ns_per_sec: i64,
 }
 
 impl Default for TelecomBoundaryClockEngine {
@@ -88,7 +90,19 @@ impl TelecomBoundaryClockEngine {
             holdover_duration_secs: 0,
             max_holdover_within_spec_secs: 14400, // 4 hours
             internal_oscillator_drift_ppb: 5.0,
+            max_steps_removed: 20,
+            slew_limit_ns_per_sec: 50, // 50 ns/s standard slew limit
         }
+    }
+
+    pub fn with_max_steps_removed(mut self, max: u16) -> Self {
+        self.max_steps_removed = max;
+        self
+    }
+
+    pub fn with_slew_limit(mut self, slew_limit: i64) -> Self {
+        self.slew_limit_ns_per_sec = slew_limit;
+        self
     }
 
     /// Configures a physical T-BC port.
@@ -134,7 +148,7 @@ impl TelecomBoundaryClockEngine {
         let mut best: Option<(u32, u8, u8, u16)> = None;
 
         for port in self.ports.values() {
-            if port.not_slave {
+            if port.not_slave || port.rx_steps_removed >= self.max_steps_removed {
                 continue;
             }
             let quality = match port.rx_clock_quality {
@@ -198,6 +212,28 @@ impl TelecomBoundaryClockEngine {
         let correction = phase_error_ns / 2;
         self.accumulated_phase_offset_ns += correction;
         correction
+    }
+
+    /// Detects whether an incoming phase error constitutes an abrupt phase step exceeding threshold.
+    pub fn detect_phase_step(&self, phase_error_ns: i64, threshold_ns: i64) -> bool {
+        phase_error_ns.abs() > threshold_ns
+    }
+
+    /// Smoothly adjusts the local clock phase toward target using slew-rate limiting (ns/s).
+    ///
+    /// Prevents sharp phase transients that cause downstream 5G O-RU / radio unit PLL dropouts.
+    pub fn slew_adjust_phase(&mut self, target_phase_error_ns: i64, elapsed_secs: u64) -> i64 {
+        let max_slew = (self.slew_limit_ns_per_sec * (elapsed_secs as i64)).abs();
+        let adjustment = if target_phase_error_ns > max_slew {
+            max_slew
+        } else if target_phase_error_ns < -max_slew {
+            -max_slew
+        } else {
+            target_phase_error_ns
+        };
+
+        self.accumulated_phase_offset_ns += adjustment;
+        adjustment
     }
 
     /// Sets ingress and egress physical latency on a port and calculates delay asymmetry compensation (ITU-T G.8275.1 Section 6.2).
