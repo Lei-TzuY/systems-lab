@@ -1022,7 +1022,7 @@ pub use ptp_telecom_tc::{
     PTP_SUB_NS_SCALE, TelecomPeerTransparentClockEngine, TelecomTcMode,
 };
 pub use ptp_time_error::{
-    MtiePoint, PtpTimeErrorEngine, TdevPoint, TelecomClockClass, TelecomSyncMask,
+    MtiePoint, PtpTimeErrorEngine, TdevPoint, TelecomClockClass, TelecomSyncMask, TelecomTdevMask,
 };
 pub use qos::{PacketPriority, PriorityScheduler, TokenBucket};
 pub use quic::{QUIC_PKT_INITIAL, QUIC_VERSION_1, QuicPacket, decode_vint, encode_vint};

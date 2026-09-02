@@ -157,6 +157,13 @@ impl PtpTimeErrorEngine {
         Some(variance.sqrt())
     }
 
+    /// Calculates Time Variance (TVAR) over an observation interval of `n` samples (ITU-T G.810).
+    ///
+    /// TVAR(tau) = TDEV^2(tau)
+    pub fn calculate_tvar(&self, tau_samples: usize) -> Option<f64> {
+        self.calculate_tdev(tau_samples).map(|tdev| tdev * tdev)
+    }
+
     /// Computes MTIE values across multiple observation intervals (tau steps).
     pub fn compute_mtie_curve(&self, tau_steps: &[usize]) -> Vec<MtiePoint> {
         let mut results = Vec::new();
@@ -197,6 +204,25 @@ impl PtpTimeErrorEngine {
                 let tau_sec = tau as f64 * sample_interval_sec;
                 let limit = mask.max_allowed_mtie_ns(tau_sec);
                 if mtie > limit {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    /// Verifies whether the calculated TDEV curve satisfies a standard telecom mask limit (ITU-T G.8262 / G.8273.2).
+    pub fn verify_tdev_mask(
+        &self,
+        mask: &TelecomTdevMask,
+        tau_steps: &[usize],
+        sample_interval_sec: f64,
+    ) -> bool {
+        for &tau in tau_steps {
+            if let Some(tdev) = self.calculate_tdev(tau) {
+                let tau_sec = tau as f64 * sample_interval_sec;
+                let limit = mask.max_allowed_tdev_ns(tau_sec);
+                if tdev > limit {
                     return false;
                 }
             }
@@ -256,6 +282,53 @@ impl TelecomSyncMask {
             }
             TelecomSyncMask::ConstantLimitNs(limit) => *limit,
             TelecomSyncMask::PiecewiseTwoStage {
+                threshold_sec,
+                limit_below_ns,
+                limit_above_ns,
+            } => {
+                if tau_sec <= *threshold_sec {
+                    *limit_below_ns
+                } else {
+                    *limit_above_ns
+                }
+            }
+        }
+    }
+}
+
+/// Standard Telecom Synchronization Mask for TDEV verification (ITU-T G.8262 / G.8273.2).
+#[derive(Debug, Clone, PartialEq)]
+pub enum TelecomTdevMask {
+    /// ITU-T G.8262 EEC Option 1 (SyncE wander generation limit)
+    /// tau <= 0.1s: 0.25 ns
+    /// 0.1s < tau <= 100s: 0.25 * sqrt(tau) ns
+    /// 100s < tau <= 1000s: 2.5 ns
+    G8262Option1,
+    /// Custom threshold with constant ceiling (ns).
+    ConstantLimitNs(f64),
+    /// Piecewise linear limit: (tau_threshold_sec, limit_below_ns, limit_above_ns).
+    PiecewiseTwoStage {
+        threshold_sec: f64,
+        limit_below_ns: f64,
+        limit_above_ns: f64,
+    },
+}
+
+impl TelecomTdevMask {
+    /// Computes the maximum allowable TDEV in nanoseconds for a given observation interval in seconds.
+    pub fn max_allowed_tdev_ns(&self, tau_sec: f64) -> f64 {
+        match self {
+            TelecomTdevMask::G8262Option1 => {
+                if tau_sec <= 0.1 {
+                    0.25
+                } else if tau_sec <= 100.0 {
+                    0.25 * tau_sec.sqrt()
+                } else {
+                    2.5
+                }
+            }
+            TelecomTdevMask::ConstantLimitNs(limit) => *limit,
+            TelecomTdevMask::PiecewiseTwoStage {
                 threshold_sec,
                 limit_below_ns,
                 limit_above_ns,

@@ -123,3 +123,31 @@ fn test_ptp_telecom_sync_mask_compliance() {
     };
     assert!(engine.verify_mtie_mask(&custom_mask, &[1, 2, 5], 0.1));
 }
+
+#[test]
+fn test_ptp_tvar_and_tdev_mask_compliance() {
+    use toy_tcpip::ptp_time_error::TelecomTdevMask;
+
+    let mut engine = PtpTimeErrorEngine::new(30);
+    // 15 samples with low jitter: deviations within +/- 0.1 ns
+    let samples = [
+        100, 101, 100, 102, 101, 100, 101, 102, 100, 101, 102, 101, 100, 101, 102,
+    ];
+    for &s in &samples {
+        engine.add_sample(s);
+    }
+
+    // TVAR = TDEV^2 check
+    let tdev = engine.calculate_tdev(2).expect("tdev");
+    let tvar = engine.calculate_tvar(2).expect("tvar");
+    assert!((tvar - tdev * tdev).abs() < 1e-9);
+
+    // G.8262 Option 1 mask verification
+    let mask_g8262 = TelecomTdevMask::G8262Option1;
+    // With 100.0s sample interval (tau >= 100s, max allowed >= 2.5ns), TDEV (~0.5ns) complies
+    assert!(engine.verify_tdev_mask(&mask_g8262, &[1, 2, 3], 100.0));
+
+    // Stricter custom mask that fails
+    let strict_mask = TelecomTdevMask::ConstantLimitNs(0.01);
+    assert!(!engine.verify_tdev_mask(&strict_mask, &[1, 2, 3], 100.0));
+}
