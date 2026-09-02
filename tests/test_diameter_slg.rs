@@ -166,3 +166,62 @@ fn test_slg_location_estimate_gad_encoding() {
     assert!(msg.avps.len() >= 5);
     assert_eq!(gm_answer.accuracy_fulfilment, Some(AccuracyFulfilmentIndicator::RequestedAccuracyFulfilled));
 }
+
+#[test]
+fn test_slg_emergency_location_retrieval() {
+    use toy_tcpip::diameter_slg::{LcsPriority, LocationSessionState, SlgLocationType};
+
+    let mut gmlc = GmlcSlgEngine::new("gmlc.emergency.org", "emergency.org");
+    let em_plr = gmlc.request_emergency_location("310010911911911", "epc.carrier.com");
+
+    assert_eq!(em_plr.location_type, SlgLocationType::CurrentOrLastKnownLocation);
+    assert_eq!(em_plr.lcs_priority, LcsPriority::HighestPriority);
+
+    let state = gmlc.get_session_state(&em_plr.session_id).unwrap();
+    assert!(matches!(state, LocationSessionState::PendingLocationResponse));
+
+    // MME returns immediate fix for 911 caller
+    let fix = LocationEstimate::EllipsoidPointUncertaintyCircle {
+        latitude: 34_052235,
+        longitude: -118_243683,
+        uncertainty_radius_m: 5,
+    };
+    let pla = ProvideLocationAnswer::success(
+        &em_plr.session_id,
+        "mme01.epc.carrier.com",
+        "epc.carrier.com",
+        fix.clone(),
+    );
+    assert!(gmlc.process_pla(&pla));
+
+    let final_state = gmlc.get_session_state(&em_plr.session_id).unwrap();
+    assert!(matches!(final_state, LocationSessionState::LocationReceived));
+    assert_eq!(*gmlc.get_last_location(&em_plr.session_id).unwrap(), fix);
+}
+
+#[test]
+fn test_slg_cancel_deferred_location() {
+    use toy_tcpip::diameter_slg::{LocationSessionState, SlgLocationType};
+
+    let mut gmlc = GmlcSlgEngine::new("gmlc.operator.com", "operator.com");
+
+    // Start a 10-report periodic tracking session
+    let plr = gmlc.request_periodic_location("310010444555666", "epc.operator.com", 10, 30);
+    assert_eq!(gmlc.active_deferred_session_count(), 1);
+
+    // Cancel the session midway
+    let cancel_plr = gmlc
+        .cancel_deferred_location(&plr.session_id, "epc.operator.com")
+        .expect("Cancel PLR generated");
+
+    assert_eq!(cancel_plr.location_type, SlgLocationType::CancelDeferredLocation);
+    assert_eq!(cancel_plr.imsi, "310010444555666");
+
+    // Session is now completed and active deferred count drops to 0
+    let state = gmlc.get_session_state(&plr.session_id).unwrap();
+    assert!(matches!(state, LocationSessionState::Completed));
+    assert_eq!(gmlc.active_deferred_session_count(), 0);
+
+    // Trying to cancel again returns None
+    assert!(gmlc.cancel_deferred_location(&plr.session_id, "epc.operator.com").is_none());
+}

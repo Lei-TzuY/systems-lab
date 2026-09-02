@@ -1015,7 +1015,9 @@ pub use ptp_telecom_bc::{
     DownstreamAnnounceDataset, TelecomBoundaryClockEngine, TelecomClockQuality, TelecomPortConfig,
     TelecomPortState, TelecomSyncState,
 };
-pub use ptp_telecom_tc::TelecomPeerTransparentClockEngine;
+pub use ptp_telecom_tc::{
+    PTP_SUB_NS_SCALE, TelecomPeerTransparentClockEngine, TelecomTcMode,
+};
 pub use ptp_time_error::{
     MtiePoint, PtpTimeErrorEngine, TdevPoint, TelecomClockClass, TelecomSyncMask,
 };
@@ -1024,7 +1026,7 @@ pub use quic::{QUIC_PKT_INITIAL, QUIC_VERSION_1, QuicPacket, decode_vint, encode
 pub use quic_datagram::{
     DatagramDropPolicy, DatagramQueueError, QUIC_FRAME_DATAGRAM, QUIC_FRAME_DATAGRAM_LEN,
     QUIC_TP_MAX_DATAGRAM_FRAME_SIZE, QuicDatagramEngine, QuicDatagramFrame, QuicDatagramQueue,
-    WebTransportDatagram,
+    WebTransportDatagram, WebTransportDatagramEngine,
 };
 pub use radius::{RADIUS_ACCT_PORT, RADIUS_AUTH_PORT, RadiusAvp, RadiusPacket};
 pub use rip::{RipEngine, RipEntry, RipPacket};

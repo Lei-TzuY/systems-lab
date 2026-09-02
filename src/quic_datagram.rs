@@ -12,7 +12,7 @@
 //! - Congestion backpressure queues with configurable drop policies (`DropOldest`, `DropNewest`).
 
 use crate::quic::{decode_vint, encode_vint, QuicError};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::fmt;
 
 pub const QUIC_FRAME_DATAGRAM: u64 = 0x30;
@@ -251,6 +251,63 @@ impl QuicDatagramEngine {
     pub fn create_outgoing_frame(&mut self, has_length: bool) -> Option<QuicDatagramFrame> {
         let payload = self.tx_queue.pop()?;
         Some(QuicDatagramFrame::new(payload, has_length))
+    }
+}
+
+/// WebTransport RFC 9297 Session Datagram Multiplexer / Demultiplexer.
+#[derive(Debug, Clone)]
+pub struct WebTransportDatagramEngine {
+    pub max_datagram_size: usize,
+    pub session_capacity: usize,
+    pub drop_policy: DatagramDropPolicy,
+    /// Outgoing QUIC datagrams ready to be serialized into DATAGRAM frames
+    pub tx_queue: QuicDatagramQueue,
+    /// Incoming demultiplexed queues: session_id -> queue
+    pub session_rx_queues: HashMap<u64, QuicDatagramQueue>,
+}
+
+impl WebTransportDatagramEngine {
+    pub fn new(max_datagram_size: usize, session_capacity: usize, drop_policy: DatagramDropPolicy) -> Self {
+        Self {
+            max_datagram_size,
+            session_capacity,
+            drop_policy,
+            tx_queue: QuicDatagramQueue::new(session_capacity * 4, max_datagram_size, drop_policy),
+            session_rx_queues: HashMap::new(),
+        }
+    }
+
+    /// Sends an unreliable WebTransport datagram for a specific session ID (RFC 9297 Section 3).
+    pub fn send_session_datagram(&mut self, session_id: u64, payload: Vec<u8>) -> Result<(), DatagramQueueError> {
+        let wt_dgram = WebTransportDatagram::new(session_id, payload);
+        let serialized = wt_dgram.serialize();
+        self.tx_queue.push(serialized)
+    }
+
+    /// Pulls an outgoing QUIC DATAGRAM frame (0x30 or 0x31) to send across the network.
+    pub fn create_outgoing_frame(&mut self, has_length: bool) -> Option<QuicDatagramFrame> {
+        let payload = self.tx_queue.pop()?;
+        Some(QuicDatagramFrame::new(payload, has_length))
+    }
+
+    /// Processes an incoming raw QUIC DATAGRAM frame, demultiplexing it into the session queue.
+    pub fn receive_and_demux(&mut self, frame: &QuicDatagramFrame) -> Result<WebTransportDatagram, QuicError> {
+        let wt = WebTransportDatagram::parse(&frame.payload)?;
+        let queue = self.session_rx_queues.entry(wt.session_id).or_insert_with(|| {
+            QuicDatagramQueue::new(self.session_capacity, self.max_datagram_size, self.drop_policy)
+        });
+        let _ = queue.push(wt.payload.clone());
+        Ok(wt)
+    }
+
+    /// Pops a demultiplexed payload for a specific WebTransport session.
+    pub fn pop_session_datagram(&mut self, session_id: u64) -> Option<Vec<u8>> {
+        self.session_rx_queues.get_mut(&session_id)?.pop()
+    }
+
+    /// Returns the number of queued datagrams for a session.
+    pub fn session_queue_len(&self, session_id: u64) -> usize {
+        self.session_rx_queues.get(&session_id).map(|q| q.len()).unwrap_or(0)
     }
 }
 

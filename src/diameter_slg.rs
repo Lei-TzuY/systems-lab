@@ -802,8 +802,90 @@ impl GmlcSlgEngine {
             .and_then(|s| s.last_location.as_ref())
     }
 
+    /// Returns the complete list of location reports received for a session.
+    pub fn get_location_history(&self, session_id: &str) -> Option<&[LocationReportRequest]> {
+        self.sessions.get(session_id).map(|s| s.location_reports.as_slice())
+    }
+
     /// Returns the current state of a location session.
     pub fn get_session_state(&self, session_id: &str) -> Option<&LocationSessionState> {
         self.sessions.get(session_id).map(|s| &s.state)
+    }
+
+    /// Returns the count of active deferred tracking sessions.
+    pub fn active_deferred_session_count(&self) -> usize {
+        self.sessions
+            .values()
+            .filter(|s| matches!(s.state, LocationSessionState::DeferredActive { .. }))
+            .count()
+    }
+
+    /// Initiates an emergency location retrieval request (3GPP TS 29.172 Section 5.2.1).
+    pub fn request_emergency_location(
+        &mut self,
+        imsi: &str,
+        destination_realm: &str,
+    ) -> ProvideLocationRequest {
+        let session_id = format!("{};{}", self.gmlc_host, self.next_session_counter);
+        self.next_session_counter += 1;
+
+        let mut plr = ProvideLocationRequest::new(
+            &session_id,
+            imsi,
+            SlgLocationType::CurrentOrLastKnownLocation,
+            &self.gmlc_host,
+            &self.gmlc_realm,
+            destination_realm,
+        );
+        plr.lcs_priority = LcsPriority::HighestPriority;
+        plr.lcs_qos = LcsQos {
+            horizontal_accuracy: Some(50),
+            vertical_accuracy: None,
+            velocity_requested: false,
+            response_time_category: LcsResponseTime::LowDelay,
+        };
+
+        self.sessions.insert(
+            session_id.clone(),
+            GmlcLocationSession {
+                session_id: session_id.clone(),
+                imsi: imsi.to_string(),
+                state: LocationSessionState::PendingLocationResponse,
+                location_type: SlgLocationType::CurrentOrLastKnownLocation,
+                last_location: None,
+                location_reports: Vec::new(),
+                total_reports_received: 0,
+            },
+        );
+
+        self.total_plr_sent += 1;
+        plr
+    }
+
+    /// Cancels an active deferred location tracking session (3GPP TS 29.172 Section 5.2.1).
+    pub fn cancel_deferred_location(
+        &mut self,
+        session_id: &str,
+        destination_realm: &str,
+    ) -> Option<ProvideLocationRequest> {
+        let session = self.sessions.get_mut(session_id)?;
+        if !matches!(session.state, LocationSessionState::DeferredActive { .. }) {
+            return None;
+        }
+
+        let imsi = session.imsi.clone();
+        session.state = LocationSessionState::Completed;
+
+        let plr = ProvideLocationRequest::new(
+            session_id,
+            &imsi,
+            SlgLocationType::CancelDeferredLocation,
+            &self.gmlc_host,
+            &self.gmlc_realm,
+            destination_realm,
+        );
+
+        self.total_plr_sent += 1;
+        Some(plr)
     }
 }
