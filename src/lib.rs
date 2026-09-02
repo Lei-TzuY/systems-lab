@@ -457,7 +457,8 @@ pub use diameter_cx::{
     CMD_MAR, CMD_SAR, CMD_UAR, CxAvp, CxMessage, DIAMETER_APP_CX, HssCxEngine, ImsSub,
 };
 pub use diameter_gx::{
-    DIAMETER_APPLICATION_GX, GxCreditControlRequest, IpCanType, PccRule, PcefGxEngine,
+    DIAMETER_APPLICATION_GX, DIAMETER_CMD_CC, GxCreditControlRequest, GxReAuthAnswer,
+    GxReAuthRequest, IpCanType, PccRule, PcefGxEngine, PcrfGxEngine,
 };
 pub use diameter_np::{
     DIAMETER_APPLICATION_NP, DIAMETER_CMD_NON_AGGREGATED_RUCI_REPORT, NpAvp, NpMessage,

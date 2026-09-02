@@ -16,6 +16,8 @@ pub const DIAMETER_APPLICATION_GX: u32 = 16777238;
 
 /// Diameter Command Code for Credit-Control / Policy-Control (CCR / CCA).
 pub const DIAMETER_CMD_CC: u32 = 272;
+/// Diameter Command Code for Re-Auth (RAR / RAA).
+pub const DIAMETER_CMD_RE_AUTH: u32 = 258;
 
 /// Standard 3GPP Gx AVP Codes (Vendor ID = 10415).
 pub const AVP_CHARGING_RULE_INSTALL: u32 = 1001;
@@ -360,5 +362,328 @@ impl PcefGxEngine {
     pub fn handle_session_termination(&mut self, session_id: &str) -> bool {
         self.installed_rules.remove(session_id);
         self.active_sessions.remove(session_id).is_some()
+    }
+
+    /// Handles a Gx Re-Auth-Request (RAR) from PCRF, applying rule installations and removals.
+    pub fn handle_rar(
+        &mut self,
+        rar: &GxReAuthRequest,
+        local_host: &str,
+        local_realm: &str,
+    ) -> GxReAuthAnswer {
+        if !self.active_sessions.contains_key(&rar.session_id) {
+            return GxReAuthAnswer {
+                session_id: rar.session_id.clone(),
+                result_code: 5002, // DIAMETER_UNKNOWN_SESSION_ID
+                origin_host: local_host.to_string(),
+                origin_realm: local_realm.to_string(),
+            };
+        }
+
+        // Apply rule removals
+        for r_name in &rar.rules_to_remove {
+            self.remove_rule(&rar.session_id, r_name);
+        }
+
+        // Apply rule installations
+        for rule in &rar.rules_to_install {
+            self.install_rule(&rar.session_id, rule.clone());
+        }
+
+        GxReAuthAnswer {
+            session_id: rar.session_id.clone(),
+            result_code: DIAMETER_SUCCESS,
+            origin_host: local_host.to_string(),
+            origin_realm: local_realm.to_string(),
+        }
+    }
+
+    /// Evaluates incoming/outgoing IP traffic against installed PCC rules for a session.
+    ///
+    /// Matches flow description substring and verifies the gate is enabled.
+    pub fn enforce_traffic(
+        &mut self,
+        session_id: &str,
+        flow_str: &str,
+        byte_len: u64,
+    ) -> Option<PccRule> {
+        let rules = self.installed_rules.get(session_id)?;
+        for rule in rules {
+            if rule.gate_enabled {
+                for fd in &rule.flow_descriptions {
+                    if fd.contains("any to any") || flow_str.contains(fd) || fd.contains(flow_str) {
+                        self.total_enforced_bytes += byte_len;
+                        return Some(rule.clone());
+                    }
+                }
+            }
+        }
+        None
+    }
+}
+
+/// Diameter Gx Re-Auth-Request (RAR) sent by PCRF to PCEF (3GPP TS 29.212 Section 5.6.3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GxReAuthRequest {
+    pub session_id: String,
+    pub origin_host: String,
+    pub origin_realm: String,
+    pub destination_host: String,
+    pub destination_realm: String,
+    pub rules_to_install: Vec<PccRule>,
+    pub rules_to_remove: Vec<String>,
+    pub event_triggers: Vec<u32>,
+}
+
+impl GxReAuthRequest {
+    pub fn to_diameter_message(&self, hop_by_hop: u32, end_to_end: u32) -> DiameterMessage {
+        let mut msg = DiameterMessage::new_request(
+            DIAMETER_CMD_RE_AUTH,
+            DIAMETER_APPLICATION_GX,
+            hop_by_hop,
+            end_to_end,
+        );
+        msg.add_avp(DiameterAvp::new_utf8(263, &self.session_id));
+        msg.add_avp(DiameterAvp::new_utf8(264, &self.origin_host));
+        msg.add_avp(DiameterAvp::new_utf8(296, &self.origin_realm));
+        msg.add_avp(DiameterAvp::new_utf8(293, &self.destination_host));
+        msg.add_avp(DiameterAvp::new_utf8(283, &self.destination_realm));
+
+        for rule in &self.rules_to_install {
+            let def_avp = rule.to_grouped_avp();
+            msg.add_avp(DiameterAvp::new_vendor(
+                AVP_CHARGING_RULE_INSTALL,
+                DIAMETER_FLAG_MANDATORY | DIAMETER_FLAG_VENDOR_SPECIFIC,
+                VENDOR_3GPP,
+                &def_avp.serialize(),
+            ));
+        }
+
+        for r_name in &self.rules_to_remove {
+            let name_avp = DiameterAvp::new_vendor(
+                AVP_CHARGING_RULE_NAME,
+                DIAMETER_FLAG_MANDATORY | DIAMETER_FLAG_VENDOR_SPECIFIC,
+                VENDOR_3GPP,
+                r_name.as_bytes(),
+            );
+            msg.add_avp(DiameterAvp::new_vendor(
+                AVP_CHARGING_RULE_REMOVE,
+                DIAMETER_FLAG_MANDATORY | DIAMETER_FLAG_VENDOR_SPECIFIC,
+                VENDOR_3GPP,
+                &name_avp.serialize(),
+            ));
+        }
+
+        for &trig in &self.event_triggers {
+            msg.add_avp(DiameterAvp::new_vendor(
+                AVP_EVENT_TRIGGER,
+                DIAMETER_FLAG_MANDATORY | DIAMETER_FLAG_VENDOR_SPECIFIC,
+                VENDOR_3GPP,
+                &trig.to_be_bytes(),
+            ));
+        }
+        msg
+    }
+
+    pub fn from_diameter_message(msg: &DiameterMessage) -> Option<Self> {
+        let session_id = msg.get_avp(263).and_then(|a| a.as_string())?;
+        let origin_host = msg.get_avp(264).and_then(|a| a.as_string()).unwrap_or_default();
+        let origin_realm = msg.get_avp(296).and_then(|a| a.as_string()).unwrap_or_default();
+        let destination_host = msg.get_avp(293).and_then(|a| a.as_string()).unwrap_or_default();
+        let destination_realm = msg.get_avp(283).and_then(|a| a.as_string()).unwrap_or_default();
+
+        let mut rules_to_install = Vec::new();
+        let mut rules_to_remove = Vec::new();
+        let mut event_triggers = Vec::new();
+
+        for avp in &msg.avps {
+            if avp.code == AVP_CHARGING_RULE_INSTALL {
+                let inner = DiameterAvp::parse_all(&avp.data);
+                for sub in inner {
+                    if sub.code == AVP_CHARGING_RULE_DEFINITION {
+                        if let Some(r) = PccRule::from_grouped_avp(&sub) {
+                            rules_to_install.push(r);
+                        }
+                    }
+                }
+            } else if avp.code == AVP_CHARGING_RULE_REMOVE {
+                let inner = DiameterAvp::parse_all(&avp.data);
+                for sub in inner {
+                    if sub.code == AVP_CHARGING_RULE_NAME {
+                        rules_to_remove.push(String::from_utf8_lossy(&sub.data).to_string());
+                    }
+                }
+            } else if avp.code == AVP_EVENT_TRIGGER {
+                if let Some(trig) = avp.as_u32() {
+                    event_triggers.push(trig);
+                }
+            }
+        }
+
+        Some(GxReAuthRequest {
+            session_id,
+            origin_host,
+            origin_realm,
+            destination_host,
+            destination_realm,
+            rules_to_install,
+            rules_to_remove,
+            event_triggers,
+        })
+    }
+}
+
+/// Diameter Gx Re-Auth-Answer (RAA) sent by PCEF to PCRF (3GPP TS 29.212).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GxReAuthAnswer {
+    pub session_id: String,
+    pub result_code: u32,
+    pub origin_host: String,
+    pub origin_realm: String,
+}
+
+impl GxReAuthAnswer {
+    pub fn to_diameter_message(&self, hop_by_hop: u32, end_to_end: u32) -> DiameterMessage {
+        let mut msg = DiameterMessage::new_answer(
+            DIAMETER_CMD_RE_AUTH,
+            DIAMETER_APPLICATION_GX,
+            hop_by_hop,
+            end_to_end,
+        );
+        msg.add_avp(DiameterAvp::new_utf8(263, &self.session_id));
+        msg.add_avp(DiameterAvp::new_u32(268, self.result_code));
+        msg.add_avp(DiameterAvp::new_utf8(264, &self.origin_host));
+        msg.add_avp(DiameterAvp::new_utf8(296, &self.origin_realm));
+        msg
+    }
+
+    pub fn from_diameter_message(msg: &DiameterMessage) -> Option<Self> {
+        let session_id = msg.get_avp(263).and_then(|a| a.as_string())?;
+        let result_code = msg.get_avp(268).and_then(|a| a.as_u32()).unwrap_or(DIAMETER_SUCCESS);
+        let origin_host = msg.get_avp(264).and_then(|a| a.as_string()).unwrap_or_default();
+        let origin_realm = msg.get_avp(296).and_then(|a| a.as_string()).unwrap_or_default();
+
+        Some(GxReAuthAnswer {
+            session_id,
+            result_code,
+            origin_host,
+            origin_realm,
+        })
+    }
+}
+
+/// State of an active Gx session tracked by PCRF.
+#[derive(Debug, Clone)]
+pub struct GxSessionState {
+    pub subscriber_id: String,
+    pub ip_can_type: IpCanType,
+    pub active_rules: Vec<PccRule>,
+}
+
+/// PCRF Policy and Charging Rules Function Gx Server Engine.
+#[derive(Debug, Clone)]
+pub struct PcrfGxEngine {
+    pub pcrf_host: String,
+    pub pcrf_realm: String,
+    pub sessions: HashMap<String, GxSessionState>,
+}
+
+impl PcrfGxEngine {
+    pub fn new(pcrf_host: &str, pcrf_realm: &str) -> Self {
+        PcrfGxEngine {
+            pcrf_host: pcrf_host.to_string(),
+            pcrf_realm: pcrf_realm.to_string(),
+            sessions: HashMap::new(),
+        }
+    }
+
+    /// Handles an incoming CCR Initial from PCEF, registering the session and provisioning default rules.
+    pub fn handle_ccr_initial(
+        &mut self,
+        ccr: &GxCreditControlRequest,
+    ) -> (DiameterMessage, Vec<PccRule>) {
+        let mut default_rules = Vec::new();
+        let mut r_default = PccRule::new("rule-default-internet", 9, 20_000_000, 100_000_000);
+        r_default
+            .flow_descriptions
+            .push("permit out ip from any to any".to_string());
+        default_rules.push(r_default);
+
+        if ccr.ip_can_type == IpCanType::ThreeGpp5Gs || ccr.ip_can_type == IpCanType::ThreeGppEps {
+            let mut r_ims = PccRule::new("rule-ims-signalling", 5, 512_000, 512_000);
+            r_ims
+                .flow_descriptions
+                .push("permit out udp from any to 10.0.0.1 5060".to_string());
+            default_rules.push(r_ims);
+        }
+
+        self.sessions.insert(
+            ccr.session_id.clone(),
+            GxSessionState {
+                subscriber_id: ccr.subscription_id.clone(),
+                ip_can_type: ccr.ip_can_type,
+                active_rules: default_rules.clone(),
+            },
+        );
+
+        let mut cca = DiameterMessage::new_answer(DIAMETER_CMD_CC, DIAMETER_APPLICATION_GX, 1, 1);
+        cca.add_avp(DiameterAvp::new_utf8(263, &ccr.session_id));
+        cca.add_avp(DiameterAvp::new_u32(268, DIAMETER_SUCCESS));
+        cca.add_avp(DiameterAvp::new_u32(416, CcRequestType::InitialRequest as u32));
+        cca.add_avp(DiameterAvp::new_u32(415, ccr.cc_request_number));
+
+        for rule in &default_rules {
+            let def_avp = rule.to_grouped_avp();
+            cca.add_avp(DiameterAvp::new_vendor(
+                AVP_CHARGING_RULE_INSTALL,
+                DIAMETER_FLAG_MANDATORY | DIAMETER_FLAG_VENDOR_SPECIFIC,
+                VENDOR_3GPP,
+                &def_avp.serialize(),
+            ));
+        }
+
+        (cca, default_rules)
+    }
+
+    /// Asynchronously pushes a RAR to install or remove rules on the PCEF.
+    pub fn push_rar(
+        &mut self,
+        session_id: &str,
+        pcef_host: &str,
+        pcef_realm: &str,
+        install: Vec<PccRule>,
+        remove: Vec<String>,
+    ) -> Option<GxReAuthRequest> {
+        let session = self.sessions.get_mut(session_id)?;
+
+        // Update local PCRF state
+        for r_name in &remove {
+            session.active_rules.retain(|r| &r.rule_name != r_name);
+        }
+        for rule in &install {
+            session.active_rules.retain(|r| r.rule_name != rule.rule_name);
+            session.active_rules.push(rule.clone());
+        }
+
+        Some(GxReAuthRequest {
+            session_id: session_id.to_string(),
+            origin_host: self.pcrf_host.clone(),
+            origin_realm: self.pcrf_realm.clone(),
+            destination_host: pcef_host.to_string(),
+            destination_realm: pcef_realm.to_string(),
+            rules_to_install: install,
+            rules_to_remove: remove,
+            event_triggers: Vec::new(),
+        })
+    }
+
+    /// Terminates an active Gx session.
+    pub fn terminate_session(&mut self, session_id: &str) -> bool {
+        self.sessions.remove(session_id).is_some()
+    }
+
+    /// Returns the number of active Gx sessions.
+    pub fn active_session_count(&self) -> usize {
+        self.sessions.len()
     }
 }
