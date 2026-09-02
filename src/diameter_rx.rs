@@ -27,6 +27,12 @@ pub const SPECIFIC_ACTION_ACCESS_NETWORK_INFO_REPORT: u32 = 12;
 /// Rx AVP Codes (3GPP TS 29.214 Section 5.3).
 pub const AVP_ABORT_CAUSE: u32 = 500;
 pub const AVP_AF_APPLICATION_IDENTIFIER: u32 = 504;
+
+/// Abort-Cause AVP Values (AVP 500 - RFC 6733 / 3GPP TS 29.214 Section 5.3.1).
+pub const ABORT_CAUSE_BEARER_RELEASED: u32 = 0;
+pub const ABORT_CAUSE_INSUFFICIENT_SERVER_RESOURCES: u32 = 1;
+pub const ABORT_CAUSE_INSUFFICIENT_BEARER_RESOURCES: u32 = 2;
+pub const ABORT_CAUSE_ADMINISTRATIVE: u32 = 4;
 pub const AVP_FLOW_DESCRIPTION: u32 = 507;
 pub const AVP_FLOW_NUMBER: u32 = 509;
 pub const AVP_FLOW_STATUS: u32 = 511;
@@ -450,6 +456,44 @@ impl PcrfRxEngine {
             false
         }
     }
+
+    /// Generates an Abort-Session-Request (ASR - Command 274) to forcefully terminate an AF session (RFC 6733).
+    pub fn generate_asr(
+        &mut self,
+        session_id: &str,
+        abort_cause: u32,
+        origin_host: &str,
+        origin_realm: &str,
+        destination_host: &str,
+        destination_realm: &str,
+    ) -> Option<AbortSessionRequest> {
+        let session = self.sessions.get_mut(session_id)?;
+        session.is_active = false;
+        let released_bw = session.granted_bandwidth_ul_bps + session.granted_bandwidth_dl_bps;
+        self.allocated_bandwidth_bps = self.allocated_bandwidth_bps.saturating_sub(released_bw as u64);
+
+        Some(AbortSessionRequest {
+            session_id: session_id.to_string(),
+            origin_host: origin_host.to_string(),
+            origin_realm: origin_realm.to_string(),
+            destination_host: destination_host.to_string(),
+            destination_realm: destination_realm.to_string(),
+            abort_cause,
+        })
+    }
+
+    /// Processes an Abort-Session-Answer (ASA) returned by the AF.
+    pub fn process_asa(&mut self, session_id: &str, result_code: u32) -> bool {
+        if let Some(session) = self.sessions.remove(session_id) {
+            if session.is_active {
+                let bw = session.granted_bandwidth_ul_bps + session.granted_bandwidth_dl_bps;
+                self.allocated_bandwidth_bps = self.allocated_bandwidth_bps.saturating_sub(bw as u64);
+            }
+            result_code == DIAMETER_SUCCESS
+        } else {
+            false
+        }
+    }
 }
 
 /// Re-Auth-Request (RAR) message (Command 258) sent by PCRF to AF (3GPP TS 29.214 Section 5.6.3).
@@ -578,6 +622,125 @@ impl ReAuthAnswer {
     }
 }
 
+/// Abort-Session-Request (ASR) message (Command 274) sent by PCRF to AF (RFC 6733 / 3GPP TS 29.214).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AbortSessionRequest {
+    pub session_id: String,
+    pub origin_host: String,
+    pub origin_realm: String,
+    pub destination_host: String,
+    pub destination_realm: String,
+    pub abort_cause: u32,
+}
+
+impl AbortSessionRequest {
+    pub fn to_diameter_message(&self, hop_by_hop_id: u32, end_to_end_id: u32) -> DiameterMessage {
+        let mut msg = DiameterMessage::new_request(
+            DIAMETER_CMD_ABORT_SESSION,
+            DIAMETER_APPLICATION_RX,
+            hop_by_hop_id,
+            end_to_end_id,
+        );
+        msg.avps.push(DiameterAvp::new_utf8(263, &self.session_id));
+        msg.avps.push(DiameterAvp::new_utf8(264, &self.origin_host));
+        msg.avps.push(DiameterAvp::new_utf8(296, &self.origin_realm));
+        msg.avps.push(DiameterAvp::new_utf8(293, &self.destination_host));
+        msg.avps.push(DiameterAvp::new_utf8(283, &self.destination_realm));
+        msg.avps.push(DiameterAvp::new_u32(AVP_ABORT_CAUSE, self.abort_cause));
+        msg
+    }
+
+    pub fn from_diameter_message(msg: &DiameterMessage) -> Option<Self> {
+        let session_id = msg.get_avp(263).and_then(|a| a.as_string())?;
+        let origin_host = msg
+            .get_avp(264)
+            .and_then(|a| a.as_string())
+            .unwrap_or_default();
+        let origin_realm = msg
+            .get_avp(296)
+            .and_then(|a| a.as_string())
+            .unwrap_or_default();
+        let destination_host = msg
+            .get_avp(293)
+            .and_then(|a| a.as_string())
+            .unwrap_or_default();
+        let destination_realm = msg
+            .get_avp(283)
+            .and_then(|a| a.as_string())
+            .unwrap_or_default();
+        let abort_cause = msg
+            .get_avp(AVP_ABORT_CAUSE)
+            .and_then(|a| a.as_u32())
+            .unwrap_or(ABORT_CAUSE_ADMINISTRATIVE);
+
+        Some(AbortSessionRequest {
+            session_id,
+            origin_host,
+            origin_realm,
+            destination_host,
+            destination_realm,
+            abort_cause,
+        })
+    }
+}
+
+/// Abort-Session-Answer (ASA) message (Command 274) sent by AF to PCRF (RFC 6733 / 3GPP TS 29.214).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AbortSessionAnswer {
+    pub session_id: String,
+    pub result_code: u32,
+    pub origin_host: String,
+    pub origin_realm: String,
+}
+
+impl AbortSessionAnswer {
+    pub fn success(session_id: &str, origin_host: &str, origin_realm: &str) -> Self {
+        AbortSessionAnswer {
+            session_id: session_id.to_string(),
+            result_code: DIAMETER_SUCCESS,
+            origin_host: origin_host.to_string(),
+            origin_realm: origin_realm.to_string(),
+        }
+    }
+
+    pub fn to_diameter_message(&self, hop_by_hop_id: u32, end_to_end_id: u32) -> DiameterMessage {
+        let mut msg = DiameterMessage::new_answer(
+            DIAMETER_CMD_ABORT_SESSION,
+            DIAMETER_APPLICATION_RX,
+            hop_by_hop_id,
+            end_to_end_id,
+        );
+        msg.avps.push(DiameterAvp::new_utf8(263, &self.session_id));
+        msg.avps.push(DiameterAvp::new_u32(268, self.result_code));
+        msg.avps.push(DiameterAvp::new_utf8(264, &self.origin_host));
+        msg.avps.push(DiameterAvp::new_utf8(296, &self.origin_realm));
+        msg
+    }
+
+    pub fn from_diameter_message(msg: &DiameterMessage) -> Option<Self> {
+        let session_id = msg.get_avp(263).and_then(|a| a.as_string())?;
+        let result_code = msg
+            .get_avp(268)
+            .and_then(|a| a.as_u32())
+            .unwrap_or(DIAMETER_SUCCESS);
+        let origin_host = msg
+            .get_avp(264)
+            .and_then(|a| a.as_string())
+            .unwrap_or_default();
+        let origin_realm = msg
+            .get_avp(296)
+            .and_then(|a| a.as_string())
+            .unwrap_or_default();
+
+        Some(AbortSessionAnswer {
+            session_id,
+            result_code,
+            origin_host,
+            origin_realm,
+        })
+    }
+}
+
 /// Simulated IMS P-CSCF / Application Function (AF) Rx Client.
 #[derive(Debug, Clone, Default)]
 pub struct PcscfRxClient {
@@ -587,6 +750,7 @@ pub struct PcscfRxClient {
     pub bearer_loss_events_received: usize,
     pub bearer_recovery_events_received: usize,
     pub bearer_release_events_received: usize,
+    pub abort_events_received: usize,
 }
 
 impl PcscfRxClient {
@@ -598,6 +762,7 @@ impl PcscfRxClient {
             bearer_loss_events_received: 0,
             bearer_recovery_events_received: 0,
             bearer_release_events_received: 0,
+            abort_events_received: 0,
         }
     }
 
@@ -623,6 +788,13 @@ impl PcscfRxClient {
         }
 
         ReAuthAnswer::success(&rar.session_id, &self.local_host, &self.local_realm)
+    }
+
+    /// Handles an incoming ASR (Abort-Session-Request) from PCRF and aborts the call immediately.
+    pub fn handle_asr(&mut self, asr: &AbortSessionRequest) -> AbortSessionAnswer {
+        self.abort_events_received += 1;
+        self.active_calls.remove(&asr.session_id);
+        AbortSessionAnswer::success(&asr.session_id, &self.local_host, &self.local_realm)
     }
 
     pub fn is_session_active(&self, session_id: &str) -> bool {

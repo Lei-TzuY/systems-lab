@@ -168,3 +168,85 @@ fn test_diameter_rx_rar_raa_bearer_loss_and_release_lifecycle() {
     // Session is now terminated on P-CSCF
     assert!(!pcscf.is_session_active(sess_id));
 }
+
+#[test]
+fn test_diameter_rx_asr_asa_wire_codec() {
+    use toy_tcpip::diameter_rx::{
+        AbortSessionAnswer, AbortSessionRequest, ABORT_CAUSE_INSUFFICIENT_SERVER_RESOURCES,
+        DIAMETER_CMD_ABORT_SESSION,
+    };
+
+    let asr = AbortSessionRequest {
+        session_id: "ims-asr-007".to_string(),
+        origin_host: "pcrf.carrier.com".to_string(),
+        origin_realm: "carrier.com".to_string(),
+        destination_host: "pcscf.carrier.com".to_string(),
+        destination_realm: "carrier.com".to_string(),
+        abort_cause: ABORT_CAUSE_INSUFFICIENT_SERVER_RESOURCES,
+    };
+
+    let msg = asr.to_diameter_message(50, 60);
+    assert_eq!(msg.header.command_code, DIAMETER_CMD_ABORT_SESSION);
+    assert!(msg.header.is_request());
+
+    let parsed_asr = AbortSessionRequest::from_diameter_message(&msg).expect("parse ASR");
+    assert_eq!(parsed_asr, asr);
+
+    let asa = AbortSessionAnswer::success("ims-asr-007", "pcscf.carrier.com", "carrier.com");
+    let ans_msg = asa.to_diameter_message(50, 60);
+    assert_eq!(ans_msg.header.command_code, DIAMETER_CMD_ABORT_SESSION);
+    assert!(!ans_msg.header.is_request());
+
+    let parsed_asa = AbortSessionAnswer::from_diameter_message(&ans_msg).expect("parse ASA");
+    assert_eq!(parsed_asa, asa);
+}
+
+#[test]
+fn test_diameter_rx_asr_asa_session_abort_lifecycle() {
+    use toy_tcpip::diameter_rx::{
+        AaRequest, MediaComponentDescription, MediaType, PcrfRxEngine, PcscfRxClient,
+        ABORT_CAUSE_INSUFFICIENT_SERVER_RESOURCES,
+    };
+
+    let mut pcrf = PcrfRxEngine::new(10_000_000);
+    let mut pcscf = PcscfRxClient::new("pcscf.ims.carrier.org", "ims.carrier.org");
+
+    let sess_id = "ims-emergency-call-112";
+    pcscf.register_session(sess_id, "IMS-Voice-Call");
+
+    // Establish call via AAR
+    let mut aar = AaRequest::new(sess_id, "IMS-Voice-Call");
+    let mut audio = MediaComponentDescription::new(1, MediaType::Audio);
+    audio.max_bandwidth_ul = 64_000;
+    audio.max_bandwidth_dl = 64_000;
+    aar.media_components.push(audio);
+    let aaa = pcrf.process_aar(&aar);
+    assert_eq!(aaa.get_avp(268).unwrap().as_u32().unwrap(), 2001);
+    assert_eq!(pcrf.allocated_bandwidth_bps, 128_000);
+
+    // Severe PCRF congestion -> PCRF issues ASR
+    let asr = pcrf
+        .generate_asr(
+            sess_id,
+            ABORT_CAUSE_INSUFFICIENT_SERVER_RESOURCES,
+            "pcrf.ims.carrier.org",
+            "ims.carrier.org",
+            &pcscf.local_host,
+            &pcscf.local_realm,
+        )
+        .expect("generate ASR");
+
+    assert_eq!(asr.abort_cause, ABORT_CAUSE_INSUFFICIENT_SERVER_RESOURCES);
+    // PCRF deactivates the session and frees reserved bandwidth
+    assert_eq!(pcrf.allocated_bandwidth_bps, 0);
+
+    // P-CSCF handles ASR, tears down call, and responds with ASA
+    let asa = pcscf.handle_asr(&asr);
+    assert_eq!(asa.result_code, 2001);
+    assert_eq!(pcscf.abort_events_received, 1);
+    assert!(!pcscf.is_session_active(sess_id));
+
+    // PCRF finalizes ASA processing
+    assert!(pcrf.process_asa(sess_id, asa.result_code));
+    assert_eq!(pcrf.sessions.len(), 0);
+}
