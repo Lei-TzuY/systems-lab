@@ -416,6 +416,75 @@ impl EvpnSpmsiEngine {
             list
         }
     }
+
+    /// Checks if a multicast flow is currently in Selective (S-PMSI) delivery mode.
+    pub fn is_selective(&self, vni: u32, source_ip: Ipv4Addr, group_ip: Ipv4Addr) -> bool {
+        let key = MulticastFlowKey {
+            vni,
+            source_ip,
+            group_ip,
+        };
+        self.trees.get(&key).map(|t| t.mode == MulticastDeliveryMode::Selective).unwrap_or(false)
+    }
+
+    /// Returns the number of flows currently using Selective (S-PMSI) trees.
+    pub fn active_spmsi_count(&self) -> usize {
+        self.trees.values().filter(|t| t.mode == MulticastDeliveryMode::Selective).count()
+    }
+
+    /// Explicitly demotes an S-PMSI tree back to Inclusive mode (e.g. traffic stopped or pruned).
+    ///
+    /// Returns the S-PMSI A-D withdrawal route if the flow was previously selective.
+    pub fn demote_or_teardown_spmsi(
+        &mut self,
+        vni: u32,
+        source_ip: Ipv4Addr,
+        group_ip: Ipv4Addr,
+    ) -> Option<EvpnSpmsiRoute> {
+        let key = MulticastFlowKey {
+            vni,
+            source_ip,
+            group_ip,
+        };
+
+        if let Some(tree) = self.trees.get_mut(&key) {
+            if tree.mode == MulticastDeliveryMode::Selective {
+                tree.mode = MulticastDeliveryMode::Inclusive;
+                tree.subscribed_leaves.clear();
+                tree.last_rate_bps = 0;
+
+                let withdrawal = EvpnSpmsiRoute::new(
+                    [0, 1, 0, 0, 0, 0, 0, 0],
+                    vni,
+                    source_ip,
+                    group_ip,
+                    self.local_vtep,
+                    None, // No PTA indicates withdrawal / teardown
+                );
+                return Some(withdrawal);
+            }
+        }
+        None
+    }
+
+    /// Audits all active S-PMSI trees and demotes those whose traffic rate has fallen below
+    /// the low threshold back to Inclusive mode (RFC 9572 Section 4.2.3).
+    pub fn check_demotions(&mut self, low_threshold_bps: u64) -> Vec<EvpnSpmsiRoute> {
+        let mut to_demote = Vec::new();
+        for (&key, tree) in &self.trees {
+            if tree.mode == MulticastDeliveryMode::Selective && tree.last_rate_bps < low_threshold_bps {
+                to_demote.push(key);
+            }
+        }
+
+        let mut withdrawals = Vec::new();
+        for key in to_demote {
+            if let Some(route) = self.demote_or_teardown_spmsi(key.vni, key.source_ip, key.group_ip) {
+                withdrawals.push(route);
+            }
+        }
+        withdrawals
+    }
 }
 
 #[cfg(test)]

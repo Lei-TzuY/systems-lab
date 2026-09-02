@@ -94,3 +94,48 @@ fn test_spmsi_and_leaf_ad_full_lifecycle() {
     let targets_after_prune = engine.get_replication_targets(vni, src, grp);
     assert_eq!(targets_after_prune, vec![leaf3]);
 }
+
+#[test]
+fn test_spmsi_demotion_and_teardown_back_to_inclusive() {
+    let mut engine = EvpnSpmsiEngine::new(Ipv4Addr::new(10, 0, 0, 1), 2_000_000); // 2 Mbps promotion threshold
+
+    let leaf2 = Ipv4Addr::new(10, 0, 0, 2);
+    let leaf3 = Ipv4Addr::new(10, 0, 0, 3);
+    engine.register_vtep(leaf2);
+    engine.register_vtep(leaf3);
+
+    let src = Ipv4Addr::new(192, 168, 5, 10);
+    let grp = Ipv4Addr::new(239, 1, 2, 3);
+    let vni = 1000;
+
+    // 1. High burst triggers S-PMSI
+    let (mode1, spmsi_opt1) = engine.record_traffic(vni, src, grp, 5_000_000, 1);
+    assert_eq!(mode1, MulticastDeliveryMode::Selective);
+    assert!(spmsi_opt1.is_some());
+    assert_eq!(engine.active_spmsi_count(), 1);
+    assert!(engine.is_selective(vni, src, grp));
+
+    // Leaf 2 joins S-PMSI tree
+    let leaf2_ad = EvpnLeafAdRoute::new([0; 8], vni, src, grp, Ipv4Addr::new(10, 0, 0, 1), leaf2);
+    assert!(engine.process_leaf_join(&leaf2_ad));
+    assert_eq!(engine.get_replication_targets(vni, src, grp), vec![leaf2]);
+
+    // 2. Traffic rate drops significantly to 100 kbps (< 500 kbps low threshold)
+    engine.record_traffic(vni, src, grp, 12_500, 1); // 100 kbps
+
+    // Run periodic demotion check (threshold: 500 kbps)
+    let withdrawals = engine.check_demotions(500_000);
+    assert_eq!(withdrawals.len(), 1);
+    assert_eq!(withdrawals[0].source_ip, src);
+    assert_eq!(withdrawals[0].group_ip, grp);
+    assert!(withdrawals[0].pta.is_none()); // PTA None indicates S-PMSI withdrawal
+
+    // 3. Tree is now demoted back to Inclusive mode
+    assert!(!engine.is_selective(vni, src, grp));
+    assert_eq!(engine.active_spmsi_count(), 0);
+
+    // Egress replication reverts to all fabric VTEPs (Leaf 2 & Leaf 3)
+    let mut targets_inclusive = engine.get_replication_targets(vni, src, grp);
+    targets_inclusive.sort();
+    assert_eq!(targets_inclusive, vec![leaf2, leaf3]);
+}

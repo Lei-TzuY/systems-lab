@@ -103,3 +103,45 @@ fn test_diameter_sy_ocs_pcrf_spending_limit_lifecycle() {
     assert_eq!(stop_sla.result_code, DIAMETER_SUCCESS);
     assert!(!ocs.active_sessions.contains_key(sess_id));
 }
+
+#[test]
+fn test_diameter_sy_intermediate_request_counter_modification() {
+    let mut ocs = OcsSyEngine::new();
+    let mut pcrf = PcrfSyClient::new();
+
+    let imsi = "imsi-460011122334455";
+    let sess_id = "sy-sess-mod-99";
+
+    ocs.set_counter_status(imsi, "initial-tier", "ACTIVE");
+    ocs.set_counter_status(imsi, "addon-boost", "AVAILABLE");
+
+    // 1. Initial SLR subscribes only to initial-tier
+    let slr_init = pcrf.create_initial_slr(sess_id, imsi, &["initial-tier"]);
+    let sla_init = ocs.handle_slr(&slr_init);
+    pcrf.process_sla(&sla_init);
+    assert_eq!(pcrf.get_counter_status(sess_id, "initial-tier"), Some("ACTIVE"));
+    assert_eq!(pcrf.get_counter_status(sess_id, "addon-boost"), None);
+
+    // 2. Intermediate SLR dynamically subscribes to addon-boost as well
+    let slr_inter = pcrf.create_intermediate_slr(sess_id, imsi, &["initial-tier", "addon-boost"]);
+    let sla_inter = ocs.handle_slr(&slr_inter);
+    assert_eq!(sla_inter.reports.len(), 2);
+    pcrf.process_sla(&sla_inter);
+    assert_eq!(pcrf.get_counter_status(sess_id, "addon-boost"), Some("AVAILABLE"));
+
+    // 3. Unsubscribe from initial-tier
+    assert!(ocs.unsubscribe_counter(sess_id, "initial-tier"));
+    // OCS status update for initial-tier will no longer notify this session
+    let empty_notifications = ocs.update_counter_and_notify(imsi, "initial-tier", "EXPIRED");
+    assert!(empty_notifications.is_empty());
+
+    // But addon-boost is still subscribed
+    let boost_notifications = ocs.update_counter_and_notify(imsi, "addon-boost", "EXHAUSTED");
+    assert_eq!(boost_notifications.len(), 1);
+
+    // 4. Terminate sessions on both sides
+    assert!(pcrf.terminate_session(sess_id));
+    assert!(ocs.terminate_session(sess_id));
+    assert_eq!(pcrf.active_session_count(), 0);
+    assert_eq!(ocs.active_session_count(), 0);
+}

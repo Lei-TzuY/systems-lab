@@ -53,18 +53,12 @@ impl QualityLevel {
     pub fn from_u8(val: u8) -> Self {
         match val & 0x0F {
             0x02 => QualityLevel::QlPrc,
-            0x04 => QualityLevel::QlSSuA(),
+            0x04 => QualityLevel::QlSsuA,
             0x08 => QualityLevel::QlSsuB,
             0x0B => QualityLevel::QlSec,
             0x0F => QualityLevel::QlDnu,
             _ => QualityLevel::QlInvalid,
         }
-    }
-
-    #[inline]
-    #[allow(non_snake_case)]
-    fn QlSSuA() -> Self {
-        QualityLevel::QlSsuA
     }
 
     /// Clock quality rank for best clock selection (lower value = higher quality).
@@ -534,5 +528,51 @@ impl SyncEEsmcEngine {
             self.selected_ext_ql = None;
             None
         }
+    }
+
+    /// Generates the outbound ESMC packet to be transmitted on a port.
+    ///
+    /// According to ITU-T G.781 timing loop prevention:
+    /// - If `port == self.selected_port`, the node MUST transmit QL-DNU (Do Not Use)
+    ///   towards the master clock source to prevent timing loops.
+    /// - For all other ports, the node forwards the current synchronized clock quality
+    ///   (`selected_ql` and optional `selected_ext_ql`).
+    /// - If in Holdover, transmits QL-SEC (or local oscillator specification).
+    pub fn generate_tx_esmc(&self, port: u32, clock_identity: [u8; 8]) -> SyncEEsmcPacket {
+        if Some(port) == self.selected_port {
+            // Timing loop prevention: Never echo valid clock back to source
+            return SyncEEsmcPacket::new(false, QualityLevel::QlDnu);
+        }
+
+        if self.holdover_active {
+            let mut pkt = SyncEEsmcPacket::new(false, QualityLevel::QlSec);
+            if self.selected_ext_ql.is_some() {
+                pkt.extended_ql = Some(ExtendedQlTlv::new(
+                    EnhancedQualityLevel::QlSec,
+                    clock_identity,
+                ));
+            }
+            return pkt;
+        }
+
+        if self.selected_port.is_none()
+            || self.selected_ql == QualityLevel::QlDnu
+            || self.selected_ql == QualityLevel::QlInvalid
+        {
+            return SyncEEsmcPacket::new(false, QualityLevel::QlDnu);
+        }
+
+        let mut pkt = SyncEEsmcPacket::new(false, self.selected_ql);
+        if let Some(ext) = self.selected_ext_ql {
+            let mut ext_tlv = ExtendedQlTlv::new(ext, clock_identity);
+            // If we have an upstream extended TLV on the selected port, copy cascade hops
+            if let Some(upstream_ext) = self.selected_port.and_then(|p| self.port_ext_ql.get(&p)) {
+                ext_tlv.mixed_network = upstream_ext.mixed_network;
+                ext_tlv.cascaded_eeec_count = upstream_ext.cascaded_eeec_count.saturating_add(1);
+                ext_tlv.cascaded_eprtc_count = upstream_ext.cascaded_eprtc_count;
+            }
+            pkt.extended_ql = Some(ext_tlv);
+        }
+        pkt
     }
 }

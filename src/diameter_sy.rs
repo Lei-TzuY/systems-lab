@@ -476,6 +476,22 @@ impl OcsSyEngine {
     pub fn terminate_session(&mut self, session_id: &str) -> bool {
         self.active_sessions.remove(session_id).is_some()
     }
+
+    /// Returns the number of currently active Sy sessions on the OCS.
+    pub fn active_session_count(&self) -> usize {
+        self.active_sessions.len()
+    }
+
+    /// Unsubscribes an active session from a specific policy counter.
+    pub fn unsubscribe_counter(&mut self, session_id: &str, counter_id: &str) -> bool {
+        if let Some((_, list)) = self.active_sessions.get_mut(session_id) {
+            if let Some(pos) = list.iter().position(|c| c == counter_id) {
+                list.remove(pos);
+                return true;
+            }
+        }
+        false
+    }
 }
 
 /// PCRF Sy Client Engine.
@@ -535,5 +551,29 @@ impl PcrfSyClient {
             .get(session_id)
             .and_then(|c| c.get(counter_id))
             .map(|s| s.as_str())
+    }
+
+    /// Creates an Intermediate Spending-Limit-Request (SLR) to modify subscribed policy counters.
+    pub fn create_intermediate_slr(
+        &mut self,
+        session_id: &str,
+        subscriber_id: &str,
+        counters: &[&str],
+    ) -> SpendingLimitRequest {
+        let mut slr = SpendingLimitRequest::new(session_id, SlRequestType::IntermediateRequest, subscriber_id);
+        for &c in counters {
+            slr = slr.with_counter(c);
+        }
+        slr
+    }
+
+    /// Terminates a local session in the PCRF cache.
+    pub fn terminate_session(&mut self, session_id: &str) -> bool {
+        self.session_counter_cache.remove(session_id).is_some()
+    }
+
+    /// Returns the number of active sessions tracked by the PCRF.
+    pub fn active_session_count(&self) -> usize {
+        self.session_counter_cache.len()
     }
 }
