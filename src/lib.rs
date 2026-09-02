@@ -266,6 +266,7 @@ pub mod ptp_telecom;
 pub mod ptp_telecom_bc;
 pub mod ptp_telecom_gm_quality;
 pub mod ptp_telecom_tc;
+pub mod ptp_telecom_dual_plane;
 pub mod ptp_synce_hybrid;
 pub mod ptp_time_error;
 pub mod qos;
@@ -1331,3 +1332,8 @@ pub use ptp_apts::{
 pub use ptp_synce_hybrid::{
     HybridAdjustment, HybridSyncConfig, HybridSyncEngine, HybridSyncMetrics, HybridSyncMode,
 };
+pub use ptp_telecom_dual_plane::{
+    DualPlaneConfig, DualPlaneEngine, DualPlaneMetrics, PlaneDataset, PtpPlaneState,
+    ProtectionSwitchMode, PtpPlaneId, SwitchReason,
+};
+
