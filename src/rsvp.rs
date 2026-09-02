@@ -76,6 +76,7 @@ pub enum RsvpError {
     PacketTooShort(usize),
     InvalidVersion(u8),
     InvalidLength,
+    InvalidChecksum,
 }
 
 impl fmt::Display for RsvpError {
@@ -84,14 +85,45 @@ impl fmt::Display for RsvpError {
             RsvpError::PacketTooShort(l) => write!(f, "RSVP packet too short ({} bytes)", l),
             RsvpError::InvalidVersion(v) => write!(f, "Unsupported RSVP version: {}", v),
             RsvpError::InvalidLength => write!(f, "Invalid RSVP length"),
+            RsvpError::InvalidChecksum => write!(f, "Invalid RSVP checksum"),
         }
     }
 }
 
 impl std::error::Error for RsvpError {}
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RsvpSerializeError {
+    ObjectTooLong { length: usize, max: usize },
+    MessageTooLong { length: usize, max: usize },
+}
+
+impl fmt::Display for RsvpSerializeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RsvpSerializeError::ObjectTooLong { length, max } => write!(
+                f,
+                "RSVP object requires {} bytes, exceeding the {}-byte length field limit",
+                length, max
+            ),
+            RsvpSerializeError::MessageTooLong { length, max } => write!(
+                f,
+                "RSVP message requires {} bytes, exceeding the {}-byte length field limit",
+                length, max
+            ),
+        }
+    }
+}
+
+impl std::error::Error for RsvpSerializeError {}
+
 impl RsvpObject {
     pub fn serialize(&self) -> Vec<u8> {
+        self.try_serialize()
+            .expect("RSVP object must fit the 16-bit object length field")
+    }
+
+    pub fn try_serialize(&self) -> Result<Vec<u8>, RsvpSerializeError> {
         let mut body = Vec::new();
         let (class_num, c_type) = match self {
             RsvpObject::Session {
@@ -100,8 +132,8 @@ impl RsvpObject {
                 ext_tunnel_id,
             } => {
                 body.extend_from_slice(&dest_ip.0);
-                body.extend_from_slice(&tunnel_id.to_be_bytes());
                 body.extend_from_slice(&[0, 0]); // Must be zero
+                body.extend_from_slice(&tunnel_id.to_be_bytes());
                 body.extend_from_slice(&ext_tunnel_id.0);
                 (RSVP_CLASS_SESSION, 7) // LSP_TUNNEL_IPv4
             }
@@ -130,8 +162,8 @@ impl RsvpObject {
             }
             RsvpObject::SenderTemplate { src_ip, lsp_id } => {
                 body.extend_from_slice(&src_ip.0);
+                body.extend_from_slice(&[0, 0]); // Must be zero
                 body.extend_from_slice(&lsp_id.to_be_bytes());
-                body.extend_from_slice(&[0, 0]);
                 (RSVP_CLASS_SENDER_TEMPLATE, 7)
             }
             RsvpObject::SenderTspec {
@@ -152,16 +184,23 @@ impl RsvpObject {
             }
         };
 
-        let obj_len = (body.len() + 4) as u16;
-        let mut buf = Vec::new();
+        while body.len() % 4 != 0 {
+            body.push(0x00);
+        }
+        let obj_len = body.len().checked_add(4).unwrap_or(usize::MAX);
+        if obj_len > u16::MAX as usize {
+            return Err(RsvpSerializeError::ObjectTooLong {
+                length: obj_len,
+                max: u16::MAX as usize,
+            });
+        }
+        let obj_len = obj_len as u16;
+        let mut buf = Vec::with_capacity(obj_len as usize);
         buf.extend_from_slice(&obj_len.to_be_bytes());
         buf.push(class_num);
         buf.push(c_type);
         buf.extend_from_slice(&body);
-        while buf.len() % 4 != 0 {
-            buf.push(0x00);
-        }
-        buf
+        Ok(buf)
     }
 
     pub fn parse(data: &[u8]) -> Option<(Self, usize)> {
@@ -169,7 +208,7 @@ impl RsvpObject {
             return None;
         }
         let obj_len = u16::from_be_bytes([data[0], data[1]]) as usize;
-        if obj_len < 4 || obj_len > data.len() {
+        if obj_len < 4 || obj_len > data.len() || obj_len % 4 != 0 {
             return None;
         }
 
@@ -178,9 +217,12 @@ impl RsvpObject {
         let body = &data[4..obj_len];
 
         let obj = match (class_num, c_type) {
-            (RSVP_CLASS_SESSION, 7) if body.len() >= 12 => {
+            (RSVP_CLASS_SESSION, 7) => {
+                if body.len() != 12 {
+                    return None;
+                }
                 let dest_ip = Ipv4Address([body[0], body[1], body[2], body[3]]);
-                let tunnel_id = u16::from_be_bytes([body[4], body[5]]);
+                let tunnel_id = u16::from_be_bytes([body[6], body[7]]);
                 let ext_tunnel_id = Ipv4Address([body[8], body[9], body[10], body[11]]);
                 RsvpObject::Session {
                     dest_ip,
@@ -191,39 +233,91 @@ impl RsvpObject {
             (RSVP_CLASS_EXPLICIT_ROUTE, 1) => {
                 let mut hops = Vec::new();
                 let mut offset = 0;
-                while offset + 8 <= body.len() {
-                    let loose = (body[offset] & 0x80) != 0;
-                    let hop_ip = Ipv4Address([
-                        body[offset + 2],
-                        body[offset + 3],
-                        body[offset + 4],
-                        body[offset + 5],
-                    ]);
-                    hops.push((loose, hop_ip));
+                let mut needs_raw_preservation = false;
+
+                while offset < body.len() {
+                    if body.len() - offset < 4 {
+                        return None;
+                    }
+
+                    let sub_type = body[offset] & 0x7f;
                     let sub_len = body[offset + 1] as usize;
-                    offset += if sub_len >= 8 { sub_len } else { 8 };
+                    if sub_len < 4 || sub_len % 4 != 0 || sub_len > body.len() - offset {
+                        return None;
+                    }
+
+                    if sub_type == 1 {
+                        if sub_len != 8 || body[offset + 6] > 32 {
+                            return None;
+                        }
+                        if body[offset + 6] == 32 {
+                            let loose = (body[offset] & 0x80) != 0;
+                            let hop_ip = Ipv4Address([
+                                body[offset + 2],
+                                body[offset + 3],
+                                body[offset + 4],
+                                body[offset + 5],
+                            ]);
+                            hops.push((loose, hop_ip));
+                        } else {
+                            needs_raw_preservation = true;
+                        }
+                    } else {
+                        needs_raw_preservation = true;
+                    }
+
+                    offset += sub_len;
                 }
-                RsvpObject::ExplicitRoute { hops }
+
+                if needs_raw_preservation {
+                    RsvpObject::Raw {
+                        class_num,
+                        c_type,
+                        body: body.to_vec(),
+                    }
+                } else {
+                    RsvpObject::ExplicitRoute { hops }
+                }
             }
-            (RSVP_CLASS_LABEL_REQUEST, 1) if body.len() >= 4 => {
+            (RSVP_CLASS_LABEL_REQUEST, 1) => {
+                if body.len() != 4 {
+                    return None;
+                }
                 let l3pid = u16::from_be_bytes([body[2], body[3]]);
                 RsvpObject::LabelRequest { l3pid }
             }
-            (RSVP_CLASS_LABEL, 1) if body.len() >= 4 => {
+            (RSVP_CLASS_LABEL, 1) => {
+                if body.len() != 4 {
+                    return None;
+                }
                 let label = u32::from_be_bytes([body[0], body[1], body[2], body[3]]);
                 RsvpObject::Label { label }
             }
-            (RSVP_CLASS_SENDER_TEMPLATE, 7) if body.len() >= 8 => {
+            (RSVP_CLASS_SENDER_TEMPLATE, 7) => {
+                if body.len() != 8 {
+                    return None;
+                }
                 let src_ip = Ipv4Address([body[0], body[1], body[2], body[3]]);
-                let lsp_id = u16::from_be_bytes([body[4], body[5]]);
+                let lsp_id = u16::from_be_bytes([body[6], body[7]]);
                 RsvpObject::SenderTemplate { src_ip, lsp_id }
             }
-            (RSVP_CLASS_SENDER_TSPEC, 2) if body.len() >= 8 => {
-                let bandwidth_bps = u32::from_be_bytes([body[0], body[1], body[2], body[3]]);
-                let peak_rate_bps = u32::from_be_bytes([body[4], body[5], body[6], body[7]]);
-                RsvpObject::SenderTspec {
-                    bandwidth_bps,
-                    peak_rate_bps,
+            (RSVP_CLASS_SENDER_TSPEC, 2) => {
+                if body.len() < 8 {
+                    return None;
+                }
+                if body.len() > 8 {
+                    RsvpObject::Raw {
+                        class_num,
+                        c_type,
+                        body: body.to_vec(),
+                    }
+                } else {
+                    let bandwidth_bps = u32::from_be_bytes([body[0], body[1], body[2], body[3]]);
+                    let peak_rate_bps = u32::from_be_bytes([body[4], body[5], body[6], body[7]]);
+                    RsvpObject::SenderTspec {
+                        bandwidth_bps,
+                        peak_rate_bps,
+                    }
                 }
             }
             _ => RsvpObject::Raw {
@@ -233,9 +327,7 @@ impl RsvpObject {
             },
         };
 
-        // Align to 4-byte word boundary
-        let consumed = (obj_len + 3) & !3;
-        Some((obj, consumed.min(data.len())))
+        Some((obj, obj_len))
     }
 }
 
@@ -307,13 +399,30 @@ impl RsvpPacket {
     }
 
     pub fn serialize(&self) -> Vec<u8> {
+        self.try_serialize()
+            .expect("RSVP packet must fit the 16-bit message length field")
+    }
+
+    pub fn try_serialize(&self) -> Result<Vec<u8>, RsvpSerializeError> {
         let mut obj_bytes = Vec::new();
         for obj in &self.objects {
-            obj_bytes.extend_from_slice(&obj.serialize());
+            let encoded = obj.try_serialize()?;
+            let message_len = 8usize
+                .checked_add(obj_bytes.len())
+                .and_then(|len| len.checked_add(encoded.len()))
+                .unwrap_or(usize::MAX);
+            if message_len > u16::MAX as usize {
+                return Err(RsvpSerializeError::MessageTooLong {
+                    length: message_len,
+                    max: u16::MAX as usize,
+                });
+            }
+            obj_bytes.extend_from_slice(&encoded);
         }
 
-        let total_len = (8 + obj_bytes.len()) as u16;
-        let mut buf = Vec::new();
+        let total_len = 8 + obj_bytes.len();
+        let total_len = total_len as u16;
+        let mut buf = Vec::with_capacity(total_len as usize);
         let b0 = (self.header.version << 4) | (self.header.flags & 0x0F);
         buf.push(b0);
         buf.push(self.header.msg_type);
@@ -323,11 +432,14 @@ impl RsvpPacket {
         buf.extend_from_slice(&total_len.to_be_bytes());
         buf.extend_from_slice(&obj_bytes);
 
-        // Compute 16-bit Internet checksum
+        // Compute 16-bit Internet checksum. RFC 2205 reserves all-zero to mean
+        // that no checksum was transmitted, so use the equivalent 0xFFFF zero
+        // representation if the computed checksum is 0x0000.
         let csum = crate::checksum::compute_checksum(&buf);
+        let csum = if csum == 0 { 0xFFFF } else { csum };
         buf[2..4].copy_from_slice(&csum.to_be_bytes());
 
-        buf
+        Ok(buf)
     }
 
     pub fn parse(data: &[u8]) -> Result<Self, RsvpError> {
@@ -346,8 +458,11 @@ impl RsvpPacket {
         let send_ttl = data[4];
         let length = u16::from_be_bytes([data[6], data[7]]) as usize;
 
-        if length > data.len() {
+        if length < 8 || length > data.len() {
             return Err(RsvpError::InvalidLength);
+        }
+        if checksum != 0 && !crate::checksum::verify_checksum(&data[..length]) {
+            return Err(RsvpError::InvalidChecksum);
         }
 
         let mut objects = Vec::new();
@@ -358,7 +473,7 @@ impl RsvpPacket {
                 objects.push(obj);
                 offset += consumed;
             } else {
-                break;
+                return Err(RsvpError::InvalidLength);
             }
         }
 
@@ -379,6 +494,21 @@ impl RsvpPacket {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn rsvp_object(class_num: u8, c_type: u8, body: &[u8]) -> Vec<u8> {
+        assert_eq!(body.len() % 4, 0);
+        let obj_len = (body.len() + 4) as u16;
+        let mut data = Vec::with_capacity(obj_len as usize);
+        data.extend_from_slice(&obj_len.to_be_bytes());
+        data.push(class_num);
+        data.push(c_type);
+        data.extend_from_slice(body);
+        data
+    }
+
+    fn ero_object(body: &[u8]) -> Vec<u8> {
+        rsvp_object(RSVP_CLASS_EXPLICIT_ROUTE, 1, body)
+    }
 
     #[test]
     fn test_rsvp_path_and_resv_signaling() {
@@ -415,5 +545,132 @@ mod tests {
         } else {
             panic!("Expected Label object");
         }
+    }
+
+    #[test]
+    fn test_rsvp_fixed_objects_require_exact_body_lengths() {
+        let cases = [
+            (RSVP_CLASS_SESSION, 7, 12usize),
+            (RSVP_CLASS_LABEL_REQUEST, 1, 4usize),
+            (RSVP_CLASS_LABEL, 1, 4usize),
+            (RSVP_CLASS_SENDER_TEMPLATE, 7, 8usize),
+        ];
+
+        for (class_num, c_type, expected_len) in cases {
+            let exact = rsvp_object(class_num, c_type, &vec![0; expected_len]);
+            assert!(RsvpObject::parse(&exact).is_some());
+
+            let short = rsvp_object(class_num, c_type, &vec![0; expected_len - 4]);
+            assert!(RsvpObject::parse(&short).is_none());
+
+            let long = rsvp_object(class_num, c_type, &vec![0; expected_len + 4]);
+            assert!(RsvpObject::parse(&long).is_none());
+        }
+    }
+
+    #[test]
+    fn test_rsvp_sender_tspec_preserves_unmodeled_tail_as_raw() {
+        let body = vec![0, 0, 0, 1, 0, 0, 0, 2, 0xaa, 0xbb, 0xcc, 0xdd];
+        let raw = rsvp_object(RSVP_CLASS_SENDER_TSPEC, 2, &body);
+        let (parsed, consumed) = RsvpObject::parse(&raw).unwrap();
+
+        assert_eq!(consumed, raw.len());
+        assert_eq!(
+            parsed,
+            RsvpObject::Raw {
+                class_num: RSVP_CLASS_SENDER_TSPEC,
+                c_type: 2,
+                body: body.clone(),
+            }
+        );
+        assert_eq!(parsed.serialize(), raw);
+    }
+
+    #[test]
+    fn test_rsvp_sender_tspec_rejects_body_shorter_than_modeled_fields() {
+        let raw = rsvp_object(RSVP_CLASS_SENDER_TSPEC, 2, &[0; 4]);
+        assert!(RsvpObject::parse(&raw).is_none());
+    }
+
+    #[test]
+    fn test_rsvp_ero_rejects_ipv4_subobject_length_below_eight() {
+        let raw = ero_object(&[1, 4, 10, 0, 0, 1, 32, 0]);
+        assert!(RsvpObject::parse(&raw).is_none());
+    }
+
+    #[test]
+    fn test_rsvp_ero_rejects_non_word_aligned_subobject_length() {
+        let raw = ero_object(&[1, 6, 10, 0, 0, 1, 32, 0]);
+        assert!(RsvpObject::parse(&raw).is_none());
+    }
+
+    #[test]
+    fn test_rsvp_ero_rejects_subobject_length_beyond_object_body() {
+        let raw = ero_object(&[1, 12, 10, 0, 0, 1, 32, 0]);
+        assert!(RsvpObject::parse(&raw).is_none());
+    }
+
+    #[test]
+    fn test_rsvp_ero_rejects_trailing_partial_subobject() {
+        let raw = ero_object(&[1, 8, 10, 0, 0, 1, 32, 0, 1, 8, 10, 0]);
+        assert!(RsvpObject::parse(&raw).is_none());
+    }
+
+    #[test]
+    fn test_rsvp_ero_rejects_invalid_ipv4_prefix_length() {
+        let raw = ero_object(&[1, 8, 10, 0, 0, 1, 33, 0]);
+        assert!(RsvpObject::parse(&raw).is_none());
+    }
+
+    #[test]
+    fn test_rsvp_ero_preserves_unsupported_subobjects_as_raw() {
+        let body = vec![2, 8, 0, 0, 0, 0, 0, 0];
+        let raw = ero_object(&body);
+        let (parsed, consumed) = RsvpObject::parse(&raw).unwrap();
+
+        assert_eq!(consumed, raw.len());
+        assert_eq!(
+            parsed,
+            RsvpObject::Raw {
+                class_num: RSVP_CLASS_EXPLICIT_ROUTE,
+                c_type: 1,
+                body,
+            }
+        );
+    }
+
+    #[test]
+    fn test_rsvp_ero_preserves_non_host_ipv4_prefix_as_raw() {
+        let body = vec![1, 8, 192, 0, 2, 0, 24, 0];
+        let raw = ero_object(&body);
+        let (parsed, consumed) = RsvpObject::parse(&raw).unwrap();
+
+        assert_eq!(consumed, raw.len());
+        assert_eq!(
+            parsed,
+            RsvpObject::Raw {
+                class_num: RSVP_CLASS_EXPLICIT_ROUTE,
+                c_type: 1,
+                body: body.clone(),
+            }
+        );
+        assert_eq!(parsed.serialize(), raw);
+    }
+
+    #[test]
+    fn test_rsvp_ero_valid_ipv4_subobjects_preserve_loose_bit() {
+        let raw = ero_object(&[1, 8, 10, 0, 0, 1, 32, 0, 0x81, 8, 10, 0, 0, 2, 32, 0]);
+        let (parsed, consumed) = RsvpObject::parse(&raw).unwrap();
+
+        assert_eq!(consumed, raw.len());
+        assert_eq!(
+            parsed,
+            RsvpObject::ExplicitRoute {
+                hops: vec![
+                    (false, Ipv4Address::new(10, 0, 0, 1)),
+                    (true, Ipv4Address::new(10, 0, 0, 2)),
+                ],
+            }
+        );
     }
 }

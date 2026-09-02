@@ -1,0 +1,288 @@
+name: SNMP Fuzz Smoke
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "fuzz/**"
+      - "src/snmp.rs"
+      - "src/bin/promote_snmp_fuzz_artifact.rs"
+      - ".github/workflows/snmp-fuzz.yml"
+  pull_request:
+    branches: [ main ]
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "fuzz/**"
+      - "src/snmp.rs"
+      - "src/bin/promote_snmp_fuzz_artifact.rs"
+      - ".github/workflows/snmp-fuzz.yml"
+  schedule:
+    - cron: "43 5 * * 3"
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: "libFuzzer iterations per SNMP target"
+        required: true
+        default: "10000"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: snmp-fuzz-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  fuzz-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - snmp_message_parse
+          - snmp_ber_primitives
+    env:
+      FUZZ_RUNS: ${{ github.event_name == 'workflow_dispatch' && inputs.runs || (github.event_name == 'schedule' && '100000' || '1000') }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Set up nightly Rust
+        uses: dtolnay/rust-toolchain@7c8d7d138f5c09cef361f8214cf96882cd029cdb # nightly
+      - name: Install cargo-fuzz 0.13.2
+        run: cargo install cargo-fuzz --version 0.13.2 --locked
+      - name: Validate fuzz run count
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "${FUZZ_RUNS}" =~ ^[1-9][0-9]{0,6}$ ]] || (( 10#${FUZZ_RUNS} > 1000000 )); then
+            echo "invalid fuzz run count: ${FUZZ_RUNS}; expected an integer from 1 to 1000000" >&2
+            exit 1
+          fi
+      - name: Prepare artifact directory
+        shell: bash
+        run: |
+          artifact_dir="fuzz-artifacts/${{ matrix.target }}"
+          mkdir -p "${artifact_dir}"
+          printf '%s\n' "1" > "${artifact_dir}/.fuzz-schema-version"
+          printf '%s\n' "${{ matrix.target }}" > "${artifact_dir}/.fuzz-target"
+      - name: Smoke fuzz ${{ matrix.target }}
+        run: >-
+          cargo fuzz run ${{ matrix.target }} --
+          -runs=${FUZZ_RUNS}
+          -max_len=4096
+          -timeout=10
+          -dict=fuzz/snmp.dict
+          -artifact_prefix="fuzz-artifacts/${{ matrix.target }}/"
+      - name: Minimize crash artifacts
+        id: minimize
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="${{ matrix.target }}"
+          raw_dir="fuzz-artifacts/${target}"
+          minimized_dir="${raw_dir}/minimized"
+
+          if [ -L "${minimized_dir}" ] || { [ -e "${minimized_dir}" ] && [ ! -d "${minimized_dir}" ]; }; then
+            echo "invalid minimized artifact directory: ${minimized_dir}" >&2
+            exit 1
+          fi
+          mkdir -p "${minimized_dir}"
+
+          unexpected_entry="$(find "${raw_dir}" -mindepth 1 -maxdepth 1 ! -type f ! -path "${minimized_dir}" -print -quit)"
+          if [ -n "${unexpected_entry}" ]; then
+            echo "unexpected top-level fuzz artifact entry: ${unexpected_entry}" >&2
+            exit 1
+          fi
+
+          verify_artifact_digest() {
+            artifact="$1"
+            name="$(basename "${artifact}")"
+            digest=""
+            case "${name}" in
+              crash-*|timeout-*|oom-*|leak-*|slow-unit-*)
+                for prefix in crash timeout oom leak slow-unit; do
+                  case "${name}" in
+                    "${prefix}-"*)
+                      digest="${name#${prefix}-}"
+                      break
+                      ;;
+                  esac
+                done
+                ;;
+              *)
+                echo "unexpected fuzz artifact file: ${artifact}" >&2
+                return 1
+                ;;
+            esac
+
+            case "${digest}" in
+              ''|*[!0-9a-f]* )
+                echo "invalid libFuzzer artifact digest: ${artifact}" >&2
+                return 1
+                ;;
+            esac
+            if [ "${#digest}" -ne 40 ]; then
+              echo "invalid libFuzzer artifact digest length: ${artifact}" >&2
+              return 1
+            fi
+
+            actual="$(sha1sum "${artifact}" | awk '{print $1}')"
+            if [ "${actual}" != "${digest}" ]; then
+              echo "libFuzzer artifact digest mismatch: ${artifact}" >&2
+              return 1
+            fi
+
+            size="$(wc -c < "${artifact}")"
+            if [ "${size}" -eq 0 ]; then
+              echo "raw fuzz artifact must not be empty: ${artifact}" >&2
+              return 1
+            fi
+            if [ "${size}" -gt 4096 ]; then
+              echo "raw fuzz artifact exceeds max input length: ${artifact}: ${size} > 4096" >&2
+              return 1
+            fi
+          }
+
+          has_artifacts=false
+          declare -A raw_digests=()
+          while IFS= read -r -d '' artifact; do
+            verify_artifact_digest "${artifact}"
+            raw_digest="$(sha1sum "${artifact}" | awk '{print $1}')"
+            if [[ -n "${raw_digests[${raw_digest}]+present}" ]]; then
+              echo "duplicate raw fuzz artifact content: ${artifact}; SHA-1 ${raw_digest}" >&2
+              exit 1
+            fi
+            raw_digests["${raw_digest}"]="${artifact}"
+            has_artifacts=true
+          done < <(find "${raw_dir}" -maxdepth 1 -type f ! -name '.fuzz-target' ! -name '.fuzz-schema-version' -print0)
+
+          echo "has_artifacts=${has_artifacts}" >> "${GITHUB_OUTPUT}"
+          if [ "${has_artifacts}" != true ]; then
+            echo "no libFuzzer failure artifacts were produced; skipping minimization"
+            exit 0
+          fi
+
+          while IFS= read -r -d '' artifact; do
+            if ! timeout --signal=TERM --kill-after=5s 60s \
+              cargo fuzz tmin "${target}" "${artifact}" -- -max_len=4096; then
+              echo "minimization did not complete for ${artifact}; retaining raw artifact" >&2
+            fi
+          done < <(find "${raw_dir}" -maxdepth 1 -type f ! -name '.fuzz-target' ! -name '.fuzz-schema-version' -print0)
+
+          while IFS= read -r -d '' artifact; do
+            verify_artifact_digest "${artifact}"
+          done < <(find "${raw_dir}" -maxdepth 1 -type f ! -name '.fuzz-target' ! -name '.fuzz-schema-version' -print0)
+
+          if [ -d "fuzz/artifacts/${target}" ]; then
+            find "fuzz/artifacts/${target}" -maxdepth 1 -type f -exec cp {} "${minimized_dir}/" \;
+          fi
+
+          unexpected_entry="$(find "${minimized_dir}" -mindepth 1 -maxdepth 1 ! -type f -print -quit)"
+          if [ -n "${unexpected_entry}" ]; then
+            echo "unexpected minimized artifact entry: ${unexpected_entry}" >&2
+            exit 1
+          fi
+
+          declare -A minimized_digests=()
+          while IFS= read -r -d '' artifact; do
+            name="$(basename "${artifact}")"
+            case "${name}" in
+              minimized-from-*)
+                digest="${name#minimized-from-}"
+                ;;
+              *)
+                echo "unexpected minimized fuzz artifact name: ${artifact}" >&2
+                exit 1
+                ;;
+            esac
+
+            source=""
+            for prefix in crash timeout oom leak slow-unit; do
+              candidate="${raw_dir}/${prefix}-${digest}"
+              if [ -f "${candidate}" ]; then
+                source="${candidate}"
+                break
+              fi
+            done
+            if [ -z "${source}" ]; then
+              echo "minimized artifact has no matching raw failure: ${artifact}" >&2
+              exit 1
+            fi
+            verify_artifact_digest "${source}"
+
+            size="$(wc -c < "${artifact}")"
+            if [ "${size}" -eq 0 ]; then
+              echo "minimized artifact must not be empty: ${artifact}" >&2
+              exit 1
+            fi
+            if [ "${size}" -gt 4096 ]; then
+              echo "minimized artifact exceeds max fuzz input length: ${artifact}: ${size} > 4096" >&2
+              exit 1
+            fi
+
+            source_size="$(wc -c < "${source}")"
+            if [ "${size}" -gt "${source_size}" ]; then
+              echo "minimized artifact is larger than raw failure: ${artifact}: ${size} > ${source_size}" >&2
+              exit 1
+            fi
+
+            minimized_digest="$(sha1sum "${artifact}" | awk '{print $1}')"
+            replay_log="$(mktemp)"
+            set +e
+            timeout --signal=TERM --kill-after=5s 30s \
+              cargo fuzz run "${target}" "${artifact}" -- \
+              -runs=1 \
+              -max_len=4096 \
+              -timeout=10 \
+              -error_exitcode=77 \
+              -timeout_exitcode=70 \
+              -oom_exitcode=71 \
+              >"${replay_log}" 2>&1
+            replay_status=$?
+            set -e
+
+            case "${replay_status}" in
+              70|71|77)
+                ;;
+              0)
+                echo "minimized artifact no longer reproduces a fuzz failure: ${artifact}" >&2
+                cat "${replay_log}" >&2
+                rm -f "${replay_log}"
+                exit 1
+                ;;
+              *)
+                echo "minimized artifact replay exited unexpectedly: ${artifact}; status ${replay_status}" >&2
+                cat "${replay_log}" >&2
+                rm -f "${replay_log}"
+                exit 1
+                ;;
+            esac
+            rm -f "${replay_log}"
+
+            replayed_digest="$(sha1sum "${artifact}" | awk '{print $1}')"
+            if [ "${replayed_digest}" != "${minimized_digest}" ]; then
+              echo "minimized artifact changed during replay: ${artifact}" >&2
+              exit 1
+            fi
+            if [[ -n "${minimized_digests[${minimized_digest}]+present}" ]]; then
+              echo "duplicate minimized artifact content: ${artifact}; SHA-1 ${minimized_digest}" >&2
+              exit 1
+            fi
+            minimized_digests["${minimized_digest}"]="${artifact}"
+          done < <(find "${minimized_dir}" -maxdepth 1 -type f -print0)
+      - name: Upload crash artifacts
+        if: failure() && steps.minimize.outputs.has_artifacts == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: snmp-fuzz-${{ matrix.target }}-${{ github.sha }}
+          path: fuzz-artifacts/${{ matrix.target }}/
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 14

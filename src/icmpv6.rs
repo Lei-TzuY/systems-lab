@@ -197,9 +197,11 @@ pub struct RouterAdvertisement {
     pub router_lifetime: u16,
     pub reachable_time: u32,
     pub retrans_timer: u32,
+    /// RFC 4861 MTU option, when present. Link-specific validity is applied
+    /// by the receiving interface rather than by the wire parser.
+    pub mtu: Option<u32>,
     pub prefixes: Vec<PrefixInformationOption>,
     pub routes: Vec<RouteInformationOption>,
-    pub mtu: Option<u32>,
     pub rdnss: Vec<RdnssOption>,
     pub dnssl: Vec<DnsslOption>,
 }
@@ -882,6 +884,36 @@ impl<'a> Icmpv6Packet<'a> {
         )
     }
 
+    /// Builds a Router Advertisement with RFC 4191 RIOs and an optional RFC 4861 MTU
+    /// option. Kept as the narrower entry point onto `build_router_advertisement_full`,
+    /// which additionally carries the RFC 8106 RDNSS and DNSSL options.
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_router_advertisement_with_routes_and_mtu(
+        src_ip: Ipv6Address,
+        dst_ip: Ipv6Address,
+        current_hop_limit: u8,
+        router_lifetime: u16,
+        preference: RouterPreference,
+        prefixes: &[PrefixInformationOption],
+        routes: &[RouteInformationOption],
+        source_mac: Option<MacAddress>,
+        mtu: Option<u32>,
+    ) -> Vec<u8> {
+        Self::build_router_advertisement_full(
+            src_ip,
+            dst_ip,
+            current_hop_limit,
+            router_lifetime,
+            preference,
+            prefixes,
+            routes,
+            mtu,
+            &[],
+            &[],
+            source_mac,
+        )
+    }
+
     /// Builds a full RFC 4861 / RFC 4191 / RFC 8106 Router Advertisement with MTU, RDNSS, and DNSSL options.
     pub fn build_router_advertisement_full(
         src_ip: Ipv6Address,
@@ -1170,9 +1202,9 @@ impl RouterAdvertisement {
         let router_lifetime = u16::from_be_bytes([payload[2], payload[3]]);
         let reachable_time = u32::from_be_bytes(payload[4..8].try_into().ok()?);
         let retrans_timer = u32::from_be_bytes(payload[8..12].try_into().ok()?);
+        let mut mtu = None;
         let mut prefixes = Vec::new();
         let mut routes = Vec::new();
-        let mut mtu = None;
         let mut rdnss = Vec::new();
         let mut dnssl = Vec::new();
         let mut offset = 12usize;
@@ -1215,6 +1247,15 @@ impl RouterAdvertisement {
                     valid_lifetime,
                     preferred_lifetime,
                 ));
+            } else if option_type == NDP_OPT_MTU {
+                // RFC 4861 defines MTU as exactly one 8-octet unit. The RA
+                // validity rules require only non-zero option lengths, so a
+                // malformed MTU option is ignored without discarding otherwise
+                // usable information from the advertisement.
+                if option_len == 8 {
+                    let option = &payload[offset..offset + option_len];
+                    mtu = Some(u32::from_be_bytes(option[4..8].try_into().ok()?));
+                }
             } else if option_type == NDP_OPT_ROUTE_INFORMATION {
                 let option = &payload[offset..offset + option_len];
                 let prefix_length = option[2];
@@ -1237,12 +1278,6 @@ impl RouterAdvertisement {
                         preference,
                         route_lifetime,
                     ));
-                }
-            } else if option_type == NDP_OPT_MTU {
-                if option_len == 8 {
-                    let option = &payload[offset..offset + option_len];
-                    let val = u32::from_be_bytes(option[4..8].try_into().ok()?);
-                    mtu = Some(val);
                 }
             } else if option_type == NDP_OPT_RDNSS {
                 if units >= 3 && units % 2 == 1 {
@@ -1293,9 +1328,9 @@ impl RouterAdvertisement {
             router_lifetime,
             reachable_time,
             retrans_timer,
+            mtu,
             prefixes,
             routes,
-            mtu,
             rdnss,
             dnssl,
         })
