@@ -83,6 +83,7 @@ pub mod diameter_sgd;
 pub mod diameter_sh;
 pub mod diameter_slh;
 pub mod diameter_swm;
+pub mod diameter_sy;
 pub mod diameter_zh;
 pub mod dns;
 pub mod eigrp;
@@ -574,6 +575,12 @@ pub use diameter_zh::{
     BsfZhEngine, DIAMETER_APPLICATION_ZH, DIAMETER_CMD_MULTIMEDIA_AUTH, GbaAuthVector,
     GbaSubscriberProfile, GbaType, ZhAvp, ZhMessage,
 };
+pub use diameter_sy::{
+    OcsSyEngine, PcrfSyClient, PolicyCounterStatusReport, SlRequestType,
+    SpendingLimitAnswer, SpendingLimitRequest, SpendingStatusNotificationAnswer,
+    SpendingStatusNotificationRequest, DIAMETER_APPLICATION_SY, DIAMETER_CMD_SPENDING_LIMIT,
+    DIAMETER_CMD_SPENDING_STATUS_NOTIFICATION,
+};
 pub use dns::{
     DnsAnswer, DnsCache, DnsError, DnsMessage, DnsQuestion, DnsRecordData, DNS_CLASS_IN, DNS_PORT,
     DNS_RCODE_FORMERR, DNS_RCODE_NOERROR, DNS_RCODE_NOTIMP, DNS_RCODE_NXDOMAIN, DNS_RCODE_REFUSED,
@@ -1035,7 +1042,11 @@ pub mod ti_lfa_reexport {
 }
 pub use stp::{BridgeId, STP_MULTICAST_MAC, StpBpdu, StpBridgeEngine, StpPortRole, StpPortState};
 pub use stun::{STUN_MAGIC_COOKIE, STUN_PORT, StunAttribute, StunPacket};
-pub use synce_esmc::{ESMC_SUBTYPE, QualityLevel, SyncEEsmcEngine, SyncEEsmcPacket};
+pub use synce_esmc::{
+    EnhancedQualityLevel, ExtendedQlTlv, PortSyncState, QualityLevel, QualityLevelOption2,
+    SyncEEsmcEngine, SyncEEsmcPacket, ESMC_SUBTYPE, EXTENDED_QL_TLV_LEN, TLV_TYPE_EXTENDED_QL,
+    TLV_TYPE_QL,
+};
 pub use syslog::{SYSLOG_UDP_PORT, SyslogCollector, SyslogFacility, SyslogMessage, SyslogSeverity};
 pub use tacacs::{TACACS_PORT, TacacsHeader, TacacsPacket, TacacsServer};
 pub use tas::{GclEntry, TimeAwareShaper};

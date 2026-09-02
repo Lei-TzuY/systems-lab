@@ -580,6 +580,7 @@ fn promote_batch(
     write_promotions(&promotions)
 }
 
+#[allow(dead_code)]
 fn promote(manifest_dir: &Path, target: Target, artifact: &Path) -> Result<PathBuf, String> {
     let promoted = promote_batch(manifest_dir, target, &[artifact.to_path_buf()])?;
     promoted

@@ -64,6 +64,19 @@ pub struct PtpPdvFloorFilter {
     pub samples: VecDeque<PtpTimestampSample>,
 }
 
+/// PTP Time Error Conformance Metrics (ITU-T G.8271 / G.8275.1 / G.8275.2)
+#[derive(Debug, Clone, PartialEq)]
+pub struct PtpTimeErrorMetrics {
+    /// Constant Time Error (cTE): Average phase offset across the measurement window (ns)
+    pub cte_ns: f64,
+    /// Dynamic Time Error (dTE): Peak-to-peak phase fluctuation around the mean (ns)
+    pub dte_peak_to_peak_ns: i64,
+    /// Maximum Absolute Time Error: max(|TE(t)|) across the observation interval (ns)
+    pub max_abs_te_ns: i64,
+    /// Sample count evaluated
+    pub sample_count: usize,
+}
+
 impl PtpPdvFloorFilter {
     pub fn new(window_size: usize, floor_threshold_percent: f64, max_cluster_spread_ns: i64) -> Self {
         Self {
@@ -85,6 +98,103 @@ impl PtpPdvFloorFilter {
     /// Reset filter history
     pub fn clear(&mut self) {
         self.samples.clear();
+    }
+
+    /// Computes Constant Time Error (cTE) and Dynamic Time Error (dTE) metrics
+    /// across the current sample window.
+    pub fn compute_time_error_metrics(&self) -> Option<PtpTimeErrorMetrics> {
+        let n = self.samples.len();
+        if n < 4 {
+            return None;
+        }
+
+        let offsets: Vec<i64> = self
+            .samples
+            .iter()
+            .map(|s| (s.forward_delay() - s.reverse_delay()) / 2)
+            .collect();
+
+        let sum: i64 = offsets.iter().sum();
+        let cte = sum as f64 / n as f64;
+
+        let min_offset = *offsets.iter().min().unwrap();
+        let max_offset = *offsets.iter().max().unwrap();
+        let dte_peak_to_peak = max_offset - min_offset;
+
+        let max_abs = offsets.iter().map(|&o| o.abs()).max().unwrap();
+
+        Some(PtpTimeErrorMetrics {
+            cte_ns: cte,
+            dte_peak_to_peak_ns: dte_peak_to_peak,
+            max_abs_te_ns: max_abs,
+            sample_count: n,
+        })
+    }
+
+    /// Filters extreme delay spikes using Interquartile Range (IQR) outlier detection.
+    pub fn filter_iqr_outliers(delays: &[i64]) -> Vec<i64> {
+        if delays.len() < 4 {
+            return delays.to_vec();
+        }
+        let mut sorted = delays.to_vec();
+        sorted.sort();
+
+        let n = sorted.len();
+        let q1 = sorted[n / 4];
+        let q3 = sorted[(3 * n) / 4];
+        let iqr = q3 - q1;
+        let upper_cutoff = q3.saturating_add(iqr.saturating_mul(3));
+
+        sorted.into_iter().filter(|&d| d <= upper_cutoff).collect()
+    }
+
+    /// Partitions sliding window into subwindows, selects the minimum-delay "lucky packet"
+    /// per subwindow, and aggregates to prevent sample bunching under bursty queuing.
+    pub fn compute_subwindow_lucky_estimate(&self, subwindow_count: usize) -> Option<PtpFilteredEstimate> {
+        let n = self.samples.len();
+        let k = subwindow_count.max(2);
+        if n < k * 2 {
+            return self.compute_estimate();
+        }
+
+        let chunk_size = n / k;
+        let sample_vec: Vec<&PtpTimestampSample> = self.samples.iter().collect();
+        let mut fwd_floors = Vec::with_capacity(k);
+        let mut rev_floors = Vec::with_capacity(k);
+
+        for chunk in sample_vec.chunks(chunk_size) {
+            if chunk.is_empty() {
+                continue;
+            }
+            let min_fwd = chunk.iter().map(|s| s.forward_delay()).min().unwrap();
+            let min_rev = chunk.iter().map(|s| s.reverse_delay()).min().unwrap();
+            fwd_floors.push(min_fwd);
+            rev_floors.push(min_rev);
+        }
+
+        if fwd_floors.is_empty() {
+            return None;
+        }
+
+        let fwd_avg = fwd_floors.iter().sum::<i64>() / fwd_floors.len() as i64;
+        let rev_avg = rev_floors.iter().sum::<i64>() / rev_floors.len() as i64;
+
+        let estimated_offset = (fwd_avg - rev_avg) / 2;
+        let mean_path_delay = (fwd_avg + rev_avg) / 2;
+
+        let fwd_spread = fwd_floors.iter().max().unwrap() - fwd_floors.iter().min().unwrap();
+        let rev_spread = rev_floors.iter().max().unwrap() - rev_floors.iter().min().unwrap();
+
+        Some(PtpFilteredEstimate {
+            forward_delay_floor_ns: fwd_avg,
+            reverse_delay_floor_ns: rev_avg,
+            mean_path_delay_ns: mean_path_delay,
+            estimated_offset_ns: estimated_offset,
+            forward_pdv_spread_ns: fwd_spread,
+            reverse_pdv_spread_ns: rev_spread,
+            floor_population_ratio: fwd_floors.len() as f64 / n as f64,
+            valid_samples_in_window: n,
+        })
     }
 
     /// Compute filtered phase offset and mean path delay using the window floor estimator
