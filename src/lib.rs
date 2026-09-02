@@ -269,6 +269,7 @@ pub mod ptp_telecom_tc;
 pub mod ptp_telecom_dual_plane;
 pub mod ptp_synce_hybrid;
 pub mod ptp_phc;
+pub mod ptp_5g_tdd_sync;
 pub mod ptp_time_error;
 pub mod qos;
 pub mod quic;
@@ -1339,5 +1340,9 @@ pub use ptp_telecom_dual_plane::{
 };
 pub use ptp_phc::{
     PhcPacketTagger, PhcTxTimestampEntry, PhcTxTimestampRing, PtpCrossTimestamp, PtpHardwareClock,
+};
+pub use ptp_5g_tdd_sync::{
+    AbsoluteCellSyncReport, AntennaPortMeasurement, BudgetDiagnosticReport, FronthaulBudgetPartition,
+    NrTddSyncCategory, NrTddSyncEngine, TaeEvaluationReport,
 };
 
