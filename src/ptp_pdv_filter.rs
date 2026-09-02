@@ -63,6 +63,7 @@ pub struct PtpPdvFloorFilter {
     pub max_cluster_spread_ns: i64,    // Max allowable spread within floor cluster
     pub samples: VecDeque<PtpTimestampSample>,
     pub asymmetry_compensation_ns: i64,
+    pub delay_asymmetry_ratio: Option<f64>,
     pub smoothed_offset_ns: Option<f64>,
 }
 
@@ -87,12 +88,23 @@ impl PtpPdvFloorFilter {
             max_cluster_spread_ns: max_cluster_spread_ns.max(10),
             samples: VecDeque::with_capacity(window_size),
             asymmetry_compensation_ns: 0,
+            delay_asymmetry_ratio: None,
             smoothed_offset_ns: None,
         }
     }
 
     pub fn with_asymmetry_compensation(mut self, asym_ns: i64) -> Self {
         self.asymmetry_compensation_ns = asym_ns;
+        self
+    }
+
+    /// Sets the dynamic delay asymmetry ratio alpha = T_fwd / T_rev (IEEE 1588-2019 Clause 9.5.5 / ITU-T G.8271).
+    ///
+    /// In Single-Fiber Bidirectional (BiDi) WDM optical networks, different wavelengths (e.g. 1310/1550nm)
+    /// exhibit chromatic velocity differences resulting in asymmetry proportional to the total fiber delay:
+    /// Asymmetry_dynamic = ((1 - alpha) / (1 + alpha)) * RoundTripDelay
+    pub fn with_delay_asymmetry_ratio(mut self, alpha: f64) -> Self {
+        self.delay_asymmetry_ratio = Some(alpha);
         self
     }
 
@@ -231,9 +243,21 @@ impl PtpPdvFloorFilter {
         let fwd_spread = fwd_delays[n - 1] - fwd_delays[0];
         let rev_spread = rev_delays[n - 1] - rev_delays[0];
 
-        // Standard two-way offset calculation on filtered delay floors with asymmetry compensation:
-        // offset = ((d_fwd - d_rev) - asymmetry) / 2
-        let estimated_offset = ((fwd_floor_avg - rev_floor_avg) - self.asymmetry_compensation_ns) / 2;
+        // Standard two-way offset calculation on filtered delay floors with static + dynamic WDM asymmetry compensation:
+        let dynamic_asym = if let Some(alpha) = self.delay_asymmetry_ratio {
+            if alpha > 0.0 {
+                let round_trip = (fwd_floor_avg + rev_floor_avg) as f64;
+                ((1.0 - alpha) / (1.0 + alpha)) * round_trip
+            } else {
+                0.0
+            }
+        } else {
+            0.0
+        };
+        let total_asymmetry = self.asymmetry_compensation_ns + dynamic_asym.round() as i64;
+
+        // offset = ((d_fwd - d_rev) - total_asymmetry) / 2
+        let estimated_offset = ((fwd_floor_avg - rev_floor_avg) - total_asymmetry) / 2;
         // meanPathDelay = (d_fwd + d_rev) / 2
         let mean_path_delay = (fwd_floor_avg + rev_floor_avg) / 2;
 
@@ -253,6 +277,147 @@ impl PtpPdvFloorFilter {
             reverse_pdv_spread_ns: rev_spread,
             floor_population_ratio,
             valid_samples_in_window: n,
+        })
+    }
+
+    /// Estimates delay floors by building a delay histogram and locating the primary floor cluster bin,
+    /// providing robust noise immunity against multi-modal queuing delay distributions (ITU-T G.8275.2 Annex D).
+    pub fn compute_histogram_floor_estimate(&self, bin_width_ns: i64) -> Option<PtpFilteredEstimate> {
+        let n = self.samples.len();
+        if n < 4 {
+            return None;
+        }
+        let bw = bin_width_ns.max(10);
+
+        let fwd_delays: Vec<i64> = self.samples.iter().map(|s| s.forward_delay()).collect();
+        let rev_delays: Vec<i64> = self.samples.iter().map(|s| s.reverse_delay()).collect();
+
+        let min_fwd = *fwd_delays.iter().min().unwrap();
+        let min_rev = *rev_delays.iter().min().unwrap();
+
+        // Bin forward delays
+        let mut fwd_bins: std::collections::HashMap<i64, Vec<i64>> = std::collections::HashMap::new();
+        for &d in &fwd_delays {
+            let bin_idx = (d - min_fwd) / bw;
+            fwd_bins.entry(bin_idx).or_default().push(d);
+        }
+
+        // Bin reverse delays
+        let mut rev_bins: std::collections::HashMap<i64, Vec<i64>> = std::collections::HashMap::new();
+        for &d in &rev_delays {
+            let bin_idx = (d - min_rev) / bw;
+            rev_bins.entry(bin_idx).or_default().push(d);
+        }
+
+        // Locate dominant floor cluster within the lowest bins
+        let fwd_floor_bin = (0..=2)
+            .filter_map(|idx| fwd_bins.get(&idx).map(|v| (idx, v)))
+            .max_by_key(|(_, v)| v.len())
+            .map(|(_, v)| v)
+            .or_else(|| fwd_bins.get(&0))?;
+
+        let rev_floor_bin = (0..=2)
+            .filter_map(|idx| rev_bins.get(&idx).map(|v| (idx, v)))
+            .max_by_key(|(_, v)| v.len())
+            .map(|(_, v)| v)
+            .or_else(|| rev_bins.get(&0))?;
+
+        let fwd_floor_avg = fwd_floor_bin.iter().sum::<i64>() / fwd_floor_bin.len() as i64;
+        let rev_floor_avg = rev_floor_bin.iter().sum::<i64>() / rev_floor_bin.len() as i64;
+
+        let dynamic_asym = if let Some(alpha) = self.delay_asymmetry_ratio {
+            if alpha > 0.0 {
+                let round_trip = (fwd_floor_avg + rev_floor_avg) as f64;
+                ((1.0 - alpha) / (1.0 + alpha)) * round_trip
+            } else {
+                0.0
+            }
+        } else {
+            0.0
+        };
+
+        let total_asym = self.asymmetry_compensation_ns + dynamic_asym.round() as i64;
+        let estimated_offset = ((fwd_floor_avg - rev_floor_avg) - total_asym) / 2;
+        let mean_path_delay = (fwd_floor_avg + rev_floor_avg) / 2;
+
+        let max_fwd = *fwd_delays.iter().max().unwrap();
+        let max_rev = *rev_delays.iter().max().unwrap();
+
+        Some(PtpFilteredEstimate {
+            forward_delay_floor_ns: fwd_floor_avg,
+            reverse_delay_floor_ns: rev_floor_avg,
+            mean_path_delay_ns: mean_path_delay,
+            estimated_offset_ns: estimated_offset,
+            forward_pdv_spread_ns: max_fwd - min_fwd,
+            reverse_pdv_spread_ns: max_rev - min_rev,
+            floor_population_ratio: fwd_floor_bin.len() as f64 / n as f64,
+            valid_samples_in_window: n,
+        })
+    }
+
+    /// Evaluates forward vs reverse Packet Delay Variation (PDV) correlation and computes
+    /// an overall composite Path Stability Score (0.0 to 100.0).
+    pub fn compute_pdv_correlation_and_stability(
+        &self,
+        floor_width_ns: i64,
+    ) -> Option<PdvPathStabilityReport> {
+        let n = self.samples.len();
+        if n < 4 {
+            return None;
+        }
+
+        let fwd: Vec<f64> = self.samples.iter().map(|s| s.forward_delay() as f64).collect();
+        let rev: Vec<f64> = self.samples.iter().map(|s| s.reverse_delay() as f64).collect();
+
+        let mean_fwd = fwd.iter().sum::<f64>() / n as f64;
+        let mean_rev = rev.iter().sum::<f64>() / n as f64;
+
+        let mut var_fwd = 0.0;
+        let mut var_rev = 0.0;
+        let mut cov = 0.0;
+
+        for i in 0..n {
+            let df = fwd[i] - mean_fwd;
+            let dr = rev[i] - mean_rev;
+            var_fwd += df * df;
+            var_rev += dr * dr;
+            cov += df * dr;
+        }
+
+        var_fwd /= n as f64;
+        var_rev /= n as f64;
+        cov /= n as f64;
+
+        let std_fwd = var_fwd.sqrt();
+        let std_rev = var_rev.sqrt();
+
+        let pearson = if std_fwd > 1e-9 && std_rev > 1e-9 {
+            (cov / (std_fwd * std_rev)).clamp(-1.0, 1.0)
+        } else {
+            0.0
+        };
+
+        let (fwd_floor_pct, rev_floor_pct) = self.floor_packet_percentage(floor_width_ns);
+        let min_floor_pct = fwd_floor_pct.min(rev_floor_pct);
+
+        // Path Stability Score (0.0 to 100.0):
+        // 1. Floor density component (up to 70 points)
+        let density_score = (min_floor_pct / 100.0) * 70.0;
+
+        // 2. Jitter penalty: standard deviation in microseconds
+        let avg_jitter_us = ((std_fwd + std_rev) / 2.0) / 1_000.0;
+        let jitter_score = (30.0 - avg_jitter_us.min(30.0)).max(0.0);
+
+        let raw_score = density_score + jitter_score;
+        let final_score = raw_score.clamp(0.0, 100.0);
+
+        Some(PdvPathStabilityReport {
+            pearson_correlation: pearson,
+            path_stability_score: final_score,
+            forward_floor_density_percent: fwd_floor_pct,
+            reverse_floor_density_percent: rev_floor_pct,
+            forward_pdv_variance_ns2: var_fwd,
+            reverse_pdv_variance_ns2: var_rev,
         })
     }
 
@@ -362,6 +527,23 @@ pub struct DelayStepEvent {
     pub forward_step_ns: i64,
     pub reverse_step_ns: i64,
     pub detected_at_seq: u16,
+}
+
+/// Directional Packet Delay Variation (PDV) Correlation and Path Stability Report.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PdvPathStabilityReport {
+    /// Pearson correlation coefficient between forward and reverse queuing jitter (-1.0 to 1.0)
+    pub pearson_correlation: f64,
+    /// Composite timing path stability rating (0.0 to 100.0)
+    pub path_stability_score: f64,
+    /// Percentage of packets meeting forward delay floor threshold (%)
+    pub forward_floor_density_percent: f64,
+    /// Percentage of packets meeting reverse delay floor threshold (%)
+    pub reverse_floor_density_percent: f64,
+    /// Forward delay variance in ns^2
+    pub forward_pdv_variance_ns2: f64,
+    /// Reverse delay variance in ns^2
+    pub reverse_pdv_variance_ns2: f64,
 }
 
 /// PTP Clock Servo Phase-Lock State (IEEE 1588-2019 / ITU-T G.8275.2).

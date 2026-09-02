@@ -1323,8 +1323,8 @@ pub use srv6_end_dt2u::{
     EndDt2uResult, Srv6EndDt2uEngine, TenantAttachmentCircuit, TenantMacVrf, UnknownUnicastPolicy,
 };
 pub use ptp_pdv_filter::{
-    DelayStepEvent, PtpClockServo, PtpClockServoConfig, PtpClockServoState, PtpFilteredEstimate,
-    PtpPdvFloorFilter, PtpServoAction, PtpTimestampSample,
+    DelayStepEvent, PdvPathStabilityReport, PtpClockServo, PtpClockServoConfig, PtpClockServoState,
+    PtpFilteredEstimate, PtpPdvFloorFilter, PtpServoAction, PtpTimestampSample,
 };
 pub use ptp_apts::{
     AptsConfig, AptsEngine, AptsMetrics, AptsState,

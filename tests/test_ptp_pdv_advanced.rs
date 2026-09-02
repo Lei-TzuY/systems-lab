@@ -74,3 +74,64 @@ fn test_ptp_subwindow_lucky_packet_selection() {
     assert_eq!(estimate.estimated_offset_ns, -1_500);
     assert_eq!(estimate.mean_path_delay_ns, 16_500);
 }
+
+#[test]
+fn test_ptp_histogram_floor_cluster_estimation() {
+    let mut filter = PtpPdvFloorFilter::new(30, 10.0, 100);
+
+    // Multi-modal delay distribution:
+    // Cluster 1 (Floor): 10 packets around 10,020 ns (base floor ~10,000 ns)
+    // Cluster 2 (Mid-queue burst): 10 packets around 35,000 ns
+    // Cluster 3 (Heavy burst): 10 packets around 120,000 ns
+    for i in 0..30 {
+        let (fwd_delay, rev_delay) = if i < 10 {
+            (10_000 + (i as i64 * 4), 10_000 + (i as i64 * 4)) // Floor cluster (10,000 - 10,036 ns)
+        } else if i < 20 {
+            (35_000 + (i as i64 * 50), 35_000 + (i as i64 * 50))
+        } else {
+            (120_000 + (i as i64 * 100), 120_000 + (i as i64 * 100))
+        };
+
+        let t1 = (i as i64) * 1_000_000;
+        let t2 = t1 + fwd_delay;
+        let t3 = t2 + 10_000;
+        let t4 = t3 + rev_delay;
+        filter.push_sample(PtpTimestampSample::new(i as u16, t1, t2, t3, t4));
+    }
+
+    // Bin width = 50 ns (groups the 10,000-10,036 ns cluster into bin 0)
+    let estimate = filter
+        .compute_histogram_floor_estimate(50)
+        .expect("Histogram floor estimate");
+
+    // The histogram estimator isolates the primary floor peak near 10,018 ns
+    assert!(estimate.forward_delay_floor_ns >= 10_000 && estimate.forward_delay_floor_ns <= 10_036);
+    assert!(estimate.reverse_delay_floor_ns >= 10_000 && estimate.reverse_delay_floor_ns <= 10_036);
+    assert_eq!(estimate.estimated_offset_ns, 0);
+}
+
+#[test]
+fn test_ptp_pdv_correlation_and_stability_score() {
+    let mut filter = PtpPdvFloorFilter::new(20, 10.0, 100);
+
+    // Highly correlated symmetrical queuing delays:
+    // Forward and reverse queues congest and drain synchronously
+    for seq in 0..20 {
+        let burst = (seq as i64) * 500;
+        let t1 = (seq as i64) * 1_000_000;
+        let t2 = t1 + 10_000 + burst;
+        let t3 = t2 + 5_000;
+        let t4 = t3 + 10_000 + burst;
+        filter.push_sample(PtpTimestampSample::new(seq, t1, t2, t3, t4));
+    }
+
+    let report = filter
+        .compute_pdv_correlation_and_stability(1_000)
+        .expect("Stability report");
+
+    // Forward and reverse delays are perfectly positively correlated (r = 1.0)
+    assert!((report.pearson_correlation - 1.0).abs() < 1e-4);
+    assert!(report.path_stability_score > 0.0);
+    assert!(report.forward_pdv_variance_ns2 > 0.0);
+}
+

@@ -155,3 +155,42 @@ fn test_ptp_pdv_floor_rate_monitoring_and_ema_smoothing() {
     let s1 = filter.update_smoothed_offset(0.5).expect("smooth 1");
     assert_eq!(s1, 0.0); // raw offset is 0
 }
+
+#[test]
+fn test_ptp_pdv_wdm_fiber_asymmetry_ratio_compensation() {
+    // 1310nm vs 1550nm BiDi optical fiber with asymmetry ratio alpha = 0.96
+    // Round trip delay = 50,000 ns fwd + 50,000 ns rev = 100,000 ns
+    // Dynamic asymmetry = ((1 - 0.96) / (1 + 0.96)) * 100,000 = (0.04 / 1.96) * 100,000 = 2041 ns
+    let mut filter = PtpPdvFloorFilter::new(10, 10.0, 100).with_delay_asymmetry_ratio(0.96);
+
+    for seq in 0..10 {
+        let t1 = (seq as i64) * 1_000_000;
+        let t2 = t1 + 50_000;
+        let t3 = t2 + 10_000;
+        let t4 = t3 + 50_000;
+        filter.push_sample(PtpTimestampSample::new(seq, t1, t2, t3, t4));
+    }
+
+    let estimate = filter.compute_estimate().expect("estimate");
+    assert_eq!(estimate.mean_path_delay_ns, 50_000);
+    // Offset = (0 - 2041) / 2 = -1020 ns
+    assert_eq!(estimate.estimated_offset_ns, -1020);
+
+    // Now combine with static PHY hardware calibration of +400 ns:
+    // Total asymmetry = 400 + 2041 = 2441 ns -> Offset = (0 - 2441) / 2 = -1220 ns
+    let mut combined_filter = PtpPdvFloorFilter::new(10, 10.0, 100)
+        .with_asymmetry_compensation(400)
+        .with_delay_asymmetry_ratio(0.96);
+
+    for seq in 0..10 {
+        let t1 = (seq as i64) * 1_000_000;
+        let t2 = t1 + 50_000;
+        let t3 = t2 + 10_000;
+        let t4 = t3 + 50_000;
+        combined_filter.push_sample(PtpTimestampSample::new(seq, t1, t2, t3, t4));
+    }
+
+    let combined_estimate = combined_filter.compute_estimate().expect("combined estimate");
+    assert_eq!(combined_estimate.estimated_offset_ns, -1220);
+}
+
