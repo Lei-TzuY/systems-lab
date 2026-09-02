@@ -255,6 +255,7 @@ pub mod pppoe;
 pub mod preemption;
 pub mod psfp;
 pub mod ptp;
+pub mod ptp_apts;
 pub mod ptp_fiber_dispersion;
 pub mod ptp_high_accuracy;
 pub mod ptp_pdv_filter;
@@ -1320,7 +1321,9 @@ pub use srv6_end_dt2u::{
     EndDt2uResult, Srv6EndDt2uEngine, TenantAttachmentCircuit, TenantMacVrf, UnknownUnicastPolicy,
 };
 pub use ptp_pdv_filter::{
-    PtpFilteredEstimate, PtpPdvFloorFilter, PtpTimestampSample,
+    DelayStepEvent, PtpClockServo, PtpClockServoConfig, PtpClockServoState, PtpFilteredEstimate,
+    PtpPdvFloorFilter, PtpServoAction, PtpTimestampSample,
 };
-
-
+pub use ptp_apts::{
+    AptsConfig, AptsEngine, AptsMetrics, AptsState,
+};

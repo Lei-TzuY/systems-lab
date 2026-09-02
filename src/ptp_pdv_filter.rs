@@ -305,7 +305,249 @@ impl PtpPdvFloorFilter {
         self.smoothed_offset_ns = Some(new_smoothed);
         Some(new_smoothed)
     }
+
+    /// Detects whether an abrupt forward or reverse delay step occurred in the sliding window,
+    /// indicating an underlying network path reroute (e.g. MPLS/SR reroute, ECMP switch).
+    pub fn detect_delay_step(&self, step_threshold_ns: i64) -> Option<DelayStepEvent> {
+        let n = self.samples.len();
+        if n < 8 {
+            return None;
+        }
+
+        let k = (n / 4).clamp(2, 10);
+        let older_count = n - k;
+
+        let older_min_fwd = self.samples.iter().take(older_count).map(|s| s.forward_delay()).min()?;
+        let older_min_rev = self.samples.iter().take(older_count).map(|s| s.reverse_delay()).min()?;
+
+        let recent_min_fwd = self.samples.iter().skip(older_count).map(|s| s.forward_delay()).min()?;
+        let recent_min_rev = self.samples.iter().skip(older_count).map(|s| s.reverse_delay()).min()?;
+
+        let fwd_step = recent_min_fwd - older_min_fwd;
+        let rev_step = recent_min_rev - older_min_rev;
+
+        if fwd_step.abs() >= step_threshold_ns || rev_step.abs() >= step_threshold_ns {
+            let last_seq = self.samples.back().map(|s| s.seq_id).unwrap_or(0);
+            Some(DelayStepEvent {
+                forward_step_ns: fwd_step,
+                reverse_step_ns: rev_step,
+                detected_at_seq: last_seq,
+            })
+        } else {
+            None
+        }
+    }
+
+    /// Detects route delay steps, and if found, purges stale pre-reroute samples from the window
+    /// to immediately realign the floor estimator to the new network path.
+    pub fn flush_on_route_step(&mut self, step_threshold_ns: i64) -> Option<DelayStepEvent> {
+        let event = self.detect_delay_step(step_threshold_ns)?;
+        let n = self.samples.len();
+        let k = (n / 4).clamp(2, 10);
+
+        // Retain only the post-step recent k samples
+        let recent: Vec<PtpTimestampSample> = self.samples.iter().skip(n - k).cloned().collect();
+        self.samples.clear();
+        for s in recent {
+            self.samples.push_back(s);
+        }
+        self.smoothed_offset_ns = None;
+        Some(event)
+    }
 }
+
+/// Network Route Change / Delay Step Event in Packet Switched Network.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DelayStepEvent {
+    pub forward_step_ns: i64,
+    pub reverse_step_ns: i64,
+    pub detected_at_seq: u16,
+}
+
+/// PTP Clock Servo Phase-Lock State (IEEE 1588-2019 / ITU-T G.8275.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PtpClockServoState {
+    /// Uninitialized or awaiting initial sample
+    Unset,
+    /// Stepping clock counter directly to align epoch
+    Stepping,
+    /// Phase slewing towards target
+    Aligning,
+    /// Phase offset and frequency disciplined within telecom lock threshold
+    Locked,
+    /// Packet updates stopped; maintaining frequency offset in holdover
+    Holdover,
+}
+
+/// Action output produced by the PTP Clock Servo for local clock discipline.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PtpServoAction {
+    /// Immediate phase step requested for large time error
+    Step { step_ns: i64 },
+    /// Frequency discipline (ppb) and phase slewing adjustment
+    AdjustFreq { freq_ppb: f64, phase_adjust_ns: i64 },
+    /// Holdover state: maintain frozen frequency offset
+    Holdover { drift_ppb: f64 },
+}
+
+/// Configuration parameters for the PTP PI Clock Servo.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PtpClockServoConfig {
+    /// Proportional gain coefficient
+    pub kp: f64,
+    /// Integral gain coefficient
+    pub ki: f64,
+    /// Phase error threshold (ns) exceeding which an immediate step is performed
+    pub step_threshold_ns: i64,
+    /// Target phase error bound (ns) to consider the clock locked (e.g. 50ns)
+    pub lock_threshold_ns: i64,
+    /// Number of consecutive locked samples required before declaring Locked state
+    pub lock_consecutive_count: usize,
+    /// Maximum allowed frequency offset in parts-per-billion (e.g. 100,000 ppb = 100 ppm)
+    pub max_frequency_offset_ppb: f64,
+    /// Anti-windup limit for integrated phase error (ns)
+    pub max_integral_windup_ns: f64,
+}
+
+impl Default for PtpClockServoConfig {
+    fn default() -> Self {
+        Self {
+            kp: 0.7,
+            ki: 0.3,
+            step_threshold_ns: 100_000,           // 100 µs
+            lock_threshold_ns: 50,                // 50 ns (Class C / D requirement)
+            lock_consecutive_count: 4,
+            max_frequency_offset_ppb: 100_000.0, // ±100 ppm
+            max_integral_windup_ns: 1_000_000.0,
+        }
+    }
+}
+
+/// PTP Proportional-Integral (PI) Clock Servo with Anti-Windup (IEEE 1588-2019 / ITU-T G.8275.2).
+#[derive(Debug, Clone)]
+pub struct PtpClockServo {
+    pub config: PtpClockServoConfig,
+    pub state: PtpClockServoState,
+    pub integrated_error_ns: f64,
+    pub current_freq_ppb: f64,
+    pub consecutive_locked: usize,
+    pub total_step_ns: i64,
+    pub samples_processed: usize,
+}
+
+impl Default for PtpClockServo {
+    fn default() -> Self {
+        Self::new(PtpClockServoConfig::default())
+    }
+}
+
+impl PtpClockServo {
+    pub fn new(config: PtpClockServoConfig) -> Self {
+        Self {
+            config,
+            state: PtpClockServoState::Unset,
+            integrated_error_ns: 0.0,
+            current_freq_ppb: 0.0,
+            consecutive_locked: 0,
+            total_step_ns: 0,
+            samples_processed: 0,
+        }
+    }
+
+    /// Returns current servo operating state.
+    pub fn state(&self) -> PtpClockServoState {
+        self.state
+    }
+
+    /// Returns whether the servo is currently in Locked state.
+    pub fn is_locked(&self) -> bool {
+        self.state == PtpClockServoState::Locked
+    }
+
+    /// Returns the current disciplined frequency offset in ppb.
+    pub fn current_freq_ppb(&self) -> f64 {
+        self.current_freq_ppb
+    }
+
+    /// Returns total cumulative phase stepped by the servo.
+    pub fn total_step_ns(&self) -> i64 {
+        self.total_step_ns
+    }
+
+    /// Resets the servo state machine and clears integral history.
+    pub fn reset(&mut self) {
+        self.state = PtpClockServoState::Unset;
+        self.integrated_error_ns = 0.0;
+        self.current_freq_ppb = 0.0;
+        self.consecutive_locked = 0;
+    }
+
+    /// Transitions the clock into Holdover, freezing the current frequency discipline.
+    pub fn enter_holdover(&mut self) -> PtpServoAction {
+        self.state = PtpClockServoState::Holdover;
+        self.consecutive_locked = 0;
+        PtpServoAction::Holdover {
+            drift_ppb: self.current_freq_ppb,
+        }
+    }
+
+    /// Samples a new estimated phase offset and calculates local clock discipline action.
+    ///
+    /// # Arguments
+    /// - `offset_ns`: Filtered phase error in nanoseconds (t_master - t_slave)
+    /// - `interval_sec`: Sample interval in seconds (e.g. 0.0625s for 16 pkts/s)
+    pub fn sample(&mut self, offset_ns: i64, interval_sec: f64) -> PtpServoAction {
+        self.samples_processed += 1;
+        let dt = interval_sec.max(0.001);
+
+        // If in Unset state or phase offset exceeds step threshold, command a phase step
+        if self.state == PtpClockServoState::Unset
+            || self.state == PtpClockServoState::Stepping
+            || offset_ns.abs() >= self.config.step_threshold_ns
+        {
+            self.state = PtpClockServoState::Aligning;
+            self.consecutive_locked = 0;
+            self.total_step_ns += offset_ns;
+            self.integrated_error_ns = 0.0;
+            return PtpServoAction::Step {
+                step_ns: offset_ns,
+            };
+        }
+
+        // Proportional term
+        let p_term = self.config.kp * (offset_ns as f64);
+
+        // Integral term with Anti-Windup Clamping
+        self.integrated_error_ns += (offset_ns as f64) * dt;
+        let max_w = self.config.max_integral_windup_ns;
+        self.integrated_error_ns = self.integrated_error_ns.clamp(-max_w, max_w);
+        let i_term = self.config.ki * self.integrated_error_ns;
+
+        // Target frequency adjustment in ppb (negative feedback)
+        let raw_freq = -(p_term + i_term);
+        let max_f = self.config.max_frequency_offset_ppb;
+        self.current_freq_ppb = raw_freq.clamp(-max_f, max_f);
+
+        // Update phase lock state machine
+        if offset_ns.abs() <= self.config.lock_threshold_ns {
+            self.consecutive_locked += 1;
+            if self.consecutive_locked >= self.config.lock_consecutive_count {
+                self.state = PtpClockServoState::Locked;
+            }
+        } else if offset_ns.abs() > self.config.lock_threshold_ns * 3 {
+            self.consecutive_locked = 0;
+            if self.state == PtpClockServoState::Locked {
+                self.state = PtpClockServoState::Aligning;
+            }
+        }
+
+        PtpServoAction::AdjustFreq {
+            freq_ppb: self.current_freq_ppb,
+            phase_adjust_ns: offset_ns,
+        }
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
