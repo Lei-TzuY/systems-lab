@@ -266,6 +266,7 @@ pub mod ptp_telecom;
 pub mod ptp_telecom_bc;
 pub mod ptp_telecom_gm_quality;
 pub mod ptp_telecom_tc;
+pub mod ptp_synce_hybrid;
 pub mod ptp_time_error;
 pub mod qos;
 pub mod quic;
@@ -1326,4 +1327,7 @@ pub use ptp_pdv_filter::{
 };
 pub use ptp_apts::{
     AptsConfig, AptsEngine, AptsMetrics, AptsState,
+};
+pub use ptp_synce_hybrid::{
+    HybridAdjustment, HybridSyncConfig, HybridSyncEngine, HybridSyncMetrics, HybridSyncMode,
 };
