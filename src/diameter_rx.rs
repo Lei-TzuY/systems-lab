@@ -15,6 +15,14 @@ pub const DIAMETER_APPLICATION_RX: u32 = 16777236;
 pub const DIAMETER_CMD_AA: u32 = 265; // AAR / AAA
 pub const DIAMETER_CMD_SESSION_TERMINATION: u32 = 275; // STR / STA
 pub const DIAMETER_CMD_ABORT_SESSION: u32 = 274; // ASR / ASA
+pub const DIAMETER_CMD_RE_AUTH: u32 = 258; // RAR / RAA (RFC 6733 / 3GPP TS 29.214)
+
+/// Specific-Action AVP Values (AVP 513 - 3GPP TS 29.214 Section 5.3.13).
+pub const SPECIFIC_ACTION_INDICATION_OF_LOSS_OF_BEARER: u32 = 1;
+pub const SPECIFIC_ACTION_INDICATION_OF_RECOVERY_OF_BEARER: u32 = 2;
+pub const SPECIFIC_ACTION_INDICATION_OF_RELEASE_OF_BEARER: u32 = 3;
+pub const SPECIFIC_ACTION_INDICATION_OF_ESTABLISHMENT_OF_BEARER: u32 = 4;
+pub const SPECIFIC_ACTION_ACCESS_NETWORK_INFO_REPORT: u32 = 12;
 
 /// Rx AVP Codes (3GPP TS 29.214 Section 5.3).
 pub const AVP_ABORT_CAUSE: u32 = 500;
@@ -402,5 +410,222 @@ impl PcrfRxEngine {
         ans.avps.push(DiameterAvp::new_utf8(263, session_id));
         ans.avps.push(DiameterAvp::new_u32(268, DIAMETER_SUCCESS));
         ans
+    }
+
+    /// Generates a Re-Auth-Request (RAR) from PCRF to AF to notify bearer events (e.g. loss or release of bearer).
+    pub fn generate_rar(
+        &self,
+        session_id: &str,
+        specific_action: u32,
+        origin_host: &str,
+        origin_realm: &str,
+        destination_host: &str,
+        destination_realm: &str,
+    ) -> Option<ReAuthRequest> {
+        if !self.sessions.contains_key(session_id) {
+            return None;
+        }
+
+        Some(ReAuthRequest {
+            session_id: session_id.to_string(),
+            origin_host: origin_host.to_string(),
+            origin_realm: origin_realm.to_string(),
+            destination_host: destination_host.to_string(),
+            destination_realm: destination_realm.to_string(),
+            specific_action,
+            abort_cause: None,
+        })
+    }
+
+    /// Processes a Re-Auth-Answer (RAA) returned by the AF.
+    pub fn process_raa(&mut self, session_id: &str, result_code: u32) -> bool {
+        if let Some(session) = self.sessions.get_mut(session_id) {
+            if result_code == DIAMETER_SUCCESS {
+                true
+            } else {
+                session.is_active = false;
+                false
+            }
+        } else {
+            false
+        }
+    }
+}
+
+/// Re-Auth-Request (RAR) message (Command 258) sent by PCRF to AF (3GPP TS 29.214 Section 5.6.3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReAuthRequest {
+    pub session_id: String,
+    pub origin_host: String,
+    pub origin_realm: String,
+    pub destination_host: String,
+    pub destination_realm: String,
+    pub specific_action: u32,
+    pub abort_cause: Option<u32>,
+}
+
+impl ReAuthRequest {
+    pub fn to_diameter_message(&self, hop_by_hop_id: u32, end_to_end_id: u32) -> DiameterMessage {
+        let mut msg = DiameterMessage::new_request(
+            DIAMETER_CMD_RE_AUTH,
+            DIAMETER_APPLICATION_RX,
+            hop_by_hop_id,
+            end_to_end_id,
+        );
+        msg.avps.push(DiameterAvp::new_utf8(263, &self.session_id));
+        msg.avps.push(DiameterAvp::new_utf8(264, &self.origin_host));
+        msg.avps.push(DiameterAvp::new_utf8(296, &self.origin_realm));
+        msg.avps.push(DiameterAvp::new_utf8(293, &self.destination_host));
+        msg.avps.push(DiameterAvp::new_utf8(283, &self.destination_realm));
+        msg.avps
+            .push(DiameterAvp::new_u32(AVP_SPECIFIC_ACTION, self.specific_action));
+        if let Some(cause) = self.abort_cause {
+            msg.avps.push(DiameterAvp::new_u32(AVP_ABORT_CAUSE, cause));
+        }
+        msg
+    }
+
+    pub fn from_diameter_message(msg: &DiameterMessage) -> Option<Self> {
+        let session_id = msg.get_avp(263).and_then(|a| a.as_string())?;
+        let origin_host = msg
+            .get_avp(264)
+            .and_then(|a| a.as_string())
+            .unwrap_or_default();
+        let origin_realm = msg
+            .get_avp(296)
+            .and_then(|a| a.as_string())
+            .unwrap_or_default();
+        let destination_host = msg
+            .get_avp(293)
+            .and_then(|a| a.as_string())
+            .unwrap_or_default();
+        let destination_realm = msg
+            .get_avp(283)
+            .and_then(|a| a.as_string())
+            .unwrap_or_default();
+        let specific_action = msg
+            .get_avp(AVP_SPECIFIC_ACTION)
+            .and_then(|a| a.as_u32())
+            .unwrap_or(0);
+        let abort_cause = msg.get_avp(AVP_ABORT_CAUSE).and_then(|a| a.as_u32());
+
+        Some(ReAuthRequest {
+            session_id,
+            origin_host,
+            origin_realm,
+            destination_host,
+            destination_realm,
+            specific_action,
+            abort_cause,
+        })
+    }
+}
+
+/// Re-Auth-Answer (RAA) message (Command 258) sent by AF to PCRF.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReAuthAnswer {
+    pub session_id: String,
+    pub result_code: u32,
+    pub origin_host: String,
+    pub origin_realm: String,
+}
+
+impl ReAuthAnswer {
+    pub fn success(session_id: &str, origin_host: &str, origin_realm: &str) -> Self {
+        ReAuthAnswer {
+            session_id: session_id.to_string(),
+            result_code: DIAMETER_SUCCESS,
+            origin_host: origin_host.to_string(),
+            origin_realm: origin_realm.to_string(),
+        }
+    }
+
+    pub fn to_diameter_message(&self, hop_by_hop_id: u32, end_to_end_id: u32) -> DiameterMessage {
+        let mut msg = DiameterMessage::new_answer(
+            DIAMETER_CMD_RE_AUTH,
+            DIAMETER_APPLICATION_RX,
+            hop_by_hop_id,
+            end_to_end_id,
+        );
+        msg.avps.push(DiameterAvp::new_utf8(263, &self.session_id));
+        msg.avps.push(DiameterAvp::new_u32(268, self.result_code));
+        msg.avps.push(DiameterAvp::new_utf8(264, &self.origin_host));
+        msg.avps.push(DiameterAvp::new_utf8(296, &self.origin_realm));
+        msg
+    }
+
+    pub fn from_diameter_message(msg: &DiameterMessage) -> Option<Self> {
+        let session_id = msg.get_avp(263).and_then(|a| a.as_string())?;
+        let result_code = msg
+            .get_avp(268)
+            .and_then(|a| a.as_u32())
+            .unwrap_or(DIAMETER_SUCCESS);
+        let origin_host = msg
+            .get_avp(264)
+            .and_then(|a| a.as_string())
+            .unwrap_or_default();
+        let origin_realm = msg
+            .get_avp(296)
+            .and_then(|a| a.as_string())
+            .unwrap_or_default();
+
+        Some(ReAuthAnswer {
+            session_id,
+            result_code,
+            origin_host,
+            origin_realm,
+        })
+    }
+}
+
+/// Simulated IMS P-CSCF / Application Function (AF) Rx Client.
+#[derive(Debug, Clone, Default)]
+pub struct PcscfRxClient {
+    pub local_host: String,
+    pub local_realm: String,
+    pub active_calls: HashMap<String, String>, // session_id -> af_application_identifier
+    pub bearer_loss_events_received: usize,
+    pub bearer_recovery_events_received: usize,
+    pub bearer_release_events_received: usize,
+}
+
+impl PcscfRxClient {
+    pub fn new(local_host: &str, local_realm: &str) -> Self {
+        PcscfRxClient {
+            local_host: local_host.to_string(),
+            local_realm: local_realm.to_string(),
+            active_calls: HashMap::new(),
+            bearer_loss_events_received: 0,
+            bearer_recovery_events_received: 0,
+            bearer_release_events_received: 0,
+        }
+    }
+
+    pub fn register_session(&mut self, session_id: &str, app_id: &str) {
+        self.active_calls
+            .insert(session_id.to_string(), app_id.to_string());
+    }
+
+    /// Handles an incoming RAR from PCRF and returns an RAA answer.
+    pub fn handle_rar(&mut self, rar: &ReAuthRequest) -> ReAuthAnswer {
+        match rar.specific_action {
+            SPECIFIC_ACTION_INDICATION_OF_LOSS_OF_BEARER => {
+                self.bearer_loss_events_received += 1;
+            }
+            SPECIFIC_ACTION_INDICATION_OF_RECOVERY_OF_BEARER => {
+                self.bearer_recovery_events_received += 1;
+            }
+            SPECIFIC_ACTION_INDICATION_OF_RELEASE_OF_BEARER => {
+                self.bearer_release_events_received += 1;
+                self.active_calls.remove(&rar.session_id);
+            }
+            _ => {}
+        }
+
+        ReAuthAnswer::success(&rar.session_id, &self.local_host, &self.local_realm)
+    }
+
+    pub fn is_session_active(&self, session_id: &str) -> bool {
+        self.active_calls.contains_key(session_id)
     }
 }

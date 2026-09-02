@@ -75,3 +75,96 @@ fn test_pcrf_rx_engine_admission_and_qci_authorization() {
     assert_eq!(pcrf.allocated_bandwidth_bps, 0);
     assert_eq!(pcrf.sessions.len(), 0);
 }
+
+#[test]
+fn test_diameter_rx_rar_raa_wire_codec() {
+    use toy_tcpip::diameter_rx::{
+        ReAuthAnswer, ReAuthRequest, DIAMETER_CMD_RE_AUTH,
+        SPECIFIC_ACTION_INDICATION_OF_LOSS_OF_BEARER,
+    };
+
+    let rar = ReAuthRequest {
+        session_id: "ims-rar-999".to_string(),
+        origin_host: "pcrf01.operator.com".to_string(),
+        origin_realm: "operator.com".to_string(),
+        destination_host: "pcscf01.operator.com".to_string(),
+        destination_realm: "operator.com".to_string(),
+        specific_action: SPECIFIC_ACTION_INDICATION_OF_LOSS_OF_BEARER,
+        abort_cause: None,
+    };
+
+    let msg = rar.to_diameter_message(100, 200);
+    assert_eq!(msg.header.command_code, DIAMETER_CMD_RE_AUTH);
+    assert!(msg.header.is_request());
+
+    let parsed_rar = ReAuthRequest::from_diameter_message(&msg).expect("parse RAR");
+    assert_eq!(parsed_rar, rar);
+
+    let raa = ReAuthAnswer::success("ims-rar-999", "pcscf01.operator.com", "operator.com");
+    let ans_msg = raa.to_diameter_message(100, 200);
+    assert_eq!(ans_msg.header.command_code, DIAMETER_CMD_RE_AUTH);
+    assert!(!ans_msg.header.is_request());
+
+    let parsed_raa = ReAuthAnswer::from_diameter_message(&ans_msg).expect("parse RAA");
+    assert_eq!(parsed_raa, raa);
+}
+
+#[test]
+fn test_diameter_rx_rar_raa_bearer_loss_and_release_lifecycle() {
+    use toy_tcpip::diameter_rx::{
+        AaRequest, MediaComponentDescription, MediaType, PcrfRxEngine, PcscfRxClient,
+        SPECIFIC_ACTION_INDICATION_OF_LOSS_OF_BEARER,
+        SPECIFIC_ACTION_INDICATION_OF_RELEASE_OF_BEARER,
+    };
+
+    let mut pcrf = PcrfRxEngine::new(5_000_000);
+    let mut pcscf = PcscfRxClient::new("pcscf.ims.mnc001.mcc310.3gppnetwork.org", "ims.mnc001.mcc310.3gppnetwork.org");
+
+    let sess_id = "ims-voice-session-42";
+    pcscf.register_session(sess_id, "VoLTE-Voice");
+    assert!(pcscf.is_session_active(sess_id));
+
+    // PCRF authorizes call
+    let mut aar = AaRequest::new(sess_id, "VoLTE-Voice");
+    let mut audio = MediaComponentDescription::new(1, MediaType::Audio);
+    audio.max_bandwidth_ul = 32_000;
+    audio.max_bandwidth_dl = 32_000;
+    aar.media_components.push(audio);
+    let aaa = pcrf.process_aar(&aar);
+    assert_eq!(aaa.get_avp(268).unwrap().as_u32().unwrap(), 2001);
+
+    // 1. Radio bearer is temporarily lost -> PCRF sends RAR (Loss of Bearer)
+    let rar_loss = pcrf.generate_rar(
+        sess_id,
+        SPECIFIC_ACTION_INDICATION_OF_LOSS_OF_BEARER,
+        "pcrf.epc.mnc001.mcc310.3gppnetwork.org",
+        "epc.mnc001.mcc310.3gppnetwork.org",
+        &pcscf.local_host,
+        &pcscf.local_realm,
+    ).expect("generate RAR");
+
+    let raa = pcscf.handle_rar(&rar_loss);
+    assert_eq!(raa.result_code, 2001);
+    assert_eq!(pcscf.bearer_loss_events_received, 1);
+    assert!(pcscf.is_session_active(sess_id)); // Call still held during temporary loss
+
+    // PCRF processes the RAA
+    let ok = pcrf.process_raa(sess_id, raa.result_code);
+    assert!(ok);
+
+    // 2. Radio bearer cannot recover and is released -> PCRF sends RAR (Release of Bearer)
+    let rar_release = pcrf.generate_rar(
+        sess_id,
+        SPECIFIC_ACTION_INDICATION_OF_RELEASE_OF_BEARER,
+        "pcrf.epc.mnc001.mcc310.3gppnetwork.org",
+        "epc.mnc001.mcc310.3gppnetwork.org",
+        &pcscf.local_host,
+        &pcscf.local_realm,
+    ).expect("generate RAR");
+
+    let raa2 = pcscf.handle_rar(&rar_release);
+    assert_eq!(raa2.result_code, 2001);
+    assert_eq!(pcscf.bearer_release_events_received, 1);
+    // Session is now terminated on P-CSCF
+    assert!(!pcscf.is_session_active(sess_id));
+}

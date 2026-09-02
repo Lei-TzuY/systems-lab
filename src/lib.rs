@@ -464,8 +464,13 @@ pub use diameter_np::{
     RanCongestionInfo, RanCongestionLevel, RcafNpEngine,
 };
 pub use diameter_rx::{
-    AaRequest, DIAMETER_APPLICATION_RX, DIAMETER_CMD_AA, MediaComponentDescription,
-    MediaSubComponent, MediaType, PcrfRxEngine, PcrfSessionState,
+    AaRequest, MediaComponentDescription, MediaSubComponent, MediaType, PcrfRxEngine,
+    PcrfSessionState, PcscfRxClient, ReAuthAnswer, ReAuthRequest, DIAMETER_APPLICATION_RX,
+    DIAMETER_CMD_AA, DIAMETER_CMD_ABORT_SESSION, DIAMETER_CMD_RE_AUTH,
+    DIAMETER_CMD_SESSION_TERMINATION, SPECIFIC_ACTION_ACCESS_NETWORK_INFO_REPORT,
+    SPECIFIC_ACTION_INDICATION_OF_ESTABLISHMENT_OF_BEARER,
+    SPECIFIC_ACTION_INDICATION_OF_LOSS_OF_BEARER, SPECIFIC_ACTION_INDICATION_OF_RECOVERY_OF_BEARER,
+    SPECIFIC_ACTION_INDICATION_OF_RELEASE_OF_BEARER,
 };
 pub use diameter_s6a::{
     DIAMETER_APPLICATION_S6A, DIAMETER_CMD_AUTH_INFO, DIAMETER_CMD_UPDATE_LOCATION, EpsAuthVector,
@@ -695,8 +700,9 @@ pub use evpn_ssm_underlay::{
     EvpnUnderlayPmsiEngine, UnderlayEncapsulationPlan, UnderlaySsmMapping, UnderlayTunnelType,
 };
 pub use evpn_synch::{
-    EVPN_ROUTE_TYPE_LEAVE_SYNCH, EthernetSegmentId, EvpnJoinSynchRoute, EvpnLeaveSynchRoute,
-    EvpnMulticastSynchEngine,
+    EVPN_MULTICAST_FLAG_IE_EXCLUDE, EVPN_MULTICAST_FLAG_IE_INCLUDE, EVPN_ROUTE_TYPE_LEAVE_SYNCH,
+    EthernetSegmentId, EvpnJoinSynchRoute, EvpnJoinSynchRouteV6, EvpnLeaveSynchRoute,
+    EvpnLeaveSynchRouteV6, EvpnMulticastSynchEngine,
 };
 pub use evpn_type1::{
     ETHERNET_TAG_MAX_PER_ES, EVPN_ROUTE_TYPE_ETHERNET_AD, EvpnAliasingEngine, EvpnEthernetAdRoute,
@@ -1042,9 +1048,10 @@ pub use sctp::{
 pub use sflow::{SFLOW_UDP_PORT, SflowCounterSample, SflowDatagram, SflowFlowSample, SflowSample};
 pub use shell::NetworkShell;
 pub use sip::{SIP_PORT, SipMessage, SipMethod, build_simple_sdp};
-pub use snmp::{SNMP_PORT, SnmpMessage, SnmpMib, SnmpPdu, SnmpValue, SnmpVarbind};
-pub use socket::{SocketError, SocketRuntime, TcpListenerHandle, TcpStreamHandle, UdpSocketHandle};
-pub use sr_mpls::{SrAction, SrMplsEngine, SrSegment, Srgb, Srlb, TiLfaEngine};
+pub use socket::{
+    SocketError, SocketRuntime, TcpListenerHandle, TcpSocketOptions, TcpStreamHandle,
+    UdpSocketHandle, UdpSocketOptions,
+};
 pub use sr_mpls_oam::{
     SR_SUB_TLV_IPV4_ADJ_SID, SR_SUB_TLV_IPV4_PREFIX_SID, SR_SUB_TLV_IPV6_PREFIX_SID,
     SrLspEchoReply, SrLspEchoRequest, SrMplsOamEngine, SrTargetFecSubTlv,
