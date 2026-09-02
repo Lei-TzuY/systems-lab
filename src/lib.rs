@@ -954,8 +954,8 @@ pub use nsh::{
 pub use nsh_md2::{
     NSH_MD_TYPE_2, NSH_TLV_CLASS_IETF, NSH_TLV_TYPE_FLOW_HASH, NSH_TLV_TYPE_INBAND_PATH_TRACE,
     NSH_TLV_TYPE_SECURITY_GROUP_TAG, NSH_TLV_TYPE_SOURCE_INTERFACE, NSH_TLV_TYPE_TENANT_ID,
-    NshContextTlv, NshMd2ForwarderEngine, NshMd2Header, NshMd2Packet, NshMd2SffEngine,
-    NshMetadataExtractor, SffForwardingAction,
+    NshClassificationRule, NshClassifierEngine, NshContextTlv, NshMd2ForwarderEngine, NshMd2Header,
+    NshMd2Packet, NshMd2SffEngine, NshMetadataExtractor, SffForwardingAction,
 };
 pub use nsh_md2_ext::{
     NSH_TLV_CLASS_IOAM, NSH_TLV_TYPE_IOAM_HOP_TELEMETRY, NSH_TLV_TYPE_ECN_CONGESTION,

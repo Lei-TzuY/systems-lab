@@ -88,6 +88,19 @@ impl NshContextTlv {
         )
     }
 
+    pub fn new_inband_path_trace(node_ids: &[u32]) -> Self {
+        let mut data = Vec::with_capacity(node_ids.len() * 4);
+        for &nid in node_ids {
+            data.extend_from_slice(&nid.to_be_bytes());
+        }
+        Self::new(
+            NSH_TLV_CLASS_IETF,
+            NSH_TLV_TYPE_INBAND_PATH_TRACE,
+            false,
+            data,
+        )
+    }
+
     /// Serializes this TLV to bytes.
     pub fn serialize(&self) -> Vec<u8> {
         let mut buf = Vec::new();
@@ -161,6 +174,17 @@ impl NshMd2Header {
     pub fn with_tlv(mut self, tlv: NshContextTlv) -> Self {
         self.tlvs.push(tlv);
         self
+    }
+
+    /// Appends an SFF node ID to the In-band Path Trace TLV (RFC 8300 Section 3.5.2).
+    pub fn append_path_trace_node(&mut self, node_id: u32) {
+        for tlv in &mut self.tlvs {
+            if tlv.class == NSH_TLV_CLASS_IETF && tlv.tlv_type == NSH_TLV_TYPE_INBAND_PATH_TRACE {
+                tlv.data.extend_from_slice(&node_id.to_be_bytes());
+                return;
+            }
+        }
+        self.tlvs.push(NshContextTlv::new_inband_path_trace(&[node_id]));
     }
 
     /// Total header length in 4-byte (32-bit) words.
@@ -300,6 +324,7 @@ pub struct NshMd2SffEngine {
     pub service_paths: std::collections::HashMap<(u32, u8), u32>, // (SPI, SI) -> Next Node ID
     pub supported_tlvs: std::collections::HashSet<(u16, u8)>,      // (Class, TLV Type)
     pub security_group_acls: std::collections::HashMap<(u32, u32), bool>, // (Tenant, SecGroup) -> Allowed
+    pub local_node_id: u32,
 }
 
 impl Default for NshMd2SffEngine {
@@ -324,7 +349,13 @@ impl NshMd2SffEngine {
             service_paths: std::collections::HashMap::new(),
             supported_tlvs: supported,
             security_group_acls: std::collections::HashMap::new(),
+            local_node_id: 0,
         }
+    }
+
+    pub fn with_local_node_id(mut self, node_id: u32) -> Self {
+        self.local_node_id = node_id;
+        self
     }
 
     pub fn register_supported_tlv(&mut self, class: u16, tlv_type: u8) {
@@ -383,6 +414,16 @@ impl NshMd2SffEngine {
         let next_si = current_si - 1;
         pkt.header.service_index = next_si;
 
+        // In-band Path Trace recording if enabled on this SFF
+        if self.local_node_id != 0 {
+            for tlv in &pkt.header.tlvs {
+                if tlv.class == NSH_TLV_CLASS_IETF && tlv.tlv_type == NSH_TLV_TYPE_INBAND_PATH_TRACE {
+                    pkt.header.append_path_trace_node(self.local_node_id);
+                    break;
+                }
+            }
+        }
+
         if let Some(&next_node) = self.service_paths.get(&(current_spi, current_si)) {
             SffForwardingAction::ForwardNextHop {
                 spi: current_spi,
@@ -439,8 +480,110 @@ impl NshMetadataExtractor {
         None
     }
 
+    /// Extracts traversed node IDs from the In-band Path Trace TLV.
+    pub fn extract_inband_path_trace(hdr: &NshMd2Header) -> Option<Vec<u32>> {
+        for tlv in &hdr.tlvs {
+            if tlv.class == NSH_TLV_CLASS_IETF && tlv.tlv_type == NSH_TLV_TYPE_INBAND_PATH_TRACE {
+                let mut nodes = Vec::new();
+                for chunk in tlv.data.chunks_exact(4) {
+                    nodes.push(u32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
+                }
+                return Some(nodes);
+            }
+        }
+        None
+    }
+
     /// Decapsulates an NSH packet at the tail of a service path, returning `(inner_next_protocol, payload)`.
     pub fn decapsulate(pkt: NshMd2Packet) -> (u8, Vec<u8>) {
         (pkt.header.next_protocol, pkt.payload)
+    }
+}
+
+/// Service Function Chaining (SFC) Traffic Classifier Rule (RFC 7665 / RFC 8300).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NshClassificationRule {
+    pub src_ip: Option<[u8; 4]>,
+    pub dst_ip: Option<[u8; 4]>,
+    pub ip_proto: Option<u8>,
+    pub dst_port: Option<u16>,
+    pub spi: u32,
+    pub initial_si: u8,
+    pub tenant_id: Option<u32>,
+    pub security_group: Option<u32>,
+    pub enable_path_trace: bool,
+}
+
+/// SFC Classifier Engine that inspects raw IPv4 packets and encapsulates them into NSH MD2.
+#[derive(Debug, Clone, Default)]
+pub struct NshClassifierEngine {
+    pub rules: Vec<NshClassificationRule>,
+}
+
+impl NshClassifierEngine {
+    pub fn new() -> Self {
+        NshClassifierEngine { rules: Vec::new() }
+    }
+
+    pub fn add_rule(&mut self, rule: NshClassificationRule) {
+        self.rules.push(rule);
+    }
+
+    /// Classifies a raw IPv4 packet and encapsulates it into an `NshMd2Packet` if a rule matches.
+    pub fn classify_and_encapsulate(&self, ipv4_packet: &[u8]) -> Option<NshMd2Packet> {
+        if ipv4_packet.len() < 20 {
+            return None;
+        }
+        let src_ip = [ipv4_packet[12], ipv4_packet[13], ipv4_packet[14], ipv4_packet[15]];
+        let dst_ip = [ipv4_packet[16], ipv4_packet[17], ipv4_packet[18], ipv4_packet[19]];
+        let proto = ipv4_packet[9];
+        let dst_port = if (proto == 6 || proto == 17) && ipv4_packet.len() >= 24 {
+            let ihl = ((ipv4_packet[0] & 0x0F) as usize) * 4;
+            if ipv4_packet.len() >= ihl + 4 {
+                Some(u16::from_be_bytes([ipv4_packet[ihl + 2], ipv4_packet[ihl + 3]]))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        for rule in &self.rules {
+            if let Some(sip) = rule.src_ip {
+                if sip != src_ip {
+                    continue;
+                }
+            }
+            if let Some(dip) = rule.dst_ip {
+                if dip != dst_ip {
+                    continue;
+                }
+            }
+            if let Some(p) = rule.ip_proto {
+                if p != proto {
+                    continue;
+                }
+            }
+            if let Some(dp) = rule.dst_port {
+                if dst_port != Some(dp) {
+                    continue;
+                }
+            }
+
+            // Rule matches: build NSH MD2 encapsulation
+            let mut hdr = NshMd2Header::new(rule.spi, rule.initial_si, NSH_NP_IPV4);
+            if let Some(tenant) = rule.tenant_id {
+                hdr = hdr.with_tlv(NshContextTlv::new_tenant_id(tenant));
+            }
+            if let Some(sg) = rule.security_group {
+                hdr = hdr.with_tlv(NshContextTlv::new_security_group_tag(sg));
+            }
+            if rule.enable_path_trace {
+                hdr = hdr.with_tlv(NshContextTlv::new_inband_path_trace(&[]));
+            }
+
+            return Some(NshMd2Packet::new(hdr, ipv4_packet.to_vec()));
+        }
+        None
     }
 }

@@ -153,3 +153,86 @@ fn test_nsh_md2_security_group_acl_and_metadata_extraction() {
     assert_eq!(inner_proto, NSH_NP_IPV4);
     assert_eq!(payload, b"Payload");
 }
+
+#[test]
+fn test_nsh_md2_inband_path_trace_telemetry() {
+    use toy_tcpip::nsh_md2::{NshContextTlv, NshMd2Header, NshMd2Packet, NshMd2SffEngine, NshMetadataExtractor};
+
+    let spi = 0x005001;
+    let mut sff1 = NshMd2SffEngine::new().with_local_node_id(101);
+    let mut sff2 = NshMd2SffEngine::new().with_local_node_id(102);
+    let mut sff3 = NshMd2SffEngine::new().with_local_node_id(103);
+
+    sff1.add_path_hop(spi, 5, 102);
+    sff2.add_path_hop(spi, 4, 103);
+    sff3.add_path_hop(spi, 3, 104);
+
+    let hdr = NshMd2Header::new(spi, 5, 0x01)
+        .with_tlv(NshContextTlv::new_inband_path_trace(&[]));
+    let mut pkt = NshMd2Packet::new(hdr, b"Payload Data".to_vec());
+
+    // Packet traverses SFF1 -> SFF2 -> SFF3
+    sff1.process_packet(&mut pkt);
+    assert_eq!(pkt.header.service_index, 4);
+
+    sff2.process_packet(&mut pkt);
+    assert_eq!(pkt.header.service_index, 3);
+
+    sff3.process_packet(&mut pkt);
+    assert_eq!(pkt.header.service_index, 2);
+
+    let trace = NshMetadataExtractor::extract_inband_path_trace(&pkt.header)
+        .expect("extract in-band trace");
+    assert_eq!(trace, vec![101, 102, 103]);
+}
+
+#[test]
+fn test_nsh_md2_classifier_engine_encapsulation() {
+    use toy_tcpip::nsh_md2::{
+        NshClassificationRule, NshClassifierEngine, NshMetadataExtractor, NSH_NP_IPV4,
+    };
+
+    let mut classifier = NshClassifierEngine::new();
+
+    // Rule: Match TCP (proto 6) dst_port 80 -> SPI 0x006001, SI 10, Tenant 400, SecGroup 15
+    classifier.add_rule(NshClassificationRule {
+        src_ip: None,
+        dst_ip: None,
+        ip_proto: Some(6),
+        dst_port: Some(80),
+        spi: 0x006001,
+        initial_si: 10,
+        tenant_id: Some(400),
+        security_group: Some(15),
+        enable_path_trace: true,
+    });
+
+    // Mock IPv4 TCP packet to port 80
+    // Header len = 20 bytes (IHL = 5), total len = 40 bytes
+    let mut raw_ip = vec![0u8; 40];
+    raw_ip[0] = 0x45; // IPv4, IHL = 5 (20 bytes)
+    raw_ip[9] = 6;    // TCP
+    raw_ip[12..16].copy_from_slice(&[10, 0, 0, 1]); // src IP
+    raw_ip[16..20].copy_from_slice(&[10, 0, 0, 2]); // dst IP
+    raw_ip[20..22].copy_from_slice(&12345u16.to_be_bytes()); // src port 12345
+    raw_ip[22..24].copy_from_slice(&80u16.to_be_bytes());    // dst port 80
+
+    let nsh_pkt = classifier
+        .classify_and_encapsulate(&raw_ip)
+        .expect("classify HTTP packet");
+
+    assert_eq!(nsh_pkt.header.service_path_id, 0x006001);
+    assert_eq!(nsh_pkt.header.service_index, 10);
+    assert_eq!(nsh_pkt.header.next_protocol, NSH_NP_IPV4);
+    assert_eq!(NshMetadataExtractor::extract_tenant_id(&nsh_pkt.header), Some(400));
+    assert_eq!(NshMetadataExtractor::extract_security_group_tag(&nsh_pkt.header), Some(15));
+    assert_eq!(NshMetadataExtractor::extract_inband_path_trace(&nsh_pkt.header), Some(vec![]));
+    assert_eq!(nsh_pkt.payload, raw_ip);
+
+    // Mock non-matching packet (UDP port 53)
+    let mut raw_udp = vec![0u8; 40];
+    raw_udp[0] = 0x45;
+    raw_udp[9] = 17; // UDP
+    raw_udp[22..24].copy_from_slice(&53u16.to_be_bytes());
+    assert!(classifier.classify_and_encapsulate(&raw_udp).is_none());
+}
