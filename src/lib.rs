@@ -268,6 +268,7 @@ pub mod ptp_telecom_gm_quality;
 pub mod ptp_telecom_tc;
 pub mod ptp_telecom_dual_plane;
 pub mod ptp_synce_hybrid;
+pub mod ptp_phc;
 pub mod ptp_time_error;
 pub mod qos;
 pub mod quic;
@@ -1335,5 +1336,8 @@ pub use ptp_synce_hybrid::{
 pub use ptp_telecom_dual_plane::{
     DualPlaneConfig, DualPlaneEngine, DualPlaneMetrics, PlaneDataset, PtpPlaneState,
     ProtectionSwitchMode, PtpPlaneId, SwitchReason,
+};
+pub use ptp_phc::{
+    PhcPacketTagger, PhcTxTimestampEntry, PhcTxTimestampRing, PtpCrossTimestamp, PtpHardwareClock,
 };
 
