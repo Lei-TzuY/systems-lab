@@ -62,6 +62,8 @@ pub struct PtpPdvFloorFilter {
     pub floor_threshold_percent: f64, // e.g. 5.0% lowest delay
     pub max_cluster_spread_ns: i64,    // Max allowable spread within floor cluster
     pub samples: VecDeque<PtpTimestampSample>,
+    pub asymmetry_compensation_ns: i64,
+    pub smoothed_offset_ns: Option<f64>,
 }
 
 /// PTP Time Error Conformance Metrics (ITU-T G.8271 / G.8275.1 / G.8275.2)
@@ -84,7 +86,14 @@ impl PtpPdvFloorFilter {
             floor_threshold_percent: floor_threshold_percent.clamp(0.01, 50.0),
             max_cluster_spread_ns: max_cluster_spread_ns.max(10),
             samples: VecDeque::with_capacity(window_size),
+            asymmetry_compensation_ns: 0,
+            smoothed_offset_ns: None,
         }
+    }
+
+    pub fn with_asymmetry_compensation(mut self, asym_ns: i64) -> Self {
+        self.asymmetry_compensation_ns = asym_ns;
+        self
     }
 
     /// Ingest a new PTP timestamp measurement sample into the sliding window
@@ -222,9 +231,9 @@ impl PtpPdvFloorFilter {
         let fwd_spread = fwd_delays[n - 1] - fwd_delays[0];
         let rev_spread = rev_delays[n - 1] - rev_delays[0];
 
-        // Standard two-way offset calculation on filtered delay floors:
-        // offset = (d_fwd - d_rev) / 2
-        let estimated_offset = (fwd_floor_avg - rev_floor_avg) / 2;
+        // Standard two-way offset calculation on filtered delay floors with asymmetry compensation:
+        // offset = ((d_fwd - d_rev) - asymmetry) / 2
+        let estimated_offset = ((fwd_floor_avg - rev_floor_avg) - self.asymmetry_compensation_ns) / 2;
         // meanPathDelay = (d_fwd + d_rev) / 2
         let mean_path_delay = (fwd_floor_avg + rev_floor_avg) / 2;
 
@@ -245,6 +254,56 @@ impl PtpPdvFloorFilter {
             floor_population_ratio,
             valid_samples_in_window: n,
         })
+    }
+
+    /// Computes percentage of samples in the window within `floor_width_ns` of the minimum delay
+    /// for forward and reverse directions: `(fwd_percent, rev_percent)` (ITU-T G.8275.2 Section 6.2).
+    pub fn floor_packet_percentage(&self, floor_width_ns: i64) -> (f64, f64) {
+        let n = self.samples.len();
+        if n == 0 {
+            return (0.0, 0.0);
+        }
+
+        let min_fwd = self.samples.iter().map(|s| s.forward_delay()).min().unwrap();
+        let min_rev = self.samples.iter().map(|s| s.reverse_delay()).min().unwrap();
+
+        let fwd_floor_count = self
+            .samples
+            .iter()
+            .filter(|s| s.forward_delay() <= min_fwd + floor_width_ns)
+            .count();
+        let rev_floor_count = self
+            .samples
+            .iter()
+            .filter(|s| s.reverse_delay() <= min_rev + floor_width_ns)
+            .count();
+
+        (
+            (fwd_floor_count as f64 / n as f64) * 100.0,
+            (rev_floor_count as f64 / n as f64) * 100.0,
+        )
+    }
+
+    /// Evaluates whether the floor packet rate in both forward and reverse paths meets the minimum
+    /// operational threshold required to maintain phase synchronization lock (ITU-T G.8275.2).
+    pub fn is_floor_rate_adequate(&self, min_rate_percent: f64, floor_width_ns: i64) -> bool {
+        let (fwd_rate, rev_rate) = self.floor_packet_percentage(floor_width_ns);
+        fwd_rate >= min_rate_percent && rev_rate >= min_rate_percent
+    }
+
+    /// Updates and returns the exponential moving average (EMA) of the estimated phase offset
+    /// with smoothing factor `alpha` in range (0.0, 1.0].
+    pub fn update_smoothed_offset(&mut self, alpha: f64) -> Option<f64> {
+        let current_estimate = self.compute_estimate()?;
+        let raw_offset = current_estimate.estimated_offset_ns as f64;
+        let clamped_alpha = alpha.clamp(0.001, 1.0);
+
+        let new_smoothed = match self.smoothed_offset_ns {
+            Some(prev) => prev * (1.0 - clamped_alpha) + raw_offset * clamped_alpha,
+            None => raw_offset,
+        };
+        self.smoothed_offset_ns = Some(new_smoothed);
+        Some(new_smoothed)
     }
 }
 

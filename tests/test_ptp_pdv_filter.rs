@@ -105,3 +105,53 @@ fn test_ptp_pdv_subwindow_lucky_packet_estimation() {
     assert_eq!(lucky_estimate.mean_path_delay_ns, 15_000);
     assert_eq!(lucky_estimate.estimated_offset_ns, 0);
 }
+
+#[test]
+fn test_ptp_pdv_floor_asymmetry_compensation() {
+    // True symmetric physical path delay = 20,000 ns, known static asymmetry = +400 ns
+    let mut filter = PtpPdvFloorFilter::new(10, 10.0, 100).with_asymmetry_compensation(400);
+
+    for seq in 0..10 {
+        let t1 = (seq as i64) * 1_000_000;
+        let t2 = t1 + 20_000;
+        let t3 = t2 + 10_000;
+        let t4 = t3 + 20_000;
+        filter.push_sample(PtpTimestampSample::new(seq, t1, t2, t3, t4));
+    }
+
+    let estimate = filter.compute_estimate().expect("estimate");
+    // Without compensation offset would be 0. With +400ns asymmetry compensation:
+    // offset = (0 - 400) / 2 = -200 ns
+    assert_eq!(estimate.estimated_offset_ns, -200);
+    assert_eq!(estimate.mean_path_delay_ns, 20_000);
+}
+
+#[test]
+fn test_ptp_pdv_floor_rate_monitoring_and_ema_smoothing() {
+    let mut filter = PtpPdvFloorFilter::new(20, 10.0, 100);
+
+    // 20 samples: 4 are clean floor (20%), 16 suffer +500ns queuing
+    for seq in 0..20 {
+        let is_floor = seq % 5 == 0;
+        let queuing = if is_floor { 0 } else { 500 };
+
+        let t1 = (seq as i64) * 1_000_000;
+        let t2 = t1 + 10_000 + queuing;
+        let t3 = t2 + 5_000;
+        let t4 = t3 + 10_000 + queuing;
+        filter.push_sample(PtpTimestampSample::new(seq, t1, t2, t3, t4));
+    }
+
+    // Floor packet percentage within 50ns of minimum delay
+    let (fwd_pct, rev_pct) = filter.floor_packet_percentage(50);
+    assert_eq!(fwd_pct, 20.0);
+    assert_eq!(rev_pct, 20.0);
+
+    // Adequacy check
+    assert!(filter.is_floor_rate_adequate(15.0, 50));
+    assert!(!filter.is_floor_rate_adequate(25.0, 50));
+
+    // EMA smoothing
+    let s1 = filter.update_smoothed_offset(0.5).expect("smooth 1");
+    assert_eq!(s1, 0.0); // raw offset is 0
+}
