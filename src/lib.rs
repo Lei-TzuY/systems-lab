@@ -263,6 +263,7 @@ pub mod nrf_5g;
 pub mod nssf_5g;
 pub mod nssaaf_5g;
 pub mod nsacf_5g;
+pub mod nsce_5g;
 pub mod nwdaf_5g;
 pub mod nsh;
 pub mod nsh_md2;
@@ -1690,6 +1691,11 @@ pub use mcx_cms_5g::{
     FloorRequestResult, FloorState, McxError, McxGroupConfig, McxServerEngine, McxServiceType,
     McxUserProfile,
 };
+pub use nsce_5g::{
+    NsceError, NsceServerEngine, SlaAssessmentResult, SliceAdaptationState, SliceCapability,
+    SliceCapabilityProfile, SliceSlaContract,
+};
+
 
 
 
