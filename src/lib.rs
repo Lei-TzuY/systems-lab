@@ -248,6 +248,7 @@ pub mod oran_fh_delay_mgmt;
 pub mod oran_cplane_ext;
 pub mod oran_iq_compression;
 pub mod oran_packet_proc;
+pub mod oran_mplane_fcaps;
 pub mod ospf;
 pub mod ospfv3;
 pub mod otlp;
@@ -1385,4 +1386,9 @@ pub use oran_cplane_ext::{
 };
 pub use oran_packet_proc::{
     OranDemuxEvent, OranFronthaulProcessor, OranStreamConfig, OranStreamStats,
+};
+pub use oran_mplane_fcaps::{
+    AlarmRecord, AlarmSeverity, DatastoreTarget, EditConfigOp, FaultManager, OranMplaneEngine,
+    OranMplaneRpc, OranMplaneRpcReply, OruOperationalState, PerformanceMeasurementBin,
+    YangDatastore, YangValue,
 };
