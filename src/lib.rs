@@ -270,6 +270,7 @@ pub mod nwdaf_5g;
 pub mod nsh;
 pub mod nsh_md2;
 pub mod nsh_md2_ext;
+pub mod ntn_5g;
 pub mod ntp;
 pub mod openflow;
 pub mod optical_dom;
@@ -1709,6 +1710,11 @@ pub use mb_upf_5g::{
     GnbBranchEndpoint, MbUpfEngine, MbUpfError, MbUpfSessionContext, MbsSessionType,
     MulticastFlowSpec, ReplicatedGtpPacket,
 };
+pub use ntn_5g::{
+    GroundUePosition, NtnEngine, NtnError, NtnHandoverStatus, NtnLinkMetrics, OrbitType,
+    SatelliteEphemeris,
+};
+
 
 
 
