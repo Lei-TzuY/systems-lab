@@ -245,6 +245,7 @@ pub mod mpls;
 pub mod mpls_oam;
 pub mod mpls_tp_oam;
 pub mod mbsf_5g;
+pub mod mb_upf_5g;
 pub mod mfaf_5g;
 pub mod mcx_cms_5g;
 pub mod mac_5g;
@@ -1704,6 +1705,11 @@ pub use seal_5g::{
 pub use iupf_5g::{
     DispatchedN9Packet, IUpfEngine, IUpfError, IUpfSessionContext, RoutingTarget, UlclFilterRule,
 };
+pub use mb_upf_5g::{
+    GnbBranchEndpoint, MbUpfEngine, MbUpfError, MbUpfSessionContext, MbsSessionType,
+    MulticastFlowSpec, ReplicatedGtpPacket,
+};
+
 
 
 
