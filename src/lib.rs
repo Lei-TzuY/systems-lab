@@ -32,6 +32,7 @@ pub mod bus;
 pub mod cbs;
 pub mod cdp;
 pub mod cfm;
+pub mod chf_5g;
 pub mod checksum;
 pub mod coap;
 pub mod congestion;
@@ -1543,6 +1544,14 @@ pub use nssf_5g::{
     NsSelectionResponse, NssaiAvailabilityUpdate, NssfEngine, SliceInfoType,
     SnssaiRejectionCause,
 };
+pub use chf_5g::{
+    CdrClosingCause, ChargingSessionState, ChfEngine, ChfSessionContext, FinalUnitAction,
+    FinalUnitIndication, GrantedQuotaUnit, InitialChargingRequest, InitialChargingResponse,
+    PduSessionChargingRecord, RatingPlan, ReportingReason, SubscriberAccount as ChfSubscriberAccount,
+    TerminationChargingRequest, TerminationChargingResponse, UpdateChargingRequest,
+    UpdateChargingResponse, UsedQuotaUnit,
+};
+
 
 
 
