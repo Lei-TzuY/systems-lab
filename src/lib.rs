@@ -240,6 +240,7 @@ pub mod mqtt;
 pub mod nas_5g;
 pub mod nat;
 pub mod nef_traffic_influence;
+pub mod nef_5g;
 pub mod netconf;
 pub mod netflow;
 pub mod netflow_v5;
@@ -1573,6 +1574,12 @@ pub use udr_5g::{
     SessionManagementData, SmPolicyData, TrafficInfluenceData, UdrDataChangeNotification,
     UdrDataChangeSubscription, UdrDataType, UdrEngine,
 };
+pub use nef_5g::{
+    DeviceTriggerRecord, DeviceTriggerRequest, DeviceTriggerStatus, GeoLocation,
+    InternalEventPayload, LocationInfo, NefEngine, NefEvent, NefEventNotification,
+    NefEventSubscription,
+};
+
 
 
 
