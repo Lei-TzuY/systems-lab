@@ -10,6 +10,7 @@
 #![allow(clippy::type_complexity)]
 
 pub mod arp;
+pub mod ausf_udm_5g;
 pub mod ats;
 pub mod bfd;
 pub mod bfd_v6;
@@ -1524,4 +1525,11 @@ pub use smf_5g::{
     ReleaseSmContextResponse, SmContextState, SmContextUpdateType, SmfEngine,
     SmfQosProfile, SmfSessionContext, UpdateSmContextRequest, UpdateSmContextResponse,
 };
+pub use ausf_udm_5g::{
+    derive_hxres_star, derive_k_seaf, sha256, AmSubscriptionData, AuthenticationVector,
+    AusfAuthContext, AusfEngine, DnnConfiguration, UdmEngine, UdmSecurityRecord,
+    UeAuthenticationConfirmationRequest, UeAuthenticationConfirmationResponse,
+    UeAuthenticationRequest, UeAuthenticationResponse,
+};
+
 
