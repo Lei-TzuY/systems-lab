@@ -254,6 +254,7 @@ pub mod oran_iq_compression;
 pub mod oran_packet_proc;
 pub mod oran_mplane_fcaps;
 pub mod oran_a1_interface;
+pub mod oran_o2_interface;
 pub mod ospf;
 pub mod ospfv3;
 pub mod otlp;
@@ -1429,4 +1430,9 @@ pub use oran_a1_interface::{
     A1EiJob, A1EiType, A1EnforcementState, A1HttpMethod, A1InterfaceEngine, A1PolicyInstance,
     A1PolicyStatus, A1PolicyType, A1RestRequest, A1RestResponse, A1Role, A1StatusCode,
     SliceSlaPolicyPayload,
+};
+pub use oran_o2_interface::{
+    AcceleratorResource, AcceleratorType, ComputeNodeResource, NfDeploymentDescriptor,
+    NfDeploymentInstance, NfDeploymentState, O2InterfaceEngine, O2imsAlarmEvent,
+    O2imsAlarmSeverity, OranNfType, ResourcePool,
 };
