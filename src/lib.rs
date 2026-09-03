@@ -278,6 +278,7 @@ pub mod oran_fh_cus;
 pub mod oran_fh_delay_mgmt;
 pub mod oran_cplane_ext;
 pub mod oran_iq_compression;
+pub mod oran_bfp_compression;
 pub mod oran_packet_proc;
 pub mod oran_mplane_fcaps;
 pub mod oran_a1_interface;
@@ -1719,6 +1720,10 @@ pub use upip_5g::{
     compute_mac_i, MaxDataRatePerUe, UpIntegrityAlgorithm, UpIntegrityPolicy, UpSecurityContext,
     UpipEngine, UpipError,
 };
+pub use oran_bfp_compression::{
+    BfpError, ComplexIq, CompressedPrbBlock, IqQualityMetrics, ModulationScheme, OranBfpEngine,
+};
+
 
 
 
