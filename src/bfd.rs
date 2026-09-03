@@ -144,10 +144,11 @@ impl BfdAuthHeader {
         let key_id = data[2];
 
         match auth_type {
-            BFD_AUTH_SIMPLE_PASSWORD => {
+            BFD_AUTH_SIMPLE_PASSWORD if (4..=19).contains(&auth_len) => {
                 let password = data[3..auth_len].to_vec();
                 Some(BfdAuthHeader::SimplePassword { key_id, password })
             }
+            BFD_AUTH_SIMPLE_PASSWORD => None,
             BFD_AUTH_KEYED_MD5 | BFD_AUTH_METICULOUS_KEYED_MD5 if auth_len >= 24 => {
                 let sequence_number = u32::from_be_bytes(data[4..8].try_into().ok()?);
                 let mut auth_key_hash = [0u8; 16];
@@ -598,6 +599,11 @@ mod tests {
         assert_eq!(parsed.my_discriminator, 0x12345678);
         assert_eq!(parsed.your_discriminator, 0x87654321);
         assert_eq!(parsed.desired_min_tx_interval_us, 50_000);
+    }
+
+    #[test]
+    fn test_bfd_simple_password_rejects_zero_length_password() {
+        assert_eq!(BfdAuthHeader::parse(&[BFD_AUTH_SIMPLE_PASSWORD, 3, 7]), None);
     }
 
     #[test]
