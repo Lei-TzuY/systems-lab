@@ -324,6 +324,7 @@ pub mod qos;
 pub mod quic;
 pub mod quic_datagram;
 pub mod radius;
+pub mod redcap_5g;
 pub mod rip;
 pub mod rlc_5g;
 pub mod rrc_5g;
@@ -1728,6 +1729,11 @@ pub use bdt_5g::{
     BdtEngine, BdtError, BdtNegotiationSession, BdtNegotiationState, BdtPolicyCandidate,
     BdtTransferRequest, TimeWindow,
 };
+pub use redcap_5g::{
+    CellRedCapConfig, RedCapCapability, RedCapDeviceType, RedCapDuplexMode, RedCapEngine,
+    RedCapError, RedCapModulation, RedCapUeContext,
+};
+
 
 
 
