@@ -31,6 +31,7 @@ pub enum NfType {
     Nssaaf,
     Nsacf,
     Ees,
+    Ucmf,
 }
 
 impl NfType {
@@ -60,6 +61,7 @@ impl NfType {
             NfType::Nssaaf => "NSSAAF",
             NfType::Nsacf => "NSACF",
             NfType::Ees => "EES",
+            NfType::Ucmf => "UCMF",
         }
     }
 }

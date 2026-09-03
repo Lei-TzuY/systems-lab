@@ -398,6 +398,7 @@ pub mod twamp;
 pub mod udp;
 pub mod udr_5g;
 pub mod udsf_5g;
+pub mod ucmf_5g;
 pub mod upf_pipeline_5g;
 pub mod vlan;
 pub mod vpls;
@@ -1645,6 +1646,10 @@ pub use ees_5g::{
     EasDiscoveryRequest, EasDiscoveryResult, EasProfile, EcsEngine, EcsProvisioningRequest,
     EcsProvisioningResponse, EdgeAppError, EesEngine, EesProfile,
 };
+pub use ucmf_5g::{
+    RacId, RacIdType, RadioCapEntry, RadioCapFormat, UcmfEngine, UcmfError,
+};
+
 
 
 
