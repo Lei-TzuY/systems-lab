@@ -87,6 +87,7 @@ pub mod diameter_swm;
 pub mod diameter_sy;
 pub mod diameter_zh;
 pub mod dns;
+pub mod e1ap_5g;
 pub mod ecpri;
 pub mod eigrp;
 pub mod erspan;
@@ -1403,4 +1404,10 @@ pub use f1ap_5g::{
     F1SetupResponse, F1apEngine, F1apPdu, F1apRole, F1apState, F1apUeContext,
     InitialUlRrcMessageTransfer, RlcMode, ServedCellInfo, UeContextReleaseCommand,
     UeContextSetupRequest, UeContextSetupResponse, UlRrcMessageTransfer, F1AP_SCTP_PORT,
+};
+pub use e1ap_5g::{
+    BearerContextReleaseCommand, BearerContextSetupRequest, BearerContextSetupResponse,
+    E1apBearerContext, E1apDrbSetupItem, E1apDrbSetupResponseItem, E1apEngine, E1apPduSessionItem,
+    E1apPduSessionResponseItem, E1apRole, E1apState, GnbCuUpE1SetupFailure, GnbCuUpE1SetupRequest,
+    GnbCuUpE1SetupResponse, E1AP_SCTP_PORT,
 };
