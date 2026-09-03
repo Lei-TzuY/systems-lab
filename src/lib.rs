@@ -257,6 +257,7 @@ pub mod oran_packet_proc;
 pub mod oran_mplane_fcaps;
 pub mod oran_a1_interface;
 pub mod oran_o2_interface;
+pub mod oran_e2sm;
 pub mod ospf;
 pub mod ospfv3;
 pub mod otlp;
@@ -1503,4 +1504,17 @@ pub use nas_5g::{
     NAS_5GSM_PDU_SESSION_RELEASE_COMPLETE, NAS_5GSM_PDU_SESSION_RELEASE_REQUEST,
     SHT_INTEGRITY_AND_CIPHERED, SHT_INTEGRITY_AND_CIPHERED_WITH_NEW_CONTEXT,
     SHT_INTEGRITY_PROTECTED, SHT_INTEGRITY_WITH_NEW_CONTEXT, SHT_PLAIN_NAS,
+};
+pub use oran_e2sm::{
+    E2NodeSmEngine, E2smEngine, KpmActionDefinition, KpmEventTriggerDefinition,
+    KpmIndicationHeader, KpmIndicationMessage, KpmMeasType, KpmMeasurementRecord,
+    KpmRecordValue, KpmSliceMeasurement, KpmUeMeasurement, RcControlHeader,
+    RcControlMessage, RcControlOutcome, RcControlParameter, RcParameterValue,
+    SlaPolicyRule, SliceSlaAssuranceXApp, E2SM_KPM_RAN_FUNCTION_ID, E2SM_RC_RAN_FUNCTION_ID,
+    RC_ACTION_ADJUST_A3_OFFSET, RC_ACTION_SET_PRB_QUOTA, RC_ACTION_STEER_TRAFFIC,
+    RC_ACTION_THROTTLE_BEARER, RC_PARAM_ID_A3_OFFSET_DB, RC_PARAM_ID_GUARANTEED_PRB_PPM,
+    RC_PARAM_ID_MAX_BITRATE_KBPS, RC_PARAM_ID_MAX_PRB_PPM, RC_PARAM_ID_TIME_TO_TRIGGER_MS,
+    RC_PARAM_ID_TRAFFIC_OFFLOAD_RATIO_PPM, RC_STYLE_CONNECTED_MODE_MOBILITY,
+    RC_STYLE_RADIO_RESOURCE_ALLOCATION, RC_STYLE_SLICE_SLA_ENFORCEMENT,
+    RC_STYLE_TRAFFIC_STEERING,
 };
