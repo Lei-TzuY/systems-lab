@@ -9,6 +9,7 @@
 #![allow(clippy::bool_assert_comparison)]
 #![allow(clippy::type_complexity)]
 
+pub mod adrf_5g;
 pub mod arp;
 pub mod ausf_udm_5g;
 pub mod ats;
@@ -1663,6 +1664,10 @@ pub use ddnmf_5g::{
 pub use pkmf_5g::{
     KeyRequestResponse, Pc5TrafficKeys, PkmfEngine, PkmfError, ProSeGroupKeyRecord,
 };
+pub use adrf_5g::{
+    AdrfEngine, AdrfError, AnalyticsDataRecord, AnalyticsDomain, MlModelRecord,
+};
+
 
 
 
