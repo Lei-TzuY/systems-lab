@@ -291,6 +291,7 @@ pub mod quic;
 pub mod quic_datagram;
 pub mod radius;
 pub mod rip;
+pub mod rlc_5g;
 pub mod roce;
 pub mod router;
 pub mod router_ipv6;
@@ -1439,4 +1440,8 @@ pub use oran_o2_interface::{
 };
 pub use pdcp_5g::{
     PdcpBearerType, PdcpControlPdu, PdcpDataPdu, PdcpEntity, PdcpSnSize,
+};
+pub use rlc_5g::{
+    RlcAmDataPdu, RlcAmSnSize, RlcEntity, RlcEntityMode, RlcNackRange, RlcSegmentationInfo,
+    RlcStatusPdu, RlcUmSnSize,
 };
