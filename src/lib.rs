@@ -301,6 +301,7 @@ pub mod sai;
 pub mod sba_5g;
 pub mod sba_events;
 pub mod sbfd;
+pub mod sdap_5g;
 pub mod sctp;
 pub mod sflow;
 pub mod shell;
@@ -1444,4 +1445,9 @@ pub use pdcp_5g::{
 pub use rlc_5g::{
     RlcAmDataPdu, RlcAmSnSize, RlcEntity, RlcEntityMode, RlcNackRange, RlcSegmentationInfo,
     RlcStatusPdu, RlcUmSnSize,
+};
+pub use sdap_5g::{
+    MappingOrigin, QosFlowMapping, SdapControlPdu, SdapControlPduType, SdapDataPdu,
+    SdapDirection, SdapEntity, SdapHeader, SdapHeaderConfig, SdapRole, SDAP_HEADER_LEN,
+    SDAP_MAX_QFI,
 };
