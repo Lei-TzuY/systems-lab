@@ -314,6 +314,7 @@ pub mod sba_5g;
 pub mod sba_events;
 pub mod sbfd;
 pub mod sdap_5g;
+pub mod sepp_5g;
 pub mod smf_5g;
 pub mod sctp;
 pub mod sflow;
@@ -1579,6 +1580,11 @@ pub use nef_5g::{
     InternalEventPayload, LocationInfo, NefEngine, NefEvent, NefEventNotification,
     NefEventSubscription,
 };
+pub use sepp_5g::{
+    DecapsulatedSbiMessage, IpxModification, IpxModificationPolicy, N32SessionContext,
+    N32cState, N32fMessage, PrinsCipherSuite, SecurityCapability, SeppEngine, SeppError,
+};
+
 
 
 
