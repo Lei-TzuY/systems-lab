@@ -149,6 +149,7 @@ pub mod flowspec_l2;
 pub mod flowspec_redirect_vrf;
 pub mod flowspec_v6;
 pub mod flowspec_v6_actions;
+pub mod f1ap_5g;
 pub mod fragment;
 pub mod frer;
 pub mod frer_srf;
@@ -1396,4 +1397,10 @@ pub use oran_mplane_fcaps::{
 pub use nr_up_38425::{
     DddsCause, DiscardedSnBlock, LostSnRange, NrUpDlDataDeliveryStatus, NrUpDlUserData, NrUpError,
     NrUpFlowController, NrUpPduType, NR_U_MAX_SN,
+};
+pub use f1ap_5g::{
+    DlRrcMessageTransfer, DrbSetupItem, DrbSetupResponseItem, F1SetupFailure, F1SetupRequest,
+    F1SetupResponse, F1apEngine, F1apPdu, F1apRole, F1apState, F1apUeContext,
+    InitialUlRrcMessageTransfer, RlcMode, ServedCellInfo, UeContextReleaseCommand,
+    UeContextSetupRequest, UeContextSetupResponse, UlRrcMessageTransfer, F1AP_SCTP_PORT,
 };
