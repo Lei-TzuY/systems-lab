@@ -247,6 +247,7 @@ pub mod nr_up_38425;
 pub mod nrf_oauth;
 pub mod nrf_5g;
 pub mod nssf_5g;
+pub mod nwdaf_5g;
 pub mod nsh;
 pub mod nsh_md2;
 pub mod nsh_md2_ext;
@@ -1556,6 +1557,13 @@ pub use nrf_5g::{
     DiscoveryQuery, DiscoveryResult, NfLifecycleEvent, NfProfileRecord, NfServiceRecord,
     NfStatus, NfStatusNotification, NfStatusSubscription, NrfEngine,
 };
+pub use nwdaf_5g::{
+    AbnormalBehaviourReport, AnalyticsId, AnalyticsInfoRequest, AnalyticsInfoResponse,
+    AnalyticsNotification, AnalyticsSubscription, AnalyticsThreshold, CongestionReport,
+    HoltLinearPredictor, NwdafEngine, ServiceExperienceReport, SliceLoadReport,
+    ZScoreAnomalyDetector,
+};
+
 
 
 
