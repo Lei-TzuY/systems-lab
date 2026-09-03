@@ -521,7 +521,14 @@ impl BfdSession {
 
     /// Advances the BFD FSM upon receiving a remote BFD control packet.
     pub fn process_packet(&mut self, pkt: &BfdControlPacket) -> Option<BfdControlPacket> {
-        if pkt.my_discriminator == 0 || pkt.detect_mult == 0 {
+        if pkt.version != 1
+            || (pkt.length as usize) < BFD_MIN_PACKET_LEN
+            || pkt.my_discriminator == 0
+            || pkt.detect_mult == 0
+            || (pkt.poll && pkt.r#final)
+            || pkt.auth
+            || pkt.multipoint
+        {
             return None;
         }
         if pkt.your_discriminator != 0 && pkt.your_discriminator != self.local_discriminator {
@@ -710,6 +717,30 @@ mod tests {
     }
 
     #[test]
+    fn test_bfd_session_rejects_invalid_version_without_mutation() {
+        let mut session = BfdSession::new(0x1001, 100_000);
+        session.remote_discriminator = 0x2002;
+        let mut incoming = BfdControlPacket::build_control(BfdState::Down, 0x3003, 0, 100_000);
+        incoming.version = 0;
+
+        assert!(session.process_packet(&incoming).is_none());
+        assert_eq!(session.state, BfdState::Down);
+        assert_eq!(session.remote_discriminator, 0x2002);
+    }
+
+    #[test]
+    fn test_bfd_session_rejects_short_length_without_mutation() {
+        let mut session = BfdSession::new(0x1001, 100_000);
+        session.remote_discriminator = 0x2002;
+        let mut incoming = BfdControlPacket::build_control(BfdState::Down, 0x3003, 0, 100_000);
+        incoming.length = (BFD_MIN_PACKET_LEN - 1) as u8;
+
+        assert!(session.process_packet(&incoming).is_none());
+        assert_eq!(session.state, BfdState::Down);
+        assert_eq!(session.remote_discriminator, 0x2002);
+    }
+
+    #[test]
     fn test_bfd_session_rejects_zero_my_discriminator_without_mutation() {
         let mut session = BfdSession::new(0x1001, 100_000);
         session.remote_discriminator = 0x2002;
@@ -733,6 +764,41 @@ mod tests {
     }
 
     #[test]
+    fn test_bfd_session_rejects_unverified_auth_without_mutation() {
+        let mut session = BfdSession::new(0x1001, 100_000);
+        session.remote_discriminator = 0x2002;
+        let mut incoming = BfdControlPacket::build_control(BfdState::Down, 0x3003, 0, 100_000);
+        incoming.auth = true;
+
+        assert!(session.process_packet(&incoming).is_none());
+        assert_eq!(session.state, BfdState::Down);
+        assert_eq!(session.remote_discriminator, 0x2002);
+    }
+
+    #[test]
+    fn test_bfd_session_rejects_multipoint_without_mutation() {
+        let mut session = BfdSession::new(0x1001, 100_000);
+        session.remote_discriminator = 0x2002;
+        let mut incoming = BfdControlPacket::build_control(BfdState::Down, 0x3003, 0, 100_000);
+        incoming.multipoint = true;
+
+        assert!(session.process_packet(&incoming).is_none());
+        assert_eq!(session.state, BfdState::Down);
+        assert_eq!(session.remote_discriminator, 0x2002);
+    }
+
+    #[test]
+    fn test_bfd_session_rejects_poll_and_final_without_mutation() {
+        let mut session = BfdSession::new(0x1001, 100_000);
+        session.remote_discriminator = 0x2002;
+        let mut incoming = BfdControlPacket::build_control(BfdState::Down, 0x3003, 0, 100_000);
+        incoming.poll = true;
+        incoming.r#final = true;
+
+        assert!(session.process_packet(&incoming).is_none());
+        assert_eq!(session.state, BfdState::Down);
+        assert_eq!(session.remote_discriminator, 0x2002);
+    }
     fn test_bfd_session_rejects_zero_your_discriminator_for_init_packet() {
         let mut session = BfdSession::new(0x1001, 100_000);
         let incoming = BfdControlPacket::build_control(BfdState::Init, 0x3003, 0, 100_000);
