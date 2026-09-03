@@ -255,6 +255,7 @@ pub mod nrf_oauth;
 pub mod nrf_5g;
 pub mod nssf_5g;
 pub mod nssaaf_5g;
+pub mod nsacf_5g;
 pub mod nwdaf_5g;
 pub mod nsh;
 pub mod nsh_md2;
@@ -1635,6 +1636,11 @@ pub use nssaaf_5g::{
     EapCode, EapPacket, NssaafEngine, NssaafError, SliceAuthContext, SliceAuthStatus,
     SliceRevocationNotification, Snssai as NssaafSnssai,
 };
+pub use nsacf_5g::{
+    NsacAdmissionResult, NsacUpdateAction, NsacfEngine, NsacfError, SliceNsacProfile,
+    SliceUtilizationStatus,
+};
+
 
 
 
