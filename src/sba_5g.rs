@@ -28,6 +28,7 @@ pub enum NfType {
     Udsf,
     Gmlc,
     Easdf,
+    Nssaaf,
 }
 
 impl NfType {
@@ -54,6 +55,7 @@ impl NfType {
             NfType::Udsf => "UDSF",
             NfType::Gmlc => "GMLC",
             NfType::Easdf => "EASDF",
+            NfType::Nssaaf => "NSSAAF",
         }
     }
 }
