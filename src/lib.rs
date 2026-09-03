@@ -232,6 +232,7 @@ pub mod mldp;
 pub mod mpls;
 pub mod mpls_oam;
 pub mod mpls_tp_oam;
+pub mod mac_5g;
 pub mod mqtt;
 pub mod nat;
 pub mod nef_traffic_influence;
@@ -1450,4 +1451,10 @@ pub use sdap_5g::{
     MappingOrigin, QosFlowMapping, SdapControlPdu, SdapControlPduType, SdapDataPdu,
     SdapDirection, SdapEntity, SdapHeader, SdapHeaderConfig, SdapRole, SDAP_HEADER_LEN,
     SDAP_MAX_QFI,
+};
+pub use mac_5g::{
+    HarqProcess, HarqState, LogicalChannelConfig, LogicalChannelState, MacEntity, MacPdu,
+    MacPduElement, MacSubheader, MAC_LCID_CRNTI, MAC_LCID_DRX_CMD, MAC_LCID_LONG_BSR,
+    MAC_LCID_PADDING, MAC_LCID_SHORT_BSR, MAC_LCID_SINGLE_ENTRY_PHR, MAC_LCID_TA_CMD,
+    MAC_MAX_HARQ_PROCESSES,
 };
