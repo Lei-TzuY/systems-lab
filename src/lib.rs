@@ -87,6 +87,7 @@ pub mod diameter_swm;
 pub mod diameter_sy;
 pub mod diameter_zh;
 pub mod dns;
+pub mod ecpri;
 pub mod eigrp;
 pub mod erspan;
 pub mod etag;
@@ -242,6 +243,8 @@ pub mod nsh_md2_ext;
 pub mod ntp;
 pub mod openflow;
 pub mod optical_dom;
+pub mod oran_fh_cus;
+pub mod oran_fh_delay_mgmt;
 pub mod ospf;
 pub mod ospfv3;
 pub mod otlp;
@@ -270,6 +273,7 @@ pub mod ptp_telecom_dual_plane;
 pub mod ptp_synce_hybrid;
 pub mod ptp_phc;
 pub mod ptp_5g_tdd_sync;
+pub mod ptp_telecom_node;
 pub mod ptp_time_error;
 pub mod qos;
 pub mod quic;
@@ -1350,4 +1354,22 @@ pub use tsn_8021cm_fronthaul::{
     EcpriTrafficClass, FronthaulBridgeHop, FronthaulPathEvaluation, Ieee8021CmEngine,
     Ieee8021CmProfile,
 };
-
+pub use ecpri::{
+    EcpriCommonHeader, EcpriDelayAction, EcpriDelayMeasurement, EcpriError, EcpriIqReassembler,
+    EcpriMessage, EcpriMessageType, EcpriOwdEngine, EcpriPacket, EcpriSeqId, EcpriTimestamp,
+    IqReassemblyEvent, OwdEvent, OwdMeasurementResult, ECPRI_ETHERTYPE, ECPRI_UDP_PORT,
+};
+pub use oran_fh_cus::{
+    CPlaneMessage, CPlaneSection, DataDirection, EaxcId, EaxcIdFormat, OranError, OranFlowMonitor,
+    OranFlowStats, OranRadioHeader, OranSectionType, UdCompHeader, UdCompMethod, UPlaneMessage,
+    UPlaneSection,
+};
+pub use oran_fh_delay_mgmt::{
+    DelayMgmtError, FronthaulWindowKind, NetworkDelayBudget, OduReceptionWindow,
+    OduTransmissionWindow, OranDelayManager, OruReceptionWindow, OruUplinkWindow,
+    OruWindowCapability, WindowCompatibility, WindowVerdict,
+};
+pub use ptp_telecom_node::{
+    TelecomAlarm, TelecomSyncCycleResult, TelecomSyncNode, TelecomSyncNodeConfig,
+    TelecomSyncStatusReport,
+};
