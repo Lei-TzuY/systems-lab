@@ -26,6 +26,7 @@ pub enum NfType {
     N3iwf,
     Eir,
     Udsf,
+    Gmlc,
 }
 
 impl NfType {
@@ -50,6 +51,7 @@ impl NfType {
             NfType::N3iwf => "N3IWF",
             NfType::Eir => "EIR",
             NfType::Udsf => "UDSF",
+            NfType::Gmlc => "GMLC",
         }
     }
 }

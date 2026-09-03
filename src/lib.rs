@@ -169,6 +169,7 @@ pub mod geneve_pmtud;
 pub mod geneve_security;
 pub mod geneve_sfc;
 pub mod geneve_telemetry_opt;
+pub mod gmlc_5g;
 pub mod glbp;
 pub mod gnmi;
 pub mod gnoi;
@@ -1619,6 +1620,12 @@ pub use oran_splane_sync::{
     LlsConfig, OranSplaneSyncEngine, PtpClockQuality, SplaneSyncState, SyncEQl, TimeErrorMetrics,
     LINK_LOCK_THRESHOLD_NS, MAX_TDD_TIME_ERROR_NS, OCXO_DRIFT_NS_PER_SEC,
 };
+pub use gmlc_5g::{
+    CircularGeoFence, DeferredLocationSub, GeoFenceEvent, GmlcEngine, GmlcError, LcsClientClass,
+    PrivacyConsent, ProvideLocationRequest as GmlcProvideLocationRequest,
+    ProvideLocationResponse as GmlcProvideLocationResponse,
+};
+
 
 
 
