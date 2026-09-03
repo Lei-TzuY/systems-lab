@@ -94,6 +94,7 @@ pub mod easdf_5g;
 pub mod e1ap_5g;
 pub mod e2ap_oran;
 pub mod eir_5g;
+pub mod ees_5g;
 pub mod ecpri;
 pub mod eigrp;
 pub mod erspan;
@@ -1640,6 +1641,11 @@ pub use nsacf_5g::{
     NsacAdmissionResult, NsacUpdateAction, NsacfEngine, NsacfError, SliceNsacProfile,
     SliceUtilizationStatus,
 };
+pub use ees_5g::{
+    EasDiscoveryRequest, EasDiscoveryResult, EasProfile, EcsEngine, EcsProvisioningRequest,
+    EcsProvisioningResponse, EdgeAppError, EesEngine, EesProfile,
+};
+
 
 
 
