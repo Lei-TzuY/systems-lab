@@ -332,6 +332,7 @@ pub mod sba_5g;
 pub mod sba_events;
 pub mod sbfd;
 pub mod sdap_5g;
+pub mod seal_5g;
 pub mod sepp_5g;
 pub mod scp_5g;
 pub mod smf_5g;
@@ -1695,6 +1696,11 @@ pub use nsce_5g::{
     NsceError, NsceServerEngine, SlaAssessmentResult, SliceAdaptationState, SliceCapability,
     SliceCapabilityProfile, SliceSlaContract,
 };
+pub use seal_5g::{
+    GeoPoint, GeofenceZone, QosReservation, SealAlertEvent, SealError, SealServerEngine, ValDomain,
+    ValGroup,
+};
+
 
 
 
