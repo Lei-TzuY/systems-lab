@@ -39,6 +39,7 @@ pub enum NfType {
     Dccf,
     Mfaf,
     Wagf,
+    Tngf,
 }
 
 impl NfType {
@@ -76,6 +77,7 @@ impl NfType {
             NfType::Dccf => "DCCF",
             NfType::Mfaf => "MFAF",
             NfType::Wagf => "W-AGF",
+            NfType::Tngf => "TNGF",
         }
     }
 }

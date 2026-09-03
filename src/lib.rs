@@ -367,6 +367,7 @@ pub mod tcp_seq;
 pub mod tftp;
 pub mod ti_lfa;
 pub mod tls;
+pub mod tngf_5g;
 pub mod transition;
 pub mod tsn_8021cm_fronthaul;
 pub mod tsn_ats_multihop;
@@ -1681,6 +1682,10 @@ pub use wagf_5g::{
     GlobalLineId, QosMappingRule, RgType, WagfEngine, WagfError, WirelineSessionContext,
     WirelineSessionState,
 };
+pub use tngf_5g::{
+    TnapInfo, TngfEngine, TngfError, TngfSessionContext, TngfSessionState, TrustedAccessType,
+};
+
 
 
 
