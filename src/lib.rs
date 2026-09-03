@@ -281,6 +281,7 @@ pub mod preemption;
 pub mod psfp;
 pub mod ptp;
 pub mod ptp_apts;
+pub mod ptp_g8275_2;
 pub mod ptp_fiber_dispersion;
 pub mod ptp_high_accuracy;
 pub mod ptp_pdv_filter;
@@ -1584,6 +1585,11 @@ pub use sepp_5g::{
     DecapsulatedSbiMessage, IpxModification, IpxModificationPolicy, N32SessionContext,
     N32cState, N32fMessage, PrinsCipherSuite, SecurityCapability, SeppEngine, SeppError,
 };
+pub use ptp_g8275_2::{
+    G8275_2MasterCandidate, G8275_2MasterEngine, G8275_2MessageType, G8275_2SlaveEngine,
+    G8275_2SlaveState, UnicastGrant, UnicastLease, UnicastRequest,
+};
+
 
 
 
