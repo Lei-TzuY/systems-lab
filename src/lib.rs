@@ -245,6 +245,7 @@ pub mod netflow_v5;
 pub mod ngap_5g;
 pub mod nr_up_38425;
 pub mod nrf_oauth;
+pub mod nrf_5g;
 pub mod nssf_5g;
 pub mod nsh;
 pub mod nsh_md2;
@@ -1551,6 +1552,11 @@ pub use chf_5g::{
     TerminationChargingRequest, TerminationChargingResponse, UpdateChargingRequest,
     UpdateChargingResponse, UsedQuotaUnit,
 };
+pub use nrf_5g::{
+    DiscoveryQuery, DiscoveryResult, NfLifecycleEvent, NfProfileRecord, NfServiceRecord,
+    NfStatus, NfStatusNotification, NfStatusSubscription, NrfEngine,
+};
+
 
 
 
