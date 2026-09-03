@@ -89,6 +89,7 @@ pub mod diameter_slh;
 pub mod diameter_swm;
 pub mod diameter_sy;
 pub mod diameter_zh;
+pub mod ddnmf_5g;
 pub mod dns;
 pub mod easdf_5g;
 pub mod e1ap_5g;
@@ -1654,6 +1655,11 @@ pub use mbsf_5g::{
     CellDeliveryMode, MbsDeliveryMethod, MbsError, MbsSessionContext, MbsSessionState,
     MbsServiceType, MbsfEngine, Tmgi,
 };
+pub use ddnmf_5g::{
+    AnnouncementRecord, DdnmfEngine, DdnmfError, MatchReportResult, MonitorRecord, ProSeAppCode,
+    ProSeDiscoveryRole,
+};
+
 
 
 
