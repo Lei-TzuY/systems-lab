@@ -88,6 +88,7 @@ pub mod diameter_sy;
 pub mod diameter_zh;
 pub mod dns;
 pub mod e1ap_5g;
+pub mod e2ap_oran;
 pub mod ecpri;
 pub mod eigrp;
 pub mod erspan;
@@ -1415,4 +1416,11 @@ pub use e1ap_5g::{
 pub use upf_pipeline_5g::{
     GateStatus, PacketProcessingResult, TokenBucketPolicer, UpfBar, UpfFar, UpfPdr, UpfPipeline,
     UpfQer, UpfSession, UpfUrr, UsageReport,
+};
+pub use e2ap_oran::{
+    E2NodeType, E2SetupFailure, E2SetupRequest, E2SetupResponse, E2apEngine, E2apRole, E2apState,
+    GlobalE2NodeId, KpmMetricsPayload, RanFunctionDefinition, RicActionItem, RicActionType,
+    RicControlAcknowledge, RicControlRequest, RicIndication, RicIndicationType, RicRequestId,
+    RicSubscriptionRequest, RicSubscriptionResponse, E2AP_SCTP_PORT, RAN_FUNCTION_ID_KPM,
+    RAN_FUNCTION_ID_NI, RAN_FUNCTION_ID_RC,
 };
