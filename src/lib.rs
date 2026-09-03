@@ -293,6 +293,7 @@ pub mod quic_datagram;
 pub mod radius;
 pub mod rip;
 pub mod rlc_5g;
+pub mod rrc_5g;
 pub mod roce;
 pub mod router;
 pub mod router_ipv6;
@@ -1457,4 +1458,14 @@ pub use mac_5g::{
     MacPduElement, MacSubheader, MAC_LCID_CRNTI, MAC_LCID_DRX_CMD, MAC_LCID_LONG_BSR,
     MAC_LCID_PADDING, MAC_LCID_SHORT_BSR, MAC_LCID_SINGLE_ENTRY_PHR, MAC_LCID_TA_CMD,
     MAC_MAX_HARQ_PROCESSES,
+};
+pub use rrc_5g::{
+    CipheringAlgorithm, IntegrityAlgorithm, MasterInformationBlock, MeasResultServingCell,
+    MeasurementReport, PagingMessage, PagingRecord, RadioBearerConfig, RrcDrbConfig,
+    RrcEngine, RrcEstablishmentCause, RrcMessage, RrcReconfiguration, RrcReconfigurationComplete,
+    RrcReestablishment, RrcReestablishmentCause, RrcReestablishmentComplete,
+    RrcReestablishmentRequest, RrcRelease, RrcReleaseCause, RrcResume, RrcResumeCause,
+    RrcResumeComplete, RrcResumeRequest, RrcRlcMode, RrcRole, RrcSetup, RrcSetupComplete,
+    RrcSetupRequest, RrcSrbConfig, RrcState, RrcUeContext, SuspendConfig,
+    SystemInformationBlockType1, RRC_MAX_DRBS, SRB0_ID, SRB1_ID, SRB2_ID, SRB3_ID,
 };
