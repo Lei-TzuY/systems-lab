@@ -283,6 +283,7 @@ pub mod p4runtime;
 pub mod pcap;
 pub mod pcep;
 pub mod pcf_5g;
+pub mod pkmf_5g;
 pub mod pdcp_5g;
 pub mod pfcp_5g;
 pub mod pim;
@@ -1659,6 +1660,10 @@ pub use ddnmf_5g::{
     AnnouncementRecord, DdnmfEngine, DdnmfError, MatchReportResult, MonitorRecord, ProSeAppCode,
     ProSeDiscoveryRole,
 };
+pub use pkmf_5g::{
+    KeyRequestResponse, Pc5TrafficKeys, PkmfEngine, PkmfError, ProSeGroupKeyRecord,
+};
+
 
 
 
