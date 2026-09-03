@@ -11,13 +11,13 @@ pub const NGAP_PROC_NG_SETUP: u8 = 21;
 pub const NGAP_PROC_INITIAL_UE_MESSAGE: u8 = 15;
 pub const NGAP_PROC_PDU_SESSION_RESOURCE_SETUP: u8 = 29;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PlmnId {
     pub mcc: [u8; 3], // e.g. [2, 0, 8]
     pub mnc: [u8; 3], // e.g. [9, 5, 0]
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Snssai {
     pub sst: u8,             // Slice/Service Type: 1 = eMBB, 2 = URLLC, 3 = MIoT
     pub sd: Option<[u8; 3]>, // Slice Differentiator

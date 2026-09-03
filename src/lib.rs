@@ -244,6 +244,7 @@ pub mod netflow_v5;
 pub mod ngap_5g;
 pub mod nr_up_38425;
 pub mod nrf_oauth;
+pub mod nssf_5g;
 pub mod nsh;
 pub mod nsh_md2;
 pub mod nsh_md2_ext;
@@ -1537,6 +1538,12 @@ pub use pcf_5g::{
     CreateSmPolicyResponse, FlowDirection, PacketFilter, PccRule as PccRule5G, PcfEngine,
     PolicyEventTrigger, SmPolicyAssociation, UpdateSmPolicyRequest, UpdateSmPolicyResponse,
 };
+pub use nssf_5g::{
+    AllowedSnssai, AuthorizedNetworkSliceInfo, CandidateAmf, NsSelectionRequest,
+    NsSelectionResponse, NssaiAvailabilityUpdate, NssfEngine, SliceInfoType,
+    SnssaiRejectionCause,
+};
+
 
 
 
