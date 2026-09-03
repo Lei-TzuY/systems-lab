@@ -265,6 +265,7 @@ pub mod otlp;
 pub mod p4runtime;
 pub mod pcap;
 pub mod pcep;
+pub mod pcf_5g;
 pub mod pdcp_5g;
 pub mod pfcp_5g;
 pub mod pim;
@@ -1531,5 +1532,11 @@ pub use ausf_udm_5g::{
     UeAuthenticationConfirmationRequest, UeAuthenticationConfirmationResponse,
     UeAuthenticationRequest, UeAuthenticationResponse,
 };
+pub use pcf_5g::{
+    AfMediaType, AppSessionContextRequest, AppSessionContextResponse, CreateSmPolicyRequest,
+    CreateSmPolicyResponse, FlowDirection, PacketFilter, PccRule as PccRule5G, PcfEngine,
+    PolicyEventTrigger, SmPolicyAssociation, UpdateSmPolicyRequest, UpdateSmPolicyResponse,
+};
+
 
 
