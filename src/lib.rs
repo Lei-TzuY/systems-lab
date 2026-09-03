@@ -240,6 +240,7 @@ pub mod mldp;
 pub mod mpls;
 pub mod mpls_oam;
 pub mod mpls_tp_oam;
+pub mod mbsf_5g;
 pub mod mac_5g;
 pub mod mqtt;
 pub mod n3iwf_5g;
@@ -1649,6 +1650,11 @@ pub use ees_5g::{
 pub use ucmf_5g::{
     RacId, RacIdType, RadioCapEntry, RadioCapFormat, UcmfEngine, UcmfError,
 };
+pub use mbsf_5g::{
+    CellDeliveryMode, MbsDeliveryMethod, MbsError, MbsSessionContext, MbsSessionState,
+    MbsServiceType, MbsfEngine, Tmgi,
+};
+
 
 
 
