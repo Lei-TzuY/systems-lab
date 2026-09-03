@@ -281,7 +281,7 @@ impl SectionExtension2 {
     pub fn serialize(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(8);
         out.push(ORAN_EXT_BEAM_ATTRIBUTES);
-        out.extend_from_slice(&2u16.to_be_bytes()); // 2 * 32-bit words = 8 bytes
+        out.extend_from_slice(&3u16.to_be_bytes()); // 3 * 32-bit words = 12 bytes
         out.push(0); // Alignment padding
         out.extend_from_slice(&self.bf_id.to_be_bytes());
         // Quantize angles: resolution 0.01 deg -> i16

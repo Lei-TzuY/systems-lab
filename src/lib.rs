@@ -247,6 +247,7 @@ pub mod oran_fh_cus;
 pub mod oran_fh_delay_mgmt;
 pub mod oran_cplane_ext;
 pub mod oran_iq_compression;
+pub mod oran_packet_proc;
 pub mod ospf;
 pub mod ospfv3;
 pub mod otlp;
@@ -1381,4 +1382,7 @@ pub use oran_iq_compression::{
 pub use oran_cplane_ext::{
     BfwBundle, BfwCompressionMethod, BfwWeight, CPlaneSectionType3, OranCPlaneError,
     OranCPlaneExtEngine, SectionExtension1, SectionExtension2, SectionExtension4,
+};
+pub use oran_packet_proc::{
+    OranDemuxEvent, OranFronthaulProcessor, OranStreamConfig, OranStreamStats,
 };
