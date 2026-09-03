@@ -382,6 +382,7 @@ pub mod vxlan;
 pub mod vxlan_gpe;
 pub mod websocket;
 pub mod wireguard;
+pub mod xnap_5g;
 
 pub use arp::{ArpOpcode, ArpPacket, ArpTable};
 pub use bfd::{
@@ -1468,4 +1469,16 @@ pub use rrc_5g::{
     RrcResumeComplete, RrcResumeRequest, RrcRlcMode, RrcRole, RrcSetup, RrcSetupComplete,
     RrcSetupRequest, RrcSrbConfig, RrcState, RrcUeContext, SuspendConfig,
     SystemInformationBlockType1, RRC_MAX_DRBS, SRB0_ID, SRB1_ID, SRB2_ID, SRB3_ID,
+};
+pub use xnap_5g::{
+    HandoverCancel, HandoverContext, HandoverPreparationFailure, HandoverRequest,
+    HandoverRequestAcknowledge, HandoverStatus, PduSessionResourceAdmittedItem,
+    PduSessionResourceToBeSetup, SgNbAdditionRequest, SgNbAdditionRequestAcknowledge,
+    SnStatusItem, SnStatusTransfer, UeContextRelease, XnCause, XnDataForwardingTunnel,
+    XnDrbItem, XnPeerState, XnServedCellInfo, XnSetupFailure, XnSetupRequest,
+    XnSetupResponse, XnapEngine, XNAP_PROC_HANDOVER_CANCEL, XNAP_PROC_HANDOVER_PREPARATION,
+    XNAP_PROC_RESET, XNAP_PROC_RETRIEVE_UE_CONTEXT, XNAP_PROC_SECONDARY_NODE_ADDITION,
+    XNAP_PROC_SECONDARY_NODE_RECONFIG_COMPLETE, XNAP_PROC_SECONDARY_NODE_RELEASE,
+    XNAP_PROC_SN_STATUS_TRANSFER, XNAP_PROC_UE_CONTEXT_RELEASE, XNAP_PROC_XN_REMOVAL,
+    XNAP_PROC_XN_SETUP, XNAP_SCTP_PORT,
 };
