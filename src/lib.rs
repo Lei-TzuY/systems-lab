@@ -261,6 +261,7 @@ pub mod otlp;
 pub mod p4runtime;
 pub mod pcap;
 pub mod pcep;
+pub mod pdcp_5g;
 pub mod pfcp_5g;
 pub mod pim;
 pub mod pim_bsr;
@@ -1435,4 +1436,7 @@ pub use oran_o2_interface::{
     AcceleratorResource, AcceleratorType, ComputeNodeResource, NfDeploymentDescriptor,
     NfDeploymentInstance, NfDeploymentState, O2InterfaceEngine, O2imsAlarmEvent,
     O2imsAlarmSeverity, OranNfType, ResourcePool,
+};
+pub use pdcp_5g::{
+    PdcpBearerType, PdcpControlPdu, PdcpDataPdu, PdcpEntity, PdcpSnSize,
 };
