@@ -237,6 +237,7 @@ pub mod mpls_oam;
 pub mod mpls_tp_oam;
 pub mod mac_5g;
 pub mod mqtt;
+pub mod n3iwf_5g;
 pub mod nas_5g;
 pub mod nat;
 pub mod nef_traffic_influence;
@@ -1594,6 +1595,11 @@ pub use scp_5g::{
     CanaryRule, CircuitState, InstanceCircuitBreaker, ScpBackendInstance, ScpEngine,
     ScpError, ScpForwardRequest, ScpForwardResponse,
 };
+pub use n3iwf_5g::{
+    Eap5gMessage, Eap5gType, EspPacket as N3iwfEspPacket, GtpuPacket, N3iwfChildSa, N3iwfEngine,
+    N3iwfError, N3iwfPduSession, N3iwfUeContext,
+};
+
 
 
 
