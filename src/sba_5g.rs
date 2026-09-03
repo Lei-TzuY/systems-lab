@@ -15,6 +15,13 @@ pub enum NfType {
     Pcf,
     Ausf,
     Nssf,
+    Chf,
+    Nwdaf,
+    Udr,
+    Nef,
+    Bsf,
+    Sepp,
+    Scp,
 }
 
 impl NfType {
@@ -28,6 +35,13 @@ impl NfType {
             NfType::Pcf => "PCF",
             NfType::Ausf => "AUSF",
             NfType::Nssf => "NSSF",
+            NfType::Chf => "CHF",
+            NfType::Nwdaf => "NWDAF",
+            NfType::Udr => "UDR",
+            NfType::Nef => "NEF",
+            NfType::Bsf => "BSF",
+            NfType::Sepp => "SEPP",
+            NfType::Scp => "SCP",
         }
     }
 }

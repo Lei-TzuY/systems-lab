@@ -316,6 +316,7 @@ pub mod sba_events;
 pub mod sbfd;
 pub mod sdap_5g;
 pub mod sepp_5g;
+pub mod scp_5g;
 pub mod smf_5g;
 pub mod sctp;
 pub mod sflow;
@@ -1589,6 +1590,11 @@ pub use ptp_g8275_2::{
     G8275_2MasterCandidate, G8275_2MasterEngine, G8275_2MessageType, G8275_2SlaveEngine,
     G8275_2SlaveState, UnicastGrant, UnicastLease, UnicastRequest,
 };
+pub use scp_5g::{
+    CanaryRule, CircuitState, InstanceCircuitBreaker, ScpBackendInstance, ScpEngine,
+    ScpError, ScpForwardRequest, ScpForwardResponse,
+};
+
 
 
 
