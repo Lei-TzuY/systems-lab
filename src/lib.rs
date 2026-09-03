@@ -29,6 +29,7 @@ pub mod bgp_prefix_sid;
 pub mod bgp_rib;
 pub mod bgp_router;
 pub mod bus;
+pub mod bsf_5g;
 pub mod cbs;
 pub mod cdp;
 pub mod cfm;
@@ -1563,6 +1564,10 @@ pub use nwdaf_5g::{
     HoltLinearPredictor, NwdafEngine, ServiceExperienceReport, SliceLoadReport,
     ZScoreAnomalyDetector,
 };
+pub use bsf_5g::{
+    BsfEngine, CreateBindingRequest, DiscoverBindingQuery, PcfBinding, UpdateBindingRequest,
+};
+
 
 
 
