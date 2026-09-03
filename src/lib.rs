@@ -236,6 +236,7 @@ pub mod netconf;
 pub mod netflow;
 pub mod netflow_v5;
 pub mod ngap_5g;
+pub mod nr_up_38425;
 pub mod nrf_oauth;
 pub mod nsh;
 pub mod nsh_md2;
@@ -1391,4 +1392,8 @@ pub use oran_mplane_fcaps::{
     AlarmRecord, AlarmSeverity, DatastoreTarget, EditConfigOp, FaultManager, OranMplaneEngine,
     OranMplaneRpc, OranMplaneRpcReply, OruOperationalState, PerformanceMeasurementBin,
     YangDatastore, YangValue,
+};
+pub use nr_up_38425::{
+    DddsCause, DiscardedSnBlock, LostSnRange, NrUpDlDataDeliveryStatus, NrUpDlUserData, NrUpError,
+    NrUpFlowController, NrUpPduType, NR_U_MAX_SN,
 };
