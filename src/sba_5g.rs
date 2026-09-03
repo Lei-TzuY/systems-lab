@@ -25,6 +25,7 @@ pub enum NfType {
     Lmf,
     N3iwf,
     Eir,
+    Udsf,
 }
 
 impl NfType {
@@ -48,6 +49,7 @@ impl NfType {
             NfType::Lmf => "LMF",
             NfType::N3iwf => "N3IWF",
             NfType::Eir => "EIR",
+            NfType::Udsf => "UDSF",
         }
     }
 }

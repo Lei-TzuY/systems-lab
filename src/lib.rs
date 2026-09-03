@@ -391,6 +391,7 @@ pub mod turn;
 pub mod twamp;
 pub mod udp;
 pub mod udr_5g;
+pub mod udsf_5g;
 pub mod upf_pipeline_5g;
 pub mod vlan;
 pub mod vpls;
@@ -1610,6 +1611,10 @@ pub use eir_5g::{
     EquipmentCheckResponse, EquipmentStatus as Eir5gEquipmentStatus, GreylistRecord, Pei,
     PeiPresenceRecord,
 };
+pub use udsf_5g::{
+    PutRecordRequest, UdsfEngine, UdsfError, UdsfRecord,
+};
+
 
 
 
