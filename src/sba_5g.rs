@@ -22,6 +22,8 @@ pub enum NfType {
     Bsf,
     Sepp,
     Scp,
+    Lmf,
+    N3iwf,
 }
 
 impl NfType {
@@ -42,6 +44,8 @@ impl NfType {
             NfType::Bsf => "BSF",
             NfType::Sepp => "SEPP",
             NfType::Scp => "SCP",
+            NfType::Lmf => "LMF",
+            NfType::N3iwf => "N3IWF",
         }
     }
 }
