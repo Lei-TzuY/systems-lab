@@ -383,6 +383,7 @@ pub mod tunnel;
 pub mod turn;
 pub mod twamp;
 pub mod udp;
+pub mod udr_5g;
 pub mod upf_pipeline_5g;
 pub mod vlan;
 pub mod vpls;
@@ -1567,6 +1568,12 @@ pub use nwdaf_5g::{
 pub use bsf_5g::{
     BsfEngine, CreateBindingRequest, DiscoverBindingQuery, PcfBinding, UpdateBindingRequest,
 };
+pub use udr_5g::{
+    AccessAndMobilityData, AuthMethod, AuthenticationData, PacketFlowDescription,
+    SessionManagementData, SmPolicyData, TrafficInfluenceData, UdrDataChangeNotification,
+    UdrDataChangeSubscription, UdrDataType, UdrEngine,
+};
+
 
 
 
