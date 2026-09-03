@@ -412,6 +412,7 @@ pub mod vrrp;
 pub mod vtp;
 pub mod vxlan;
 pub mod vxlan_gpe;
+pub mod wagf_5g;
 pub mod websocket;
 pub mod wireguard;
 pub mod xnap_5g;
@@ -1676,6 +1677,11 @@ pub use mfaf_5g::{
     DispatchedBatch, MessageMapping, MessagingProtocol, MfafEngine, MfafError, SerializationFormat,
     TelemetryItem,
 };
+pub use wagf_5g::{
+    GlobalLineId, QosMappingRule, RgType, WagfEngine, WagfError, WirelineSessionContext,
+    WirelineSessionState,
+};
+
 
 
 
