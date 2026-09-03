@@ -92,6 +92,7 @@ pub mod diameter_zh;
 pub mod dns;
 pub mod e1ap_5g;
 pub mod e2ap_oran;
+pub mod eir_5g;
 pub mod ecpri;
 pub mod eigrp;
 pub mod erspan;
@@ -1604,6 +1605,12 @@ pub use lmf_5g::{
     DetermineLocationRequest, DetermineLocationResponse, GeographicCoordinates, GnbMeasurement,
     LcsClientType, LmfEngine, LmfError, LocationQos, PositioningMethod, VelocityEstimate,
 };
+pub use eir_5g::{
+    calculate_luhn_check_digit, validate_luhn, EirEngine, EirError, EquipmentCheckRequest,
+    EquipmentCheckResponse, EquipmentStatus as Eir5gEquipmentStatus, GreylistRecord, Pei,
+    PeiPresenceRecord,
+};
+
 
 
 

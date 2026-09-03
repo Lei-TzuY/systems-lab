@@ -24,6 +24,7 @@ pub enum NfType {
     Scp,
     Lmf,
     N3iwf,
+    Eir,
 }
 
 impl NfType {
@@ -46,6 +47,7 @@ impl NfType {
             NfType::Scp => "SCP",
             NfType::Lmf => "LMF",
             NfType::N3iwf => "N3IWF",
+            NfType::Eir => "EIR",
         }
     }
 }
