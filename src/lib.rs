@@ -31,6 +31,7 @@ pub mod bgp_rib;
 pub mod bgp_router;
 pub mod bus;
 pub mod bsf_5g;
+pub mod bdt_5g;
 pub mod cbs;
 pub mod cdp;
 pub mod cfm;
@@ -1723,6 +1724,11 @@ pub use upip_5g::{
 pub use oran_bfp_compression::{
     BfpError, ComplexIq, CompressedPrbBlock, IqQualityMetrics, ModulationScheme, OranBfpEngine,
 };
+pub use bdt_5g::{
+    BdtEngine, BdtError, BdtNegotiationSession, BdtNegotiationState, BdtPolicyCandidate,
+    BdtTransferRequest, TimeWindow,
+};
+
 
 
 
