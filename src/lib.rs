@@ -413,6 +413,7 @@ pub mod udr_5g;
 pub mod udsf_5g;
 pub mod ucmf_5g;
 pub mod upf_pipeline_5g;
+pub mod upip_5g;
 pub mod vlan;
 pub mod vpls;
 pub mod vrrp;
@@ -1714,6 +1715,11 @@ pub use ntn_5g::{
     GroundUePosition, NtnEngine, NtnError, NtnHandoverStatus, NtnLinkMetrics, OrbitType,
     SatelliteEphemeris,
 };
+pub use upip_5g::{
+    compute_mac_i, MaxDataRatePerUe, UpIntegrityAlgorithm, UpIntegrityPolicy, UpSecurityContext,
+    UpipEngine, UpipError,
+};
+
 
 
 
