@@ -19,6 +19,8 @@ pub const PFCP_SRC_INTERFACE_ACCESS: u8 = 0;
 pub const PFCP_SRC_INTERFACE_CORE: u8 = 1;
 pub const PFCP_APPLY_ACTION_FORWARD: u8 = 0x02;
 pub const PFCP_APPLY_ACTION_DROP: u8 = 0x01;
+pub const PFCP_APPLY_ACTION_BUFF: u8 = 0x04;
+pub const PFCP_APPLY_ACTION_NOCP: u8 = 0x08;
 
 /// Packet Detection Rule (PDR)
 #[derive(Debug, Clone, PartialEq, Eq)]

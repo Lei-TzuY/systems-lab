@@ -365,6 +365,7 @@ pub mod tunnel;
 pub mod turn;
 pub mod twamp;
 pub mod udp;
+pub mod upf_pipeline_5g;
 pub mod vlan;
 pub mod vpls;
 pub mod vrrp;
@@ -1410,4 +1411,8 @@ pub use e1ap_5g::{
     E1apBearerContext, E1apDrbSetupItem, E1apDrbSetupResponseItem, E1apEngine, E1apPduSessionItem,
     E1apPduSessionResponseItem, E1apRole, E1apState, GnbCuUpE1SetupFailure, GnbCuUpE1SetupRequest,
     GnbCuUpE1SetupResponse, E1AP_SCTP_PORT,
+};
+pub use upf_pipeline_5g::{
+    GateStatus, PacketProcessingResult, TokenBucketPolicer, UpfBar, UpfFar, UpfPdr, UpfPipeline,
+    UpfQer, UpfSession, UpfUrr, UsageReport,
 };
