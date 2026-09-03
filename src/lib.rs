@@ -245,6 +245,7 @@ pub mod openflow;
 pub mod optical_dom;
 pub mod oran_fh_cus;
 pub mod oran_fh_delay_mgmt;
+pub mod oran_iq_compression;
 pub mod ospf;
 pub mod ospfv3;
 pub mod otlp;
@@ -1372,4 +1373,7 @@ pub use oran_fh_delay_mgmt::{
 pub use ptp_telecom_node::{
     TelecomAlarm, TelecomSyncCycleResult, TelecomSyncNode, TelecomSyncNodeConfig,
     TelecomSyncStatusReport,
+};
+pub use oran_iq_compression::{
+    BfpCodec, CompressionError, CompressionQuality, IqSample, MuLawCodec, SelectiveReCodec,
 };
