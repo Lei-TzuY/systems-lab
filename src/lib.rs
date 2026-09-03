@@ -234,6 +234,7 @@ pub mod mpls_oam;
 pub mod mpls_tp_oam;
 pub mod mac_5g;
 pub mod mqtt;
+pub mod nas_5g;
 pub mod nat;
 pub mod nef_traffic_influence;
 pub mod netconf;
@@ -1481,4 +1482,25 @@ pub use xnap_5g::{
     XNAP_PROC_SECONDARY_NODE_RECONFIG_COMPLETE, XNAP_PROC_SECONDARY_NODE_RELEASE,
     XNAP_PROC_SN_STATUS_TRANSFER, XNAP_PROC_UE_CONTEXT_RELEASE, XNAP_PROC_XN_REMOVAL,
     XNAP_PROC_XN_SETUP, XNAP_SCTP_PORT,
+};
+pub use nas_5g::{
+    AuthenticationRequest, AuthenticationResponse, DeregistrationRequest, DlNasTransport,
+    GmmState, GsmState, MobileIdentity5Gs, Nas5GmmCause, Nas5GmmMessage, Nas5GsmCause,
+    Nas5GsmMessage, NasEngine, NasPdu, PduSessionContext, PduSessionEstablishmentAccept,
+    PduSessionEstablishmentReject, PduSessionEstablishmentRequest, PduSessionReleaseCommand,
+    PduSessionReleaseComplete, PduSessionReleaseRequest, PduSessionType, RegistrationAccept,
+    RegistrationReject, RegistrationRequest, RegistrationType5Gs, SecurityModeCommand,
+    SecurityModeComplete, SscMode, UeSecurityCapabilities, UlNasTransport,
+    verify_5g_aka_challenge, EPD_5GS_MOBILITY_MANAGEMENT, EPD_5GS_SESSION_MANAGEMENT,
+    NAS_5GMM_AUTHENTICATION_REJECT, NAS_5GMM_AUTHENTICATION_REQUEST,
+    NAS_5GMM_AUTHENTICATION_RESPONSE, NAS_5GMM_DEREGISTRATION_ACCEPT_UE_ORIGINATING,
+    NAS_5GMM_DEREGISTRATION_REQUEST_UE_ORIGINATING, NAS_5GMM_DL_NAS_TRANSPORT,
+    NAS_5GMM_REGISTRATION_ACCEPT, NAS_5GMM_REGISTRATION_COMPLETE, NAS_5GMM_REGISTRATION_REJECT,
+    NAS_5GMM_REGISTRATION_REQUEST, NAS_5GMM_SECURITY_MODE_COMMAND,
+    NAS_5GMM_SECURITY_MODE_COMPLETE, NAS_5GMM_SECURITY_MODE_REJECT, NAS_5GMM_UL_NAS_TRANSPORT,
+    NAS_5GSM_PDU_SESSION_ESTABLISHMENT_ACCEPT, NAS_5GSM_PDU_SESSION_ESTABLISHMENT_REJECT,
+    NAS_5GSM_PDU_SESSION_ESTABLISHMENT_REQUEST, NAS_5GSM_PDU_SESSION_RELEASE_COMMAND,
+    NAS_5GSM_PDU_SESSION_RELEASE_COMPLETE, NAS_5GSM_PDU_SESSION_RELEASE_REQUEST,
+    SHT_INTEGRITY_AND_CIPHERED, SHT_INTEGRITY_AND_CIPHERED_WITH_NEW_CONTEXT,
+    SHT_INTEGRITY_PROTECTED, SHT_INTEGRITY_WITH_NEW_CONTEXT, SHT_PLAIN_NAS,
 };
