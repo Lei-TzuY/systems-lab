@@ -268,6 +268,7 @@ pub mod oran_mplane_fcaps;
 pub mod oran_a1_interface;
 pub mod oran_o2_interface;
 pub mod oran_e2sm;
+pub mod oran_splane_sync;
 pub mod ospf;
 pub mod ospfv3;
 pub mod otlp;
@@ -1614,6 +1615,11 @@ pub use eir_5g::{
 pub use udsf_5g::{
     PutRecordRequest, UdsfEngine, UdsfError, UdsfRecord,
 };
+pub use oran_splane_sync::{
+    LlsConfig, OranSplaneSyncEngine, PtpClockQuality, SplaneSyncState, SyncEQl, TimeErrorMetrics,
+    LINK_LOCK_THRESHOLD_NS, MAX_TDD_TIME_ERROR_NS, OCXO_DRIFT_NS_PER_SEC,
+};
+
 
 
 
