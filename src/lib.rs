@@ -225,6 +225,7 @@ pub mod igmp_ssm;
 pub mod ioam;
 pub mod ipfix;
 pub mod ipsec;
+pub mod iupf_5g;
 pub mod ipv4;
 pub mod ipv6;
 pub mod ipv6_ext;
@@ -1700,6 +1701,10 @@ pub use seal_5g::{
     GeoPoint, GeofenceZone, QosReservation, SealAlertEvent, SealError, SealServerEngine, ValDomain,
     ValGroup,
 };
+pub use iupf_5g::{
+    DispatchedN9Packet, IUpfEngine, IUpfError, IUpfSessionContext, RoutingTarget, UlclFilterRule,
+};
+
 
 
 
