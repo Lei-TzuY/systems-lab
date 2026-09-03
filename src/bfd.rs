@@ -805,6 +805,7 @@ mod tests {
         assert_eq!(session.state, BfdState::Down);
         assert_eq!(session.remote_discriminator, 0x2002);
     }
+    #[test]
     fn test_bfd_session_rejects_zero_your_discriminator_for_init_packet() {
         let mut session = BfdSession::new(0x1001, 100_000);
         let incoming = BfdControlPacket::build_control(BfdState::Init, 0x3003, 0, 100_000);
