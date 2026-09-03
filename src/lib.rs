@@ -91,6 +91,7 @@ pub mod diameter_swm;
 pub mod diameter_sy;
 pub mod diameter_zh;
 pub mod ddnmf_5g;
+pub mod dccf_5g;
 pub mod dns;
 pub mod easdf_5g;
 pub mod e1ap_5g;
@@ -1667,6 +1668,10 @@ pub use pkmf_5g::{
 pub use adrf_5g::{
     AdrfEngine, AdrfError, AnalyticsDataRecord, AnalyticsDomain, MlModelRecord,
 };
+pub use dccf_5g::{
+    DataDeliveryTarget, DataFilterSpec, DccfEngine, DccfError, DccfSubscription, TelemetryEvent,
+};
+
 
 
 
