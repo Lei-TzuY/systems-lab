@@ -90,6 +90,7 @@ pub mod diameter_swm;
 pub mod diameter_sy;
 pub mod diameter_zh;
 pub mod dns;
+pub mod easdf_5g;
 pub mod e1ap_5g;
 pub mod e2ap_oran;
 pub mod eir_5g;
@@ -1625,6 +1626,11 @@ pub use gmlc_5g::{
     PrivacyConsent, ProvideLocationRequest as GmlcProvideLocationRequest,
     ProvideLocationResponse as GmlcProvideLocationResponse,
 };
+pub use easdf_5g::{
+    DnsAction, DnsContext, DnsQueryEventReport, DnsResolutionResult, DnsRule, EasdfEngine,
+    EasdfError,
+};
+
 
 
 
