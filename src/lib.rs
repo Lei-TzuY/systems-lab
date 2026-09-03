@@ -306,6 +306,7 @@ pub mod sba_5g;
 pub mod sba_events;
 pub mod sbfd;
 pub mod sdap_5g;
+pub mod smf_5g;
 pub mod sctp;
 pub mod sflow;
 pub mod shell;
@@ -1518,3 +1519,9 @@ pub use oran_e2sm::{
     RC_STYLE_RADIO_RESOURCE_ALLOCATION, RC_STYLE_SLICE_SLA_ENFORCEMENT,
     RC_STYLE_TRAFFIC_STEERING,
 };
+pub use smf_5g::{
+    CreateSmContextRequest, CreateSmContextResponse, IpamPool, ReleaseSmContextRequest,
+    ReleaseSmContextResponse, SmContextState, SmContextUpdateType, SmfEngine,
+    SmfQosProfile, SmfSessionContext, UpdateSmContextRequest, UpdateSmContextResponse,
+};
+
