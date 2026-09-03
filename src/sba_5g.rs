@@ -37,6 +37,7 @@ pub enum NfType {
     Pkmf,
     Adrf,
     Dccf,
+    Mfaf,
 }
 
 impl NfType {
@@ -72,6 +73,7 @@ impl NfType {
             NfType::Pkmf => "PKMF",
             NfType::Adrf => "ADRF",
             NfType::Dccf => "DCCF",
+            NfType::Mfaf => "MFAF",
         }
     }
 }

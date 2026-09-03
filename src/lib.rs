@@ -244,6 +244,7 @@ pub mod mpls;
 pub mod mpls_oam;
 pub mod mpls_tp_oam;
 pub mod mbsf_5g;
+pub mod mfaf_5g;
 pub mod mac_5g;
 pub mod mqtt;
 pub mod n3iwf_5g;
@@ -1671,6 +1672,11 @@ pub use adrf_5g::{
 pub use dccf_5g::{
     DataDeliveryTarget, DataFilterSpec, DccfEngine, DccfError, DccfSubscription, TelemetryEvent,
 };
+pub use mfaf_5g::{
+    DispatchedBatch, MessageMapping, MessagingProtocol, MfafEngine, MfafError, SerializationFormat,
+    TelemetryItem,
+};
+
 
 
 
