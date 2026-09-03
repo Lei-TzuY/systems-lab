@@ -245,6 +245,7 @@ pub mod mpls_oam;
 pub mod mpls_tp_oam;
 pub mod mbsf_5g;
 pub mod mfaf_5g;
+pub mod mcx_cms_5g;
 pub mod mac_5g;
 pub mod mqtt;
 pub mod n3iwf_5g;
@@ -1685,6 +1686,11 @@ pub use wagf_5g::{
 pub use tngf_5g::{
     TnapInfo, TngfEngine, TngfError, TngfSessionContext, TngfSessionState, TrustedAccessType,
 };
+pub use mcx_cms_5g::{
+    FloorRequestResult, FloorState, McxError, McxGroupConfig, McxServerEngine, McxServiceType,
+    McxUserProfile,
+};
+
 
 
 

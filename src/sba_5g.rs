@@ -40,6 +40,7 @@ pub enum NfType {
     Mfaf,
     Wagf,
     Tngf,
+    McxServer,
 }
 
 impl NfType {
@@ -78,6 +79,7 @@ impl NfType {
             NfType::Mfaf => "MFAF",
             NfType::Wagf => "W-AGF",
             NfType::Tngf => "TNGF",
+            NfType::McxServer => "MCX-Server",
         }
     }
 }
