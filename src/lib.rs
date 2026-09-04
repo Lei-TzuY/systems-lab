@@ -284,6 +284,7 @@ pub mod oran_a1_interface;
 pub mod oran_bfp_compression;
 pub mod oran_cplane_ext;
 pub mod oran_e2sm;
+pub mod oran_fault_mgmt;
 pub mod oran_fh_cus;
 pub mod oran_fh_delay_mgmt;
 pub mod oran_iq_compression;
@@ -1441,6 +1442,10 @@ pub use oran_e2sm::{
     RC_STYLE_RADIO_RESOURCE_ALLOCATION, RC_STYLE_SLICE_SLA_ENFORCEMENT, RC_STYLE_TRAFFIC_STEERING,
     RcControlHeader, RcControlMessage, RcControlOutcome, RcControlParameter, RcParameterValue,
     SlaPolicyRule, SliceSlaAssuranceXApp,
+};
+pub use oran_fault_mgmt::{
+    AlarmFilter, NotificationEventType, OranActiveAlarm, OranFaultId, OranFaultManager,
+    OranFaultNotification, OranFaultSeverity, SoakConfig,
 };
 pub use oran_fh_cus::{
     CPlaneMessage, CPlaneSection, DataDirection, EaxcId, EaxcIdFormat, OranError, OranFlowMonitor,
