@@ -276,6 +276,7 @@ pub mod nr_drx_engine;
 pub mod nr_hst_sfn;
 pub mod nr_lbt_unlicensed;
 pub mod nr_mbs_ptm;
+pub mod nr_mobile_iab;
 pub mod nr_ncr_engine;
 pub mod nr_nes_energy_savings;
 pub mod nr_ntn_harq;
@@ -1521,6 +1522,12 @@ pub use nr_tsc_framework::{
     SurvivalTimeTransition, TscBridgePortDelayReport, TscEgressArrivalOutcome, TscEngine,
     TscEngineNotification, TscError, TscFlowDirection, TscIngressOutcome, TscStreamTelemetry,
     TscTrafficType, TscTranslatorType, TscaiProfile, TsnQosMapper,
+};
+pub use nr_mobile_iab::{
+    AccessUeBearer, BapAddress, BapControlPdu, BapControlPduType, BapDataPdu, BapPathId,
+    BapRouteEntry, BapRoutingId, BapRoutingTable, IabResourceAvailability, IabTdmSlotFormat,
+    MobileIabEngine, MobileIabError, MobileIabMetrics, MobileIabMigrationState, MultiHopTimingAdvance,
+    NextHopResolution,
 };
 pub use nr_aiml_air_interface::{
     ActivationFunction, AiMlError, AiMlMetrics, BeamPredictionEngine, ComplexElement,
