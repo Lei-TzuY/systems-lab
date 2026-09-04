@@ -268,6 +268,7 @@ pub mod nr_bfr_engine;
 pub mod nr_ca_cross_carrier;
 pub mod nr_carrier_phase_rtk;
 pub mod nr_cell_reselection;
+pub mod nr_conditional_handover;
 pub mod nr_cov_enhancement;
 pub mod nr_daps_handover;
 pub mod nr_drx_engine;
@@ -1510,6 +1511,12 @@ pub use nr_aiml_air_interface::{
     DEFAULT_INFERENCE_DEADLINE_US as AIML_DEFAULT_INFERENCE_DEADLINE_US,
     DEFAULT_QUANTIZATION_BITS as AIML_DEFAULT_QUANTIZATION_BITS,
     MAX_CANDIDATE_BEAMS as AIML_MAX_CANDIDATE_BEAMS,
+};
+pub use nr_conditional_handover::{
+    CandidateState, ChoEngine, ChoError, ChoExecutionReport, ChoMetrics, ChoType,
+    CondExecutionCondition, CondReconfigCandidate, L3Filter, MeasurementQuantity,
+    DEFAULT_L3_FILTER_COEFF_K as CHO_DEFAULT_L3_FILTER_COEFF_K,
+    MAX_CHO_CANDIDATES,
 };
 pub use nr_ncr_engine::{
     AmplifiedOutput, AmplifyDirection, NcrError, NcrForwardingEngine, NcrHardwareProfile,
