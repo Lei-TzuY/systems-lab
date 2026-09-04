@@ -303,6 +303,7 @@ pub mod nr_tsc_framework;
 pub mod nr_unified_tci;
 pub mod nr_up_38425;
 pub mod nr_udc_engine;
+pub mod nr_ul_tx_switching;
 pub mod nr_xr_pdu_set;
 pub mod nrf_5g;
 pub mod nrf_oauth;
@@ -1549,6 +1550,11 @@ pub use nr_ptrs_phase_tracking::{
     GoldSequenceGenerator as PtrsGoldSequenceGenerator, PhaseDerotator, PtrsEngine, PtrsError,
     PtrsFrequencyBand, PtrsFrequencyDensity, PtrsMetrics, PtrsResourceMapper, PtrsThresholdConfig,
     PtrsTimeDensity, PtrsWaveformType,
+};
+pub use nr_ul_tx_switching::{
+    ReciprocalChannelProfile, ReciprocityComplex, SrsCombStructure, SrsFrequencyHopper,
+    SrsResource, SrsResourceSet, SrsResourceUsage, SrsTimeDomainBehavior, SwitchingPeriodUs,
+    UlTxSwitchingCapability, UlTxSwitchingEngine, UlTxSwitchingError, UlTxSwitchingMetrics,
 };
 pub use nr_aiml_air_interface::{
     ActivationFunction, AiMlError, AiMlMetrics, BeamPredictionEngine, ComplexElement,
