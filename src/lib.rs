@@ -308,6 +308,7 @@ pub mod oran_mplane_fcaps;
 pub mod oran_o2_interface;
 pub mod oran_packet_proc;
 pub mod oran_pm_mgmt;
+pub mod oran_sec_mgmt;
 pub mod oran_splane_sync;
 pub mod oran_sw_mgmt;
 pub mod ospf;
@@ -1574,6 +1575,11 @@ pub use oran_pm_mgmt::{
     EcpriTransportMeasurement, MeasurementIntervalRecord, MeasurementJob, OranPmEngine,
     RxWindowMeasurement, TcaDirection, TcaSeverity, ThresholdCrossingAlert,
     ThresholdCrossingConfig, TransceiverMeasurement, TxPrbMeasurement,
+};
+pub use oran_sec_mgmt::{
+    hash_password, AccessPermission, CertificateType, Cmpv2Message, Cmpv2MessageType, Cmpv2Status,
+    OranSecurityManager, SecurityAuditRecord, SecurityAuditSummary, SecurityEventSeverity,
+    UserAccount, UserRole, X509CertRecord,
 };
 pub use oran_splane_sync::{
     LINK_LOCK_THRESHOLD_NS, LlsConfig, MAX_TDD_TIME_ERROR_NS, OCXO_DRIFT_NS_PER_SEC,
