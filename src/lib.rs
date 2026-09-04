@@ -286,6 +286,7 @@ pub mod nr_sdt_engine;
 pub mod nr_sidelink_v2x;
 pub mod nr_sidelink_drx;
 pub mod nr_sidelink_positioning;
+pub mod nr_srap_relay;
 pub mod nr_unified_tci;
 pub mod nr_up_38425;
 pub mod nr_udc_engine;
@@ -1532,6 +1533,14 @@ pub use nr_sidelink_positioning::{
     GoldSequenceGenerator, SlAnchorUe, SlAoAMeasurement, SlCombSize, SlKinematicTracker,
     SlMultilaterationSolver, SlPositionEstimate, SlPositioningError, SlPrsConfig,
     SlRangingSession, SlRttMeasurement, SlSessionState,
+};
+pub use nr_srap_relay::{
+    BearerQueueState, SrapBearerMapping, SrapBearerMappingTable, SrapControlPdu,
+    SrapControlPduType, SrapDataHeader, SrapDataPdu, SrapEntity, SrapError, SrapFlowControlManager,
+    SrapMetrics, SrapMultiHopRouter, SrapPduType, SrapRole, SrapRouteEntry,
+    DEFAULT_HIGH_WATERMARK_BYTES as SRAP_HIGH_WATERMARK_BYTES,
+    DEFAULT_LOW_WATERMARK_BYTES as SRAP_LOW_WATERMARK_BYTES,
+    DEFAULT_MAX_HOPS as SRAP_DEFAULT_MAX_HOPS, SRAP_MAX_BEARER_ID,
 };
 pub use nr_up_38425::{
     DddsCause, DiscardedSnBlock, LostSnRange, NR_U_MAX_SN, NrUpDlDataDeliveryStatus,
