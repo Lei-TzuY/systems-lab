@@ -295,6 +295,7 @@ pub mod nr_sidelink_v2x;
 pub mod nr_sidelink_drx;
 pub mod nr_sidelink_positioning;
 pub mod nr_srap_relay;
+pub mod nr_tsc_framework;
 pub mod nr_unified_tci;
 pub mod nr_up_38425;
 pub mod nr_udc_engine;
@@ -1513,6 +1514,13 @@ pub use nr_ambient_iot::{
     DEFAULT_RECTIFIER_EFFICIENCY as AMBIENT_DEFAULT_RECTIFIER_EFFICIENCY,
     SPEED_OF_LIGHT_M_S as AMBIENT_SPEED_OF_LIGHT_M_S,
     THERMAL_NOISE_DENSITY_DBM_HZ as AMBIENT_THERMAL_NOISE_DENSITY_DBM_HZ,
+};
+pub use nr_tsc_framework::{
+    DeJitterMetrics, DeJitterPacket, DelayCritical5Qi, EthernetPcp, FrerDeduplicator, FrerResult,
+    HoldAndForwardBuffer, NrSlotTiming, SurvivalTimeState, SurvivalTimeStateMachine,
+    SurvivalTimeTransition, TscBridgePortDelayReport, TscEgressArrivalOutcome, TscEngine,
+    TscEngineNotification, TscError, TscFlowDirection, TscIngressOutcome, TscStreamTelemetry,
+    TscTrafficType, TscTranslatorType, TscaiProfile, TsnQosMapper,
 };
 pub use nr_aiml_air_interface::{
     ActivationFunction, AiMlError, AiMlMetrics, BeamPredictionEngine, ComplexElement,
