@@ -264,6 +264,7 @@ pub mod netflow;
 pub mod netflow_v5;
 pub mod ngap_5g;
 pub mod nr_bfr_engine;
+pub mod nr_ca_cross_carrier;
 pub mod nr_cell_reselection;
 pub mod nr_drx_engine;
 pub mod nr_lbt_unlicensed;
@@ -1391,6 +1392,12 @@ pub use nef_5g::{
 pub use nr_bfr_engine::{
     BeamFailureRecoveryConfig, BeamIdentifier, BeamMeasurement, BfrEvent, BfrState,
     BfrTransmissionType, CandidateBeamConfig, NrBfrEngine, ReferenceSignalType,
+};
+pub use nr_ca_cross_carrier::{
+    CaHarqMultiplexer, CaServingCellConfig, CellHarqFeedback, CrossCarrierGrant,
+    CrossCarrierScheduler, MultiplexedPucchReport, NrSubcarrierSpacing, PucchGroupId,
+    ScellMacCeCodec, ScellManager, ScellState, LCID_SCELL_ACT_DEACT_1_OCTET,
+    LCID_SCELL_ACT_DEACT_4_OCTET,
 };
 pub use nr_cell_reselection::{
     AcceptableReason, CellAccessInfo, CellMeasurement, CellReselectionDecision, CellSuitability,
