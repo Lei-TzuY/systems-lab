@@ -287,6 +287,7 @@ pub mod ntp;
 pub mod nwdaf_5g;
 pub mod openflow;
 pub mod optical_dom;
+pub mod oran_ald_mgmt;
 pub mod oran_a1_interface;
 pub mod oran_bfp_compression;
 pub mod oran_cplane_ext;
@@ -1460,6 +1461,10 @@ pub use nwdaf_5g::{
     AnalyticsNotification, AnalyticsSubscription, AnalyticsThreshold, CongestionReport,
     HoltLinearPredictor, NwdafEngine, ServiceExperienceReport, SliceLoadReport,
     ZScoreAnomalyDetector,
+};
+pub use oran_ald_mgmt::{
+    AisgProcedureCode, AisgReturnCode, AldDevice, AldDeviceType, AldPort, OranAldManager,
+    HDLC_ESCAPE, HDLC_ESCAPE_MASK, HDLC_FLAG,
 };
 pub use oran_a1_interface::{
     A1EiJob, A1EiType, A1EnforcementState, A1HttpMethod, A1InterfaceEngine, A1PolicyInstance,
