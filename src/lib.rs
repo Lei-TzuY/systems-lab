@@ -301,6 +301,7 @@ pub mod pim;
 pub mod pim_bsr;
 pub mod pkmf_5g;
 pub mod pppoe;
+pub mod prose_relay_5g;
 pub mod preemption;
 pub mod psfp;
 pub mod ptp;
@@ -1456,6 +1457,13 @@ pub use pcf_5g::{
 };
 pub use pdcp_5g::{PdcpBearerType, PdcpControlPdu, PdcpDataPdu, PdcpEntity, PdcpSnSize};
 pub use pkmf_5g::{KeyRequestResponse, Pc5TrafficKeys, PkmfEngine, PkmfError, ProSeGroupKeyRecord};
+pub use prose_relay_5g::{
+    DEFAULT_HEARTBEAT_TIMEOUT_S, DEFAULT_RLF_RSRP_THRESHOLD_DBM, L2RelayContext, L3RelayNatEntry,
+    Pc5Layer2Id, Pc5LinkState, Pc5QoSProfile, Pc5SecurityAlgorithm, Pc5Session,
+    Pc5SignalingMessage, ProSeRelayEngine, ProseRelayError, RSC_COMMERCIAL_INTERNET,
+    RSC_EMERGENCY_SERVICES, RSC_PUBLIC_SAFETY_VOICE, RSC_SMART_GRID_IOT, RelayAnnouncement,
+    RelayResponse, RelayServiceCode, RelaySolicitation, SrapHeader, derive_k_nrp_sess,
+};
 pub use ptp_5g_tdd_sync::{
     AbsoluteCellSyncReport, AntennaPortMeasurement, BudgetDiagnosticReport,
     FronthaulBudgetPartition, NrTddSyncCategory, NrTddSyncEngine, TaeEvaluationReport,
