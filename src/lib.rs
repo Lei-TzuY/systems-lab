@@ -402,6 +402,7 @@ pub mod stack;
 pub mod stp;
 pub mod stun;
 pub mod synce_esmc;
+pub mod synce_pll_servo;
 pub mod syslog;
 pub mod tacacs;
 pub mod tas;
@@ -1773,6 +1774,10 @@ pub use synce_esmc::{
     ESMC_SUBTYPE, EXTENDED_QL_TLV_LEN, EnhancedQualityLevel, ExtendedQlTlv, PortSyncState,
     QualityLevel, QualityLevelOption2, SyncEEsmcEngine, SyncEEsmcPacket, TLV_TYPE_EXTENDED_QL,
     TLV_TYPE_QL,
+};
+pub use synce_pll_servo::{
+    EecProfile, LocalOscillator, OscillatorGrade, SyncEClockState, SyncEError, SyncEPllConfig,
+    SyncEPllServo, WanderAuditor, WanderSample, MAX_WANDER_HISTORY_SAMPLES,
 };
 pub use syslog::{SYSLOG_UDP_PORT, SyslogCollector, SyslogFacility, SyslogMessage, SyslogSeverity};
 pub use tacacs::{TACACS_PORT, TacacsHeader, TacacsPacket, TacacsServer};
