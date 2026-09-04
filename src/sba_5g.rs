@@ -45,6 +45,7 @@ pub enum NfType {
     SealServer,
     IUpf,
     MbUpf,
+    Tsctf,
 }
 
 impl NfType {
@@ -88,6 +89,7 @@ impl NfType {
             NfType::SealServer => "SEAL-Server",
             NfType::IUpf => "I-UPF",
             NfType::MbUpf => "MB-UPF",
+            NfType::Tsctf => "TSCTF",
         }
     }
 }

@@ -378,6 +378,7 @@ pub mod ti_lfa;
 pub mod tls;
 pub mod tngf_5g;
 pub mod transition;
+pub mod tsn_5g_bridge;
 pub mod tsn_8021cm_fronthaul;
 pub mod tsn_ats_multihop;
 pub mod tsn_cnc;
@@ -1570,6 +1571,11 @@ pub use tngf_5g::{
     TnapInfo, TngfEngine, TngfError, TngfSessionContext, TngfSessionState, TrustedAccessType,
 };
 pub use transition::{IP_PROTO_IPV6_IN_IPV4, NEXT_HEADER_IPV4_IN_IPV6, Tunnel4in6, Tunnel6in4};
+pub use tsn_5g_bridge::{
+    DeJitterBufferEntry, DsTtEngine, NwTtEngine, PortPairDelay, PtpResidenceTimeReport,
+    TscTrafficDirection, Tscai, Tsn5gBridgeEngine, Tsn5gStreamBinding, TsnBridgeId, TsnPortConfig,
+    TsnPortState, TsnPortType, TsnQosProfile,
+};
 pub use tsn_8021cm_fronthaul::{
     EcpriTrafficClass, FronthaulBridgeHop, FronthaulPathEvaluation, Ieee8021CmEngine,
     Ieee8021CmProfile,
