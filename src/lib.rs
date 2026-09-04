@@ -272,6 +272,7 @@ pub mod nr_conditional_handover;
 pub mod nr_cov_enhancement;
 pub mod nr_daps_handover;
 pub mod nr_drx_engine;
+pub mod nr_hst_sfn;
 pub mod nr_lbt_unlicensed;
 pub mod nr_mbs_ptm;
 pub mod nr_ncr_engine;
@@ -1517,6 +1518,15 @@ pub use nr_conditional_handover::{
     CondExecutionCondition, CondReconfigCandidate, L3Filter, MeasurementQuantity,
     DEFAULT_L3_FILTER_COEFF_K as CHO_DEFAULT_L3_FILTER_COEFF_K,
     MAX_CHO_CANDIDATES,
+};
+pub use nr_hst_sfn::{
+    DualDopplerSpectrum, HstCompensationMode, HstError, HstScenario, HstSfnManager,
+    IciMetrics, SfnDelaySpread, TrackPoint, TrainKinematics, TrpNode,
+    CP_DURATION_15KHZ_US as HST_CP_DURATION_15KHZ_US,
+    CP_DURATION_30KHZ_US as HST_CP_DURATION_30KHZ_US,
+    CP_DURATION_60KHZ_US as HST_CP_DURATION_60KHZ_US,
+    CP_DURATION_120KHZ_US as HST_CP_DURATION_120KHZ_US,
+    SPEED_OF_LIGHT_M_S as HST_SPEED_OF_LIGHT_M_S,
 };
 pub use nr_ncr_engine::{
     AmplifiedOutput, AmplifyDirection, NcrError, NcrForwardingEngine, NcrHardwareProfile,
