@@ -420,6 +420,7 @@ pub mod ucmf_5g;
 pub mod udp;
 pub mod udr_5g;
 pub mod udsf_5g;
+pub mod upf_buffering_5g;
 pub mod upf_pipeline_5g;
 pub mod upip_5g;
 pub mod vlan;
@@ -1698,6 +1699,11 @@ pub use udr_5g::{
     UdrDataChangeSubscription, UdrDataType, UdrEngine,
 };
 pub use udsf_5g::{PutRecordRequest, UdsfEngine, UdsfError, UdsfRecord};
+pub use upf_buffering_5g::{
+    BarConfig, BufferDropPolicy, BufferedDlPacket, BufferingStats,
+    DEFAULT_MAX_BUFFER_BYTES, DEFAULT_MAX_BUFFER_PACKETS, DownlinkDataReport, FlushedGtpPacket,
+    SessionBufferContext, UpfBufferingEngine, UpfBufferingError, build_5g_gtpu_packet, derive_ppi,
+};
 pub use upf_pipeline_5g::{
     GateStatus, PacketProcessingResult, TokenBucketPolicer, UpfBar, UpfFar, UpfPdr, UpfPipeline,
     UpfQer, UpfSession, UpfUrr, UsageReport,
