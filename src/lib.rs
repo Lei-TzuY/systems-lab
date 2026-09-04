@@ -270,6 +270,7 @@ pub mod nr_drx_engine;
 pub mod nr_lbt_unlicensed;
 pub mod nr_mbs_ptm;
 pub mod nr_positioning_lcs;
+pub mod nr_pei_engine;
 pub mod nr_rach_5g;
 pub mod nr_rohc_engine;
 pub mod nr_rrc_inactive;
@@ -1425,6 +1426,10 @@ pub use nr_positioning_lcs::{
     DlTdoaSolver, EcefPoint, EnuPoint, LppMessageType, LppPositioningMethod, LppTransactionManager,
     MultiRttMeasurement, MultiRttSolver, NrppaEngine, NrppaMessage, PositioningEstimate,
     SPEED_OF_LIGHT_M_S, TrpInfo, UncertaintyEllipse, Wgs84Point,
+};
+pub use nr_pei_engine::{
+    DciFormat2_7, PeiConfig, PeiPerformanceMetrics, PeiSubgroupEngine, PeiTimingCalculator,
+    PeiUeReceiver, PeiWakeupDecision, SubgroupingScheme, MAX_SFN, PEI_RNTI_DEFAULT,
 };
 pub use nr_rach_5g::{
     MacRarPayload, Msg1PreambleState, Msg1Transmission, Msg2RarMessage, Msg3Transmission,
