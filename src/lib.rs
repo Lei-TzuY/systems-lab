@@ -266,6 +266,7 @@ pub mod ngap_5g;
 pub mod nr_cell_reselection;
 pub mod nr_lbt_unlicensed;
 pub mod nr_rach_5g;
+pub mod nr_rrc_inactive;
 pub mod nr_up_38425;
 pub mod nrf_5g;
 pub mod nrf_oauth;
@@ -1391,6 +1392,11 @@ pub use nr_rach_5g::{
     Msg4ContentionResolution, MsgATransmission, MsgBResponse, NrRachEngine, PreambleGroup,
     PrachOccasion, RachCause, RachConfig, RachFailureReason, RachState, RachType,
     bi_to_delay_ms,
+};
+pub use nr_rrc_inactive::{
+    FullIRnti, InactiveResumeCause, InactiveSuspendConfig, InactiveUeContext, NrRrcInactiveEngine,
+    RanNotificationArea, RanPagingRecord, RrcResumeMessage, RrcResumeRequestMessage, ShortIRnti,
+    XnUeContextRetrieveRequest, XnUeContextRetrieveResponse, calculate_short_mac_i,
 };
 pub use nr_up_38425::{
     DddsCause, DiscardedSnBlock, LostSnRange, NR_U_MAX_SN, NrUpDlDataDeliveryStatus,
