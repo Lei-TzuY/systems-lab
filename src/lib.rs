@@ -272,6 +272,7 @@ pub mod nr_drx_engine;
 pub mod nr_lbt_unlicensed;
 pub mod nr_mbs_ptm;
 pub mod nr_ntn_harq;
+pub mod nr_ntn_polarization_doppler;
 pub mod nr_positioning_lcs;
 pub mod nr_pei_engine;
 pub mod nr_rach_5g;
@@ -1462,6 +1463,11 @@ pub use nr_ntn_harq::{
     NtnHarqTelemetry, NtnSib19Config, SatelliteOrbitType, DEFAULT_TA_STEP_THRESHOLD_US,
     MAX_NTN_HARQ_PROCESSES, SPEED_OF_LIGHT_MPS as NTN_SPEED_OF_LIGHT_MPS,
     STANDARD_TERRESTRIAL_HARQ_PROCESSES,
+};
+pub use nr_ntn_polarization_doppler::{
+    DopplerFllServo, NtnDopplerMetrics, NtnPolarizationError, PolarizationSense,
+    PolarizationTracker, SatelliteKinematics, EARTH_GRAVITATIONAL_PARAM, EARTH_RADIUS_METERS,
+    MAX_RESIDUAL_DOPPLER_SCS_RATIO, SPEED_OF_LIGHT_M_S as NTN_POL_SPEED_OF_LIGHT_M_S,
 };
 pub use nr_pei_engine::{
     DciFormat2_7, PeiConfig, PeiPerformanceMetrics, PeiSubgroupEngine, PeiTimingCalculator,
