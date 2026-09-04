@@ -286,6 +286,7 @@ pub mod nr_ntn_polarization_doppler;
 pub mod nr_ntn_regenerative;
 pub mod nr_positioning_lcs;
 pub mod nr_pei_engine;
+pub mod nr_ptrs_phase_tracking;
 pub mod nr_rach_5g;
 pub mod nr_redcap_hdfdd;
 pub mod nr_rim_cli_engine;
@@ -1542,6 +1543,12 @@ pub use nr_dss_mixed_numerology::{
     CrsPuncturingMask, CrossCarrierScheduleResult, CrossCarrierSchedulingConfig,
     CrossCarrierSlotMapper, DssMetrics, DssMixedEngine, DssMixedError, LteCrsAntennaPorts,
     LteCrsRateMatchingPattern, LteMbsfnConfig,
+};
+pub use nr_ptrs_phase_tracking::{
+    CommonPhaseErrorEstimator, Complex64 as PtrsComplex64, DftSOfdmPtrsConfig,
+    GoldSequenceGenerator as PtrsGoldSequenceGenerator, PhaseDerotator, PtrsEngine, PtrsError,
+    PtrsFrequencyBand, PtrsFrequencyDensity, PtrsMetrics, PtrsResourceMapper, PtrsThresholdConfig,
+    PtrsTimeDensity, PtrsWaveformType,
 };
 pub use nr_aiml_air_interface::{
     ActivationFunction, AiMlError, AiMlMetrics, BeamPredictionEngine, ComplexElement,
