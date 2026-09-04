@@ -101,6 +101,7 @@ pub mod ecpri;
 pub mod ees_5g;
 pub mod eigrp;
 pub mod eir_5g;
+pub mod eps_interworking_5g;
 pub mod erspan;
 pub mod etag;
 pub mod ethernet;
@@ -676,6 +677,13 @@ pub use dns::{
 };
 pub use eigrp::{
     EIGRP_MULTICAST_IP, EigrpHeader, EigrpMetric, EigrpPacket, EigrpTopologyTable, IP_PROTO_EIGRP,
+};
+pub use eps_interworking_5g::{
+    derive_k_asme_from_k_amf, map_5qi_to_qci, map_qci_to_5qi, CombinedSmfPgwContext,
+    EpsBearerContext, EpsDataForwardingTunnel, EpsInterworkingEngine, EpsInterworkingError,
+    EpsQosProfile, ForwardRelocationRequest, ForwardRelocationResponse, Fteid, N26HandoverState,
+    VoiceCallAction, FTEID_S11_MME, FTEID_S11_SGW, FTEID_S1_U_ENB, FTEID_S1_U_FORWARDING,
+    FTEID_S1_U_SGW, FTEID_S5_S8_PGW, FTEID_S5_S8_SGW, MAX_EBI, MIN_EBI,
 };
 pub use erspan::{
     ETHERTYPE_ERSPAN_TYPE2, ETHERTYPE_NVGRE_ETHERNET, ErspanPacket, ErspanType2Header, NvgrePacket,
