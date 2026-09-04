@@ -266,6 +266,7 @@ pub mod ngap_5g;
 pub mod nr_cell_reselection;
 pub mod nr_lbt_unlicensed;
 pub mod nr_rach_5g;
+pub mod nr_rohc_engine;
 pub mod nr_rrc_inactive;
 pub mod nr_up_38425;
 pub mod nrf_5g;
@@ -1393,6 +1394,12 @@ pub use nr_rach_5g::{
     Msg4ContentionResolution, MsgATransmission, MsgBResponse, NrRachEngine, PreambleGroup,
     PrachOccasion, RachCause, RachConfig, RachFailureReason, RachState, RachType,
     bi_to_delay_ms,
+};
+pub use nr_rohc_engine::{
+    CompressorState, DecompressorState, FeedbackType, RohcCompressor, RohcContext,
+    RohcDecompressor, RohcFeedback, RohcIpv4Header, RohcMode, RohcProfile, RohcRtpHeader,
+    RohcUdpHeader, UncompressedPacket, compute_crc, rohc_crc3, rohc_crc7, rohc_crc8, wlsb_decode,
+    wlsb_encode,
 };
 pub use nr_rrc_inactive::{
     FullIRnti, InactiveResumeCause, InactiveSuspendConfig, InactiveUeContext, NrRrcInactiveEngine,
