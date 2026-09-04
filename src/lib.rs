@@ -263,6 +263,7 @@ pub mod netconf;
 pub mod netflow;
 pub mod netflow_v5;
 pub mod ngap_5g;
+pub mod nr_ambient_iot;
 pub mod nr_aiml_air_interface;
 pub mod nr_bfr_engine;
 pub mod nr_ca_cross_carrier;
@@ -1503,6 +1504,15 @@ pub use nr_sbfd_engine::{
     PRB_BANDWIDTH_30KHZ_HZ as SBFD_PRB_BANDWIDTH_30KHZ_HZ,
     SUBCARRIERS_PER_PRB as SBFD_SUBCARRIERS_PER_PRB,
     THERMAL_NOISE_DENSITY_DBM_HZ as SBFD_THERMAL_NOISE_DENSITY_DBM_HZ,
+};
+pub use nr_ambient_iot::{
+    compute_crc16 as ambient_compute_crc16, encode_line_code as ambient_encode_line_code,
+    AmbientDeviceClass, AmbientIotEngine, AmbientIotError, AmbientLinkBudget, AmbientTag,
+    BackscatterModulation, LineCoding, QAlgorithm, TopologyMode as AmbientTopologyMode,
+    CRC16_CCITT_INIT as AMBIENT_CRC16_INIT, CRC16_CCITT_POLY as AMBIENT_CRC16_POLY,
+    DEFAULT_RECTIFIER_EFFICIENCY as AMBIENT_DEFAULT_RECTIFIER_EFFICIENCY,
+    SPEED_OF_LIGHT_M_S as AMBIENT_SPEED_OF_LIGHT_M_S,
+    THERMAL_NOISE_DENSITY_DBM_HZ as AMBIENT_THERMAL_NOISE_DENSITY_DBM_HZ,
 };
 pub use nr_aiml_air_interface::{
     ActivationFunction, AiMlError, AiMlMetrics, BeamPredictionEngine, ComplexElement,
