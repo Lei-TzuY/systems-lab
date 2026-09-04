@@ -306,6 +306,7 @@ pub mod oran_beamforming;
 pub mod oran_bfp_compression;
 pub mod oran_cplane_ext;
 pub mod oran_carrier_mgmt;
+pub mod oran_dss_crs;
 pub mod oran_e2sm;
 pub mod oran_esm_mgmt;
 pub mod oran_fault_mgmt;
@@ -1578,6 +1579,13 @@ pub use oran_carrier_mgmt::{
     CarrierDirection, CarrierState, CyclicPrefixType, EaxcBitAllocation, EaxcIdFields,
     IqCompressionFormat, LowLevelEndpoint, ModuleCapabilities, OranCarrierManager, RxCarrierConfig,
     TxCarrierConfig,
+};
+pub use oran_dss_crs::{
+    CrsPunctureFilter, CrsPunctureMask, DssCapacityMetrics, DssError, LteAntennaPorts,
+    LteCrsConfig, LteCyclicPrefix, NrSubcarrierSpacing as DssNrSubcarrierSpacing,
+    OranDssSectionCodec,
+    MAX_CELL_ID as DSS_MAX_CELL_ID,
+    MAX_EFFECTIVE_CODE_RATE as DSS_MAX_EFFECTIVE_CODE_RATE,
 };
 pub use oran_e2sm::{
     E2NodeSmEngine, E2SM_KPM_RAN_FUNCTION_ID, E2SM_RC_RAN_FUNCTION_ID, E2smEngine,
