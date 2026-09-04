@@ -345,6 +345,7 @@ pub mod ptp_synce_hybrid;
 pub mod ptp_tc;
 pub mod ptp_telecom;
 pub mod ptp_telecom_bc;
+pub mod ptp_telecom_class_d;
 pub mod ptp_telecom_dual_plane;
 pub mod ptp_telecom_gm_quality;
 pub mod ptp_telecom_node;
@@ -1658,6 +1659,13 @@ pub use ptp_phy_asymmetry::{
 };
 pub use ptp_synce_hybrid::{
     HybridAdjustment, HybridSyncConfig, HybridSyncEngine, HybridSyncMetrics, HybridSyncMode,
+};
+pub use ptp_telecom_class_d::{
+    ClassDPhaseServo, ClassDTelemetry, ClassDTimeErrorFilter, FiberAsymmetryModel,
+    HoldoverPredictor, PtpClockClassTier, PtpTelecomClassDManager, SubNanoPtpSample,
+    TimeErrorComponents, CLASS_A_MAX_TE_PS, CLASS_B_MAX_TE_PS, CLASS_C_MAX_CTE_PS,
+    CLASS_C_MAX_DTE_PS, CLASS_C_MAX_TE_PS, CLASS_D_MAX_CTE_PS, CLASS_D_MAX_DTE_PS,
+    CLASS_D_MAX_TE_PS, PICOSECONDS_PER_NANOSECOND, PICOSECONDS_PER_SECOND,
 };
 pub use ptp_telecom_dual_plane::{
     DualPlaneConfig, DualPlaneEngine, DualPlaneMetrics, PlaneDataset, ProtectionSwitchMode,
