@@ -273,6 +273,7 @@ pub mod nr_conditional_handover;
 pub mod nr_cov_enhancement;
 pub mod nr_daps_handover;
 pub mod nr_drx_engine;
+pub mod nr_eredcap_wus;
 pub mod nr_hst_sfn;
 pub mod nr_lbt_unlicensed;
 pub mod nr_mbs_ptm;
@@ -1528,6 +1529,12 @@ pub use nr_mobile_iab::{
     BapRouteEntry, BapRoutingId, BapRoutingTable, IabResourceAvailability, IabTdmSlotFormat,
     MobileIabEngine, MobileIabError, MobileIabMetrics, MobileIabMigrationState, MultiHopTimingAdvance,
     NextHopResolution,
+};
+pub use nr_eredcap_wus::{
+    AntennaConfiguration as ERedCapAntennaConfiguration, EDrxConfig, ERedCapBandwidth,
+    ERedCapEngine, ERedCapError, ERedCapMetrics, HyperSfnTiming, LpWurDecision, LpWurDetector,
+    LpWusModulation, LpWusSequence, PowerProfile as ERedCapPowerProfile, RelaxedRrmEvaluator,
+    SdtMode, SdtPacket,
 };
 pub use nr_aiml_air_interface::{
     ActivationFunction, AiMlError, AiMlMetrics, BeamPredictionEngine, ComplexElement,
