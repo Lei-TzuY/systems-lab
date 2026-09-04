@@ -263,6 +263,7 @@ pub mod netconf;
 pub mod netflow;
 pub mod netflow_v5;
 pub mod ngap_5g;
+pub mod nr_aiml_air_interface;
 pub mod nr_bfr_engine;
 pub mod nr_ca_cross_carrier;
 pub mod nr_carrier_phase_rtk;
@@ -1499,6 +1500,15 @@ pub use nr_sbfd_engine::{
     PRB_BANDWIDTH_30KHZ_HZ as SBFD_PRB_BANDWIDTH_30KHZ_HZ,
     SUBCARRIERS_PER_PRB as SBFD_SUBCARRIERS_PER_PRB,
     THERMAL_NOISE_DENSITY_DBM_HZ as SBFD_THERMAL_NOISE_DENSITY_DBM_HZ,
+};
+pub use nr_aiml_air_interface::{
+    ActivationFunction, AiMlError, AiMlMetrics, BeamPredictionEngine, ComplexElement,
+    CsiAutoencoder, MimoChannelMatrix, ModelLifecycleManager, ModelStatus, NeuralLayer,
+    NeuralNetwork, PositioningCirRefiner, UniformQuantizer,
+    DEFAULT_GCS_FALLBACK_THRESHOLD as AIML_DEFAULT_GCS_FALLBACK_THRESHOLD,
+    DEFAULT_INFERENCE_DEADLINE_US as AIML_DEFAULT_INFERENCE_DEADLINE_US,
+    DEFAULT_QUANTIZATION_BITS as AIML_DEFAULT_QUANTIZATION_BITS,
+    MAX_CANDIDATE_BEAMS as AIML_MAX_CANDIDATE_BEAMS,
 };
 pub use nr_ncr_engine::{
     AmplifiedOutput, AmplifyDirection, NcrError, NcrForwardingEngine, NcrHardwareProfile,
