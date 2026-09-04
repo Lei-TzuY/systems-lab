@@ -283,6 +283,7 @@ pub mod nr_redcap_hdfdd;
 pub mod nr_rim_cli_engine;
 pub mod nr_rohc_engine;
 pub mod nr_rrc_inactive;
+pub mod nr_sbfd_engine;
 pub mod nr_scg_engine;
 pub mod nr_sdt_engine;
 pub mod nr_sidelink_v2x;
@@ -1484,6 +1485,20 @@ pub use nr_xr_pdu_set::{
     XR_DEFAULT_PDU_MTU_BYTES, XR_FRAME_INTERVAL_120HZ_US, XR_FRAME_INTERVAL_60HZ_US,
     XR_FRAME_INTERVAL_90HZ_US, XR_REFRESH_RATE_120_HZ, XR_REFRESH_RATE_60_HZ,
     XR_REFRESH_RATE_90_HZ,
+};
+pub use nr_sbfd_engine::{
+    CrossLinkInterferenceModel, McsEntry, SbfdEngine, SbfdError, SbfdLinkAdapter,
+    SbfdMetrics, SbfdSlotConfig, SbfdSlotType, SbfdSubband, SbfdSubbandType,
+    SelfInterferenceCancellationModel, UlGrantDecision,
+    DEFAULT_GNB_TX_POWER_DBM as SBFD_DEFAULT_GNB_TX_POWER_DBM,
+    DEFAULT_MIN_GUARD_PRBS as SBFD_DEFAULT_MIN_GUARD_PRBS,
+    DEFAULT_SCS_HZ as SBFD_DEFAULT_SCS_HZ,
+    DEFAULT_UE_TX_POWER_DBM as SBFD_DEFAULT_UE_TX_POWER_DBM,
+    MAX_PRBS_100MHZ_30KHZ as SBFD_MAX_PRBS_100MHZ_30KHZ,
+    MAX_TOLERABLE_RSI_DBM as SBFD_MAX_TOLERABLE_RSI_DBM,
+    PRB_BANDWIDTH_30KHZ_HZ as SBFD_PRB_BANDWIDTH_30KHZ_HZ,
+    SUBCARRIERS_PER_PRB as SBFD_SUBCARRIERS_PER_PRB,
+    THERMAL_NOISE_DENSITY_DBM_HZ as SBFD_THERMAL_NOISE_DENSITY_DBM_HZ,
 };
 pub use nr_ncr_engine::{
     AmplifiedOutput, AmplifyDirection, NcrError, NcrForwardingEngine, NcrHardwareProfile,
