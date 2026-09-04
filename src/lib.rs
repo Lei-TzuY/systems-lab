@@ -263,6 +263,7 @@ pub mod netconf;
 pub mod netflow;
 pub mod netflow_v5;
 pub mod ngap_5g;
+pub mod nr_bfr_engine;
 pub mod nr_cell_reselection;
 pub mod nr_drx_engine;
 pub mod nr_lbt_unlicensed;
@@ -1379,6 +1380,10 @@ pub use nef_5g::{
     DeviceTriggerRecord, DeviceTriggerRequest, DeviceTriggerStatus, GeoLocation,
     InternalEventPayload, LocationInfo, NefEngine, NefEvent, NefEventNotification,
     NefEventSubscription,
+};
+pub use nr_bfr_engine::{
+    BeamFailureRecoveryConfig, BeamIdentifier, BeamMeasurement, BfrEvent, BfrState,
+    BfrTransmissionType, CandidateBeamConfig, NrBfrEngine, ReferenceSignalType,
 };
 pub use nr_cell_reselection::{
     AcceptableReason, CellAccessInfo, CellMeasurement, CellReselectionDecision, CellSuitability,
