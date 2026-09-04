@@ -271,6 +271,7 @@ pub mod nr_rach_5g;
 pub mod nr_rohc_engine;
 pub mod nr_rrc_inactive;
 pub mod nr_scg_engine;
+pub mod nr_sidelink_v2x;
 pub mod nr_up_38425;
 pub mod nrf_5g;
 pub mod nrf_oauth;
@@ -1421,6 +1422,10 @@ pub use nr_rrc_inactive::{
 pub use nr_scg_engine::{
     NrScgEngine, ScgBearerConfig, ScgBearerType, ScgCellConfig, ScgEngineConfig, ScgEngineEvent,
     ScgFailureInformation, ScgFailureReason, ScgState,
+};
+pub use nr_sidelink_v2x::{
+    CandidateResource, CbrMeasurement, CrMeasurement, NrSidelinkEngine, PsfchFeedback,
+    SciFormat1A, SciFormat2A, SensingReservationEntry, SidelinkBandwidthPart, SidelinkCastType,
 };
 pub use nr_up_38425::{
     DddsCause, DiscardedSnBlock, LostSnRange, NR_U_MAX_SN, NrUpDlDataDeliveryStatus,
