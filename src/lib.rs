@@ -263,6 +263,7 @@ pub mod netconf;
 pub mod netflow;
 pub mod netflow_v5;
 pub mod ngap_5g;
+pub mod nr_rach_5g;
 pub mod nr_up_38425;
 pub mod nrf_5g;
 pub mod nrf_oauth;
@@ -1371,6 +1372,12 @@ pub use nef_5g::{
     DeviceTriggerRecord, DeviceTriggerRequest, DeviceTriggerStatus, GeoLocation,
     InternalEventPayload, LocationInfo, NefEngine, NefEvent, NefEventNotification,
     NefEventSubscription,
+};
+pub use nr_rach_5g::{
+    MacRarPayload, Msg1PreambleState, Msg1Transmission, Msg2RarMessage, Msg3Transmission,
+    Msg4ContentionResolution, MsgATransmission, MsgBResponse, NrRachEngine, PreambleGroup,
+    PrachOccasion, RachCause, RachConfig, RachFailureReason, RachState, RachType,
+    bi_to_delay_ms,
 };
 pub use nr_up_38425::{
     DddsCause, DiscardedSnBlock, LostSnRange, NR_U_MAX_SN, NrUpDlDataDeliveryStatus,
