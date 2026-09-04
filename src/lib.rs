@@ -411,6 +411,7 @@ pub mod tls;
 pub mod tngf_5g;
 pub mod transition;
 pub mod tsn_5g_bridge;
+pub mod tsn_5g_clock;
 pub mod tsn_8021cm_fronthaul;
 pub mod tsn_ats_multihop;
 pub mod tsn_cnc;
@@ -1778,6 +1779,11 @@ pub use tsn_5g_bridge::{
     DeJitterBufferEntry, DsTtEngine, NwTtEngine, PortPairDelay, PtpResidenceTimeReport,
     TscTrafficDirection, Tscai, Tsn5gBridgeEngine, Tsn5gStreamBinding, TsnBridgeId, TsnPortConfig,
     TsnPortState, TsnPortType, TsnQosProfile,
+};
+pub use tsn_5g_clock::{
+    ClockDomainType, PtpResidenceTimeUpdate, ReferenceTimeInfo, SyncDirection, TimeErrorBudget,
+    TsctfEngine, TsctfError, TsctfSession, UeToUeSyncReport, WorkingClockModel,
+    DEFAULT_INDUSTRIAL_TSN_BUDGET_NS, STRICT_MOTION_CONTROL_BUDGET_NS,
 };
 pub use tsn_8021cm_fronthaul::{
     EcpriTrafficClass, FronthaulBridgeHop, FronthaulPathEvaluation, Ieee8021CmEngine,
