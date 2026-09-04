@@ -266,6 +266,7 @@ pub mod ngap_5g;
 pub mod nr_bfr_engine;
 pub mod nr_ca_cross_carrier;
 pub mod nr_cell_reselection;
+pub mod nr_cov_enhancement;
 pub mod nr_daps_handover;
 pub mod nr_drx_engine;
 pub mod nr_lbt_unlicensed;
@@ -1420,6 +1421,13 @@ pub use nr_cell_reselection::{
     FrequencyLayerConfig, MobilityState, MseConfig, NrCellIdentity, NrCellReselectionEngine,
     PlmnIdentity, ReselectionCause, SCriterionParams, SCriterionResult, ServingCellConfig,
     UnsuitableReason,
+};
+pub use nr_cov_enhancement::{
+    ActualRepetition, CovEnhError, CovEnhMetrics, DmrsBundlingController, NominalRepetition,
+    PhaseDiscontinuityReason, PuschRepetitionType, PuschTypeBSegmenter, RvPattern, TbomsConfig,
+    TddSlotFormat, TddSymbolType, DEFAULT_PATHLOSS_EXPONENT,
+    NR_SUBCARRIERS_PER_PRB as COVENH_SUBCARRIERS_PER_PRB,
+    NR_SYMBOLS_PER_SLOT as COVENH_SYMBOLS_PER_SLOT,
 };
 pub use nr_daps_handover::{
     DapsCipherAlg, DapsEngine, DapsError, DapsFailureReason, DapsIntegrityAlg, DapsLeg,
