@@ -319,6 +319,7 @@ pub mod oran_packet_proc;
 pub mod oran_pm_mgmt;
 pub mod oran_sec_mgmt;
 pub mod oran_section_type0;
+pub mod oran_shared_cell;
 pub mod oran_splane_sync;
 pub mod oran_sw_mgmt;
 pub mod ospf;
@@ -1650,6 +1651,11 @@ pub use oran_section_type0::{
     OranSectionType0Message, OranSectionType0Section, NR_SUBCARRIERS_PER_PRB,
     NR_SYMBOLS_PER_SLOT as ORAN_SYMBOLS_PER_SLOT, ORAN_SECTION_TYPE_0,
     ORAN_SECTION_TYPE_0_COMMON_HEADER_LEN, ORAN_SECTION_TYPE_0_SECTION_LEN,
+};
+pub use oran_shared_cell::{
+    CombiningMode, ComplexIq as SharedCellComplexIq, RuDlDistributedPacket, RuMemberProfile,
+    RuPrbPacket, SharedCellEngine, SharedCellError, SharedCellMetrics, DEFAULT_SKEW_TOLERANCE_NS,
+    MAX_RUS_PER_SHARED_CELL,
 };
 pub use oran_splane_sync::{
     LINK_LOCK_THRESHOLD_NS, LlsConfig, MAX_TDD_TIME_ERROR_NS, OCXO_DRIFT_NS_PER_SEC,
