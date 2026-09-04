@@ -266,6 +266,7 @@ pub mod ngap_5g;
 pub mod nr_bfr_engine;
 pub mod nr_ca_cross_carrier;
 pub mod nr_cell_reselection;
+pub mod nr_daps_handover;
 pub mod nr_drx_engine;
 pub mod nr_lbt_unlicensed;
 pub mod nr_mbs_ptm;
@@ -1417,6 +1418,11 @@ pub use nr_cell_reselection::{
     FrequencyLayerConfig, MobilityState, MseConfig, NrCellIdentity, NrCellReselectionEngine,
     PlmnIdentity, ReselectionCause, SCriterionParams, SCriterionResult, ServingCellConfig,
     UnsuitableReason,
+};
+pub use nr_daps_handover::{
+    DapsCipherAlg, DapsEngine, DapsError, DapsFailureReason, DapsIntegrityAlg, DapsLeg,
+    DapsPdu, DapsPowerManager, DapsReorderingBuffer, DapsSdu, DapsSecurityContext,
+    DapsSnSize, DapsState, DapsTelemetry, DapsUlChannel,
 };
 pub use nr_drx_engine::{
     ActiveReason, DrxActivity, DrxConfig, DrxCycleMode, DrxMacCe, HarqProcessState, NrDrxEngine,
