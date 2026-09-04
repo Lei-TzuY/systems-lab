@@ -294,6 +294,7 @@ pub mod oran_mplane_fcaps;
 pub mod oran_o2_interface;
 pub mod oran_packet_proc;
 pub mod oran_splane_sync;
+pub mod oran_sw_mgmt;
 pub mod ospf;
 pub mod ospfv3;
 pub mod otlp;
@@ -1489,6 +1490,11 @@ pub use oran_packet_proc::{
 pub use oran_splane_sync::{
     LINK_LOCK_THRESHOLD_NS, LlsConfig, MAX_TDD_TIME_ERROR_NS, OCXO_DRIFT_NS_PER_SEC,
     OranSplaneSyncEngine, PtpClockQuality, SplaneSyncState, SyncEQl, TimeErrorMetrics,
+};
+pub use oran_sw_mgmt::{
+    ActivationStatus, CommitStatus, DownloadProtocol, DownloadStatus, InstallStatus,
+    IntegrityStatus, OranSoftwareManager, SlotAccess, SlotStatus, SoftwareEvent, SoftwareFile,
+    SoftwareSlot, compute_sha256, hex_to_sha256, sha256_to_hex,
 };
 pub use pcf_5g::{
     AfMediaType, AppSessionContextRequest, AppSessionContextResponse, CreateSmPolicyRequest,
