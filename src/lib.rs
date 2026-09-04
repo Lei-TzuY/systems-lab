@@ -297,6 +297,7 @@ pub mod openflow;
 pub mod optical_dom;
 pub mod oran_ald_mgmt;
 pub mod oran_a1_interface;
+pub mod oran_beamforming;
 pub mod oran_bfp_compression;
 pub mod oran_cplane_ext;
 pub mod oran_carrier_mgmt;
@@ -1522,6 +1523,11 @@ pub use oran_a1_interface::{
     A1EiJob, A1EiType, A1EnforcementState, A1HttpMethod, A1InterfaceEngine, A1PolicyInstance,
     A1PolicyStatus, A1PolicyType, A1RestRequest, A1RestResponse, A1Role, A1StatusCode,
     SliceSlaPolicyPayload,
+};
+pub use oran_beamforming::{
+    compute_steering_vector, AntennaArrayConfig, AntennaPolarization, ArrayTopology,
+    BeamWeightVector, BeamformingTelemetry, ComplexNumber, GridOfBeamsCodebook,
+    MuMimoPrecoder, MuMimoPrecodingResult, OranBeamformingEngine, SpatialAngle,
 };
 pub use oran_bfp_compression::{
     BfpError, ComplexIq, CompressedPrbBlock, IqQualityMetrics, ModulationScheme, OranBfpEngine,
