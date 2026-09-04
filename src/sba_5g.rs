@@ -46,6 +46,7 @@ pub enum NfType {
     IUpf,
     MbUpf,
     Tsctf,
+    Hss,
 }
 
 impl NfType {
@@ -90,6 +91,7 @@ impl NfType {
             NfType::IUpf => "I-UPF",
             NfType::MbUpf => "MB-UPF",
             NfType::Tsctf => "TSCTF",
+            NfType::Hss => "HSS",
         }
     }
 }

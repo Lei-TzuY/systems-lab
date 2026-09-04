@@ -216,6 +216,7 @@ pub mod gtpu_sliding_window_ack;
 pub mod gtpu_telemetry;
 pub mod gtpu_upf_relocation;
 pub mod gue;
+pub mod hss_sbi_5g;
 pub mod hsrp;
 pub mod http2;
 pub mod http3;
@@ -932,6 +933,12 @@ pub use gtpu_upf_relocation::{
     GTPU_MSG_END_MARKER, HandoverGtpuPacket, TargetUpfRelocationEngine, UpfHandoverState,
 };
 pub use gue::{FOU_UDP_PORT, FouPacket, GUE_UDP_PORT, GueHeader, GuePacket};
+pub use hss_sbi_5g::{
+    AccessRestrictionData, ApplicationServer, DefaultHandling, DualRegistrationState, HssError,
+    HssSbiEngine, ImpiSubscription, ImpuProfile, ImsRegistrationState, InitialFilterCriteria,
+    ScscfRegistration, ScscfRestorationInfo, ServicePointTrigger, ServiceProfile, SessionCase,
+    TriggerCondition,
+};
 pub use hsrp::{HSRP_MULTICAST_IP, HSRP_UDP_PORT, HsrpEngine, HsrpPacket, HsrpState};
 pub use http2::{HTTP2_FRAME_DATA, HTTP2_FRAME_HEADERS, HTTP2_FRAME_SETTINGS, Http2Frame};
 pub use http3::{HTTP3_FRAME_DATA, HTTP3_FRAME_HEADERS, HTTP3_FRAME_SETTINGS, Http3Frame};
