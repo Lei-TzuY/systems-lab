@@ -281,6 +281,7 @@ pub mod nr_scg_engine;
 pub mod nr_sdt_engine;
 pub mod nr_sidelink_v2x;
 pub mod nr_sidelink_drx;
+pub mod nr_sidelink_positioning;
 pub mod nr_unified_tci;
 pub mod nr_up_38425;
 pub mod nr_udc_engine;
@@ -1495,6 +1496,11 @@ pub use nr_sidelink_drx::{
     CoordinationSchemeType, InterUeCoordinationMessage, PartialSensingConfig, ResourceSlotBlock,
     SidelinkDrxEngine, SidelinkDrxError, SidelinkDrxProfileConfig, SidelinkDrxSession,
     SidelinkDrxTelemetry, SidelinkHarqProcessState, SlDrxCastType,
+};
+pub use nr_sidelink_positioning::{
+    GoldSequenceGenerator, SlAnchorUe, SlAoAMeasurement, SlCombSize, SlKinematicTracker,
+    SlMultilaterationSolver, SlPositionEstimate, SlPositioningError, SlPrsConfig,
+    SlRangingSession, SlRttMeasurement, SlSessionState,
 };
 pub use nr_up_38425::{
     DddsCause, DiscardedSnBlock, LostSnRange, NR_U_MAX_SN, NrUpDlDataDeliveryStatus,
