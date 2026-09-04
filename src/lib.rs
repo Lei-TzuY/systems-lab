@@ -269,6 +269,7 @@ pub mod nr_cell_reselection;
 pub mod nr_drx_engine;
 pub mod nr_lbt_unlicensed;
 pub mod nr_mbs_ptm;
+pub mod nr_ntn_harq;
 pub mod nr_positioning_lcs;
 pub mod nr_pei_engine;
 pub mod nr_rach_5g;
@@ -1433,6 +1434,12 @@ pub use nr_positioning_lcs::{
     DlTdoaSolver, EcefPoint, EnuPoint, LppMessageType, LppPositioningMethod, LppTransactionManager,
     MultiRttMeasurement, MultiRttSolver, NrppaEngine, NrppaMessage, PositioningEstimate,
     SPEED_OF_LIGHT_M_S, TrpInfo, UncertaintyEllipse, Wgs84Point,
+};
+pub use nr_ntn_harq::{
+    AutonomousTaTracker, NtnHarqEngine, NtnHarqError, NtnHarqProcess, NtnHarqProcessState,
+    NtnHarqTelemetry, NtnSib19Config, SatelliteOrbitType, DEFAULT_TA_STEP_THRESHOLD_US,
+    MAX_NTN_HARQ_PROCESSES, SPEED_OF_LIGHT_MPS as NTN_SPEED_OF_LIGHT_MPS,
+    STANDARD_TERRESTRIAL_HARQ_PROCESSES,
 };
 pub use nr_pei_engine::{
     DciFormat2_7, PeiConfig, PeiPerformanceMetrics, PeiSubgroupEngine, PeiTimingCalculator,
