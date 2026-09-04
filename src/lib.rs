@@ -275,6 +275,7 @@ pub mod nr_rach_5g;
 pub mod nr_rohc_engine;
 pub mod nr_rrc_inactive;
 pub mod nr_scg_engine;
+pub mod nr_sdt_engine;
 pub mod nr_sidelink_v2x;
 pub mod nr_unified_tci;
 pub mod nr_up_38425;
@@ -1453,6 +1454,10 @@ pub use nr_rrc_inactive::{
 pub use nr_scg_engine::{
     NrScgEngine, ScgBearerConfig, ScgBearerType, ScgCellConfig, ScgEngineConfig, ScgEngineEvent,
     ScgFailureInformation, ScgFailureReason, ScgState,
+};
+pub use nr_sdt_engine::{
+    SdtConfig, SdtEngine, SdtMacPdu, SdtPerformanceMetrics, SdtProcedureState, SdtResponseAction,
+    SdtType, MAC_LCID_CCCH_SDT, MAC_LCID_DTCH_MAX, MAC_LCID_DTCH_MIN,
 };
 pub use nr_sidelink_v2x::{
     CandidateResource, CbrMeasurement, CrMeasurement, NrSidelinkEngine, PsfchFeedback,
