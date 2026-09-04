@@ -272,6 +272,7 @@ pub mod nr_cell_reselection;
 pub mod nr_conditional_handover;
 pub mod nr_cov_enhancement;
 pub mod nr_daps_handover;
+pub mod nr_dss_mixed_numerology;
 pub mod nr_drx_engine;
 pub mod nr_eredcap_wus;
 pub mod nr_hst_sfn;
@@ -1535,6 +1536,12 @@ pub use nr_eredcap_wus::{
     ERedCapEngine, ERedCapError, ERedCapMetrics, HyperSfnTiming, LpWurDecision, LpWurDetector,
     LpWusModulation, LpWusSequence, PowerProfile as ERedCapPowerProfile, RelaxedRrmEvaluator,
     SdtMode, SdtPacket,
+};
+pub use nr_dss_mixed_numerology::{
+    CarrierNumerology as DssCarrierNumerology, CarrierProfile as DssCarrierProfile,
+    CrsPuncturingMask, CrossCarrierScheduleResult, CrossCarrierSchedulingConfig,
+    CrossCarrierSlotMapper, DssMetrics, DssMixedEngine, DssMixedError, LteCrsAntennaPorts,
+    LteCrsRateMatchingPattern, LteMbsfnConfig,
 };
 pub use nr_aiml_air_interface::{
     ActivationFunction, AiMlError, AiMlMetrics, BeamPredictionEngine, ComplexElement,
