@@ -292,6 +292,7 @@ pub mod nr_srap_relay;
 pub mod nr_unified_tci;
 pub mod nr_up_38425;
 pub mod nr_udc_engine;
+pub mod nr_xr_pdu_set;
 pub mod nrf_5g;
 pub mod nrf_oauth;
 pub mod nsacf_5g;
@@ -1473,6 +1474,16 @@ pub use nr_carrier_phase_rtk::{
     MAX_SOLVER_ITERATIONS as RTK_MAX_SOLVER_ITERATIONS,
     SOLVER_CONVERGENCE_TOLERANCE_M as RTK_SOLVER_CONVERGENCE_TOLERANCE_M,
     SPEED_OF_LIGHT_M_S as RTK_SPEED_OF_LIGHT_M_S,
+};
+pub use nr_xr_pdu_set::{
+    CascadingDiscardManager, DiscardReason, PduHandlingAction, PduSetBinaryCodec,
+    PduSetDelayBudget, PduSetHeader, PduSetPacket, VideoFrameType, XrError, XrModality,
+    XrModalityType, XrMultiModalScheduler, XrQoeTracker, XrTrafficGenerator,
+    DEFAULT_PSDB_6DOF_POSE_US, DEFAULT_PSDB_HAPTIC_US, DEFAULT_PSDB_SPATIAL_AUDIO_US,
+    DEFAULT_PSDB_VIDEO_IFRAME_US, DEFAULT_PSDB_VIDEO_PFRAME_US, PDU_SET_HEADER_SIZE_BYTES,
+    XR_DEFAULT_PDU_MTU_BYTES, XR_FRAME_INTERVAL_120HZ_US, XR_FRAME_INTERVAL_60HZ_US,
+    XR_FRAME_INTERVAL_90HZ_US, XR_REFRESH_RATE_120_HZ, XR_REFRESH_RATE_60_HZ,
+    XR_REFRESH_RATE_90_HZ,
 };
 pub use nr_ncr_engine::{
     AmplifiedOutput, AmplifyDirection, NcrError, NcrForwardingEngine, NcrHardwareProfile,
