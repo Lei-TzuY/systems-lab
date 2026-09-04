@@ -265,6 +265,7 @@ pub mod netflow_v5;
 pub mod ngap_5g;
 pub mod nr_bfr_engine;
 pub mod nr_ca_cross_carrier;
+pub mod nr_carrier_phase_rtk;
 pub mod nr_cell_reselection;
 pub mod nr_cov_enhancement;
 pub mod nr_daps_handover;
@@ -1461,6 +1462,17 @@ pub use nr_positioning_lcs::{
     DlTdoaSolver, EcefPoint, EnuPoint, LppMessageType, LppPositioningMethod, LppTransactionManager,
     MultiRttMeasurement, MultiRttSolver, NrppaEngine, NrppaMessage, PositioningEstimate,
     SPEED_OF_LIGHT_M_S, TrpInfo, UncertaintyEllipse, Wgs84Point,
+};
+pub use nr_carrier_phase_rtk::{
+    CarrierPhaseError, CarrierPhaseObservation, CarrierPhaseRtkSolver, Cartesian3D,
+    CycleSlipDetector, LambdaAmbiguitySolver, RtkFixStatus, RtkMetrics, RtkSolution,
+    TrpCarrierPhaseConfig,
+    CYCLE_SLIP_THRESHOLD_CYCLES as RTK_CYCLE_SLIP_THRESHOLD_CYCLES,
+    DEFAULT_AMBIGUITY_RATIO_THRESHOLD as RTK_DEFAULT_AMBIGUITY_RATIO_THRESHOLD,
+    DEFAULT_NR_CARRIER_FREQ_HZ as RTK_DEFAULT_CARRIER_FREQ_HZ,
+    MAX_SOLVER_ITERATIONS as RTK_MAX_SOLVER_ITERATIONS,
+    SOLVER_CONVERGENCE_TOLERANCE_M as RTK_SOLVER_CONVERGENCE_TOLERANCE_M,
+    SPEED_OF_LIGHT_M_S as RTK_SPEED_OF_LIGHT_M_S,
 };
 pub use nr_ncr_engine::{
     AmplifiedOutput, AmplifyDirection, NcrError, NcrForwardingEngine, NcrHardwareProfile,
