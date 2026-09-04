@@ -272,6 +272,7 @@ pub mod nr_drx_engine;
 pub mod nr_lbt_unlicensed;
 pub mod nr_mbs_ptm;
 pub mod nr_ncr_engine;
+pub mod nr_nes_energy_savings;
 pub mod nr_ntn_harq;
 pub mod nr_ntn_polarization_doppler;
 pub mod nr_positioning_lcs;
@@ -1467,6 +1468,14 @@ pub use nr_ncr_engine::{
     MAX_BEAM_ID as NCR_MAX_BEAM_ID,
     SYMBOLS_PER_SLOT as NCR_SYMBOLS_PER_SLOT,
     THERMAL_NOISE_FLOOR_DBM_HZ as NCR_THERMAL_NOISE_FLOOR_DBM_HZ,
+};
+pub use nr_nes_energy_savings::{
+    BaseStationPowerModel, CellDtxDrxPattern, NesError, NesMetrics, NesSleepLevel,
+    NrNesEngine, SpatialMimoConfig, SsbAdaptationConfig,
+    DEFAULT_MAX_MIMO_ANTENNAS as NES_DEFAULT_MAX_MIMO_ANTENNAS,
+    DEFAULT_MAX_SSB_BEAMS_FR1 as NES_DEFAULT_MAX_SSB_BEAMS_FR1,
+    DEFAULT_MAX_SSB_BEAMS_FR2 as NES_DEFAULT_MAX_SSB_BEAMS_FR2,
+    NR_SYMBOLS_PER_SLOT as NES_SYMBOLS_PER_SLOT,
 };
 pub use nr_ntn_harq::{
     AutonomousTaTracker, NtnHarqEngine, NtnHarqError, NtnHarqProcess, NtnHarqProcessState,
