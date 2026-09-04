@@ -276,6 +276,7 @@ pub mod nr_rohc_engine;
 pub mod nr_rrc_inactive;
 pub mod nr_scg_engine;
 pub mod nr_sidelink_v2x;
+pub mod nr_unified_tci;
 pub mod nr_up_38425;
 pub mod nrf_5g;
 pub mod nrf_oauth;
@@ -1459,6 +1460,11 @@ pub use nr_sidelink_v2x::{
 pub use nr_up_38425::{
     DddsCause, DiscardedSnBlock, LostSnRange, NR_U_MAX_SN, NrUpDlDataDeliveryStatus,
     NrUpDlUserData, NrUpError, NrUpFlowController, NrUpPduType,
+};
+pub use nr_unified_tci::{
+    ActiveBeamSet, BeamSwitchState, MTrpTransmissionMode, QclInfo, QclType, ReferenceSignal,
+    TciDirectionMode, TrpBfdState, TrpChannelCondition, TrpId, UnifiedTciEngine, UnifiedTciMacCe,
+    UnifiedTciState, MAX_TCI_STATES,
 };
 pub use nrf_5g::{
     DiscoveryQuery, DiscoveryResult, NfLifecycleEvent, NfProfileRecord, NfServiceRecord, NfStatus,
