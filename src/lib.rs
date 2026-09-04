@@ -273,6 +273,7 @@ pub mod nr_ntn_harq;
 pub mod nr_positioning_lcs;
 pub mod nr_pei_engine;
 pub mod nr_rach_5g;
+pub mod nr_redcap_hdfdd;
 pub mod nr_rohc_engine;
 pub mod nr_rrc_inactive;
 pub mod nr_scg_engine;
@@ -1453,6 +1454,12 @@ pub use nr_rach_5g::{
     Msg4ContentionResolution, MsgATransmission, MsgBResponse, NrRachEngine, PreambleGroup,
     PrachOccasion, RachCause, RachConfig, RachFailureReason, RachState, RachType,
     bi_to_delay_ms,
+};
+pub use nr_redcap_hdfdd::{
+    CancelledChannel, ChannelAllocation, HdChannelType, HdDirection, HdFddMetrics,
+    HdFddScheduler, HdFddType, RedCapHdFddError, RelaxedRrmCriteria, RelaxedRrmState,
+    ResolutionReason, RrmRelaxationEvaluator, ScheduledChannel, SlotScheduleResult,
+    SwitchingGuardConfig, NR_SYMBOLS_PER_SLOT as REDCAP_SYMBOLS_PER_SLOT,
 };
 pub use nr_rohc_engine::{
     CompressorState, DecompressorState, FeedbackType, RohcCompressor, RohcContext,
