@@ -267,6 +267,7 @@ pub mod nr_bfr_engine;
 pub mod nr_cell_reselection;
 pub mod nr_drx_engine;
 pub mod nr_lbt_unlicensed;
+pub mod nr_mbs_ptm;
 pub mod nr_rach_5g;
 pub mod nr_rohc_engine;
 pub mod nr_rrc_inactive;
@@ -1402,6 +1403,13 @@ pub use nr_drx_engine::{
 pub use nr_lbt_unlicensed::{
     ChannelAccessPriorityClass, ChannelBandwidthMhz, ChannelReservationSignal, CotSharingInfo,
     EnergyDetectionConfig, HarqFeedback, LbtState, LbtType, NrLbtEngine, NrLbtMetrics,
+};
+pub use nr_mbs_ptm::{
+    LCID_MCCH, LCID_PADDING, MbsDeliveryLeg, MbsDeliveryMode, MbsDrxConfig, MbsDrxEngine,
+    MbsHarqProcess, MbsInterestIndication, MbsLogicalChannel, MbsMacMultiplexer, MbsMacSdu, MbsRnti,
+    MbsSessionInfo, MbsTmgi, McchConfig, McchStateMachine, MrbConfig, MrbEntity, MrbId, MrbPdcpSnSize,
+    MrbPdu, NrMbsServiceType, PtmHarqManager, PtmHarqScheme, PtmPtpController,
+    PtmPtpControllerConfig, SplitMrbRoutingPolicy, SwitchingDecision, UeTelemetry,
 };
 pub use nr_rach_5g::{
     MacRarPayload, Msg1PreambleState, Msg1Transmission, Msg2RarMessage, Msg3Transmission,
