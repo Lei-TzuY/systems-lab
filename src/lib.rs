@@ -296,6 +296,7 @@ pub mod oran_ald_mgmt;
 pub mod oran_a1_interface;
 pub mod oran_bfp_compression;
 pub mod oran_cplane_ext;
+pub mod oran_carrier_mgmt;
 pub mod oran_e2sm;
 pub mod oran_esm_mgmt;
 pub mod oran_fault_mgmt;
@@ -1511,6 +1512,11 @@ pub use oran_bfp_compression::{
 pub use oran_cplane_ext::{
     BfwBundle, BfwCompressionMethod, BfwWeight, CPlaneSectionType3, OranCPlaneError,
     OranCPlaneExtEngine, SectionExtension1, SectionExtension2, SectionExtension4,
+};
+pub use oran_carrier_mgmt::{
+    CarrierDirection, CarrierState, CyclicPrefixType, EaxcBitAllocation, EaxcIdFields,
+    IqCompressionFormat, LowLevelEndpoint, ModuleCapabilities, OranCarrierManager, RxCarrierConfig,
+    TxCarrierConfig,
 };
 pub use oran_e2sm::{
     E2NodeSmEngine, E2SM_KPM_RAN_FUNCTION_ID, E2SM_RC_RAN_FUNCTION_ID, E2smEngine,
