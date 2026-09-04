@@ -277,6 +277,7 @@ pub mod nr_ncr_engine;
 pub mod nr_nes_energy_savings;
 pub mod nr_ntn_harq;
 pub mod nr_ntn_polarization_doppler;
+pub mod nr_ntn_regenerative;
 pub mod nr_positioning_lcs;
 pub mod nr_pei_engine;
 pub mod nr_rach_5g;
@@ -1535,6 +1536,13 @@ pub use nr_ntn_polarization_doppler::{
     DopplerFllServo, NtnDopplerMetrics, NtnPolarizationError, PolarizationSense,
     PolarizationTracker, SatelliteKinematics, EARTH_GRAVITATIONAL_PARAM, EARTH_RADIUS_METERS,
     MAX_RESIDUAL_DOPPLER_SCS_RATIO, SPEED_OF_LIGHT_M_S as NTN_POL_SPEED_OF_LIGHT_M_S,
+};
+pub use nr_ntn_regenerative::{
+    BeamFootprintMode, ForwardingDecision, GroundStation, IslLink, IslStatus, IslType,
+    KeplerianElements, NtnRegenerativeEngine, NtnRegenerativeError, PayloadArchitecture,
+    SatelliteBeam, SatelliteNode, SpacePacket, SpaceQosPriority, Vector3D,
+    EARTH_ROTATION_RATE_RAD_S as NTN_REG_EARTH_ROTATION_RATE_RAD_S,
+    SPEED_OF_LIGHT_M_S as NTN_REG_SPEED_OF_LIGHT_M_S,
 };
 pub use nr_pei_engine::{
     DciFormat2_7, PeiConfig, PeiPerformanceMetrics, PeiSubgroupEngine, PeiTimingCalculator,
