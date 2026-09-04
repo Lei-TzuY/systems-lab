@@ -271,6 +271,7 @@ pub mod nr_daps_handover;
 pub mod nr_drx_engine;
 pub mod nr_lbt_unlicensed;
 pub mod nr_mbs_ptm;
+pub mod nr_ncr_engine;
 pub mod nr_ntn_harq;
 pub mod nr_ntn_polarization_doppler;
 pub mod nr_positioning_lcs;
@@ -1457,6 +1458,13 @@ pub use nr_positioning_lcs::{
     DlTdoaSolver, EcefPoint, EnuPoint, LppMessageType, LppPositioningMethod, LppTransactionManager,
     MultiRttMeasurement, MultiRttSolver, NrppaEngine, NrppaMessage, PositioningEstimate,
     SPEED_OF_LIGHT_M_S, TrpInfo, UncertaintyEllipse, Wgs84Point,
+};
+pub use nr_ncr_engine::{
+    AmplifiedOutput, AmplifyDirection, NcrError, NcrForwardingEngine, NcrHardwareProfile,
+    NcrMetrics, NcrState, SideControlInformation,
+    MAX_BEAM_ID as NCR_MAX_BEAM_ID,
+    SYMBOLS_PER_SLOT as NCR_SYMBOLS_PER_SLOT,
+    THERMAL_NOISE_FLOOR_DBM_HZ as NCR_THERMAL_NOISE_FLOOR_DBM_HZ,
 };
 pub use nr_ntn_harq::{
     AutonomousTaTracker, NtnHarqEngine, NtnHarqError, NtnHarqProcess, NtnHarqProcessState,
