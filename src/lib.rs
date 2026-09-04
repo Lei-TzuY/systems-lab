@@ -297,6 +297,7 @@ pub mod oran_iq_compression;
 pub mod oran_mplane_fcaps;
 pub mod oran_o2_interface;
 pub mod oran_packet_proc;
+pub mod oran_pm_mgmt;
 pub mod oran_splane_sync;
 pub mod oran_sw_mgmt;
 pub mod ospf;
@@ -1508,6 +1509,11 @@ pub use oran_o2_interface::{
 };
 pub use oran_packet_proc::{
     OranDemuxEvent, OranFronthaulProcessor, OranStreamConfig, OranStreamStats,
+};
+pub use oran_pm_mgmt::{
+    EcpriTransportMeasurement, MeasurementIntervalRecord, MeasurementJob, OranPmEngine,
+    RxWindowMeasurement, TcaDirection, TcaSeverity, ThresholdCrossingAlert,
+    ThresholdCrossingConfig, TransceiverMeasurement, TxPrbMeasurement,
 };
 pub use oran_splane_sync::{
     LINK_LOCK_THRESHOLD_NS, LlsConfig, MAX_TDD_TIME_ERROR_NS, OCXO_DRIFT_NS_PER_SEC,
