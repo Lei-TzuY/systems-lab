@@ -279,6 +279,7 @@ pub mod nr_sdt_engine;
 pub mod nr_sidelink_v2x;
 pub mod nr_unified_tci;
 pub mod nr_up_38425;
+pub mod nr_udc_engine;
 pub mod nrf_5g;
 pub mod nrf_oauth;
 pub mod nsacf_5g;
@@ -1472,6 +1473,10 @@ pub use nr_unified_tci::{
     ActiveBeamSet, BeamSwitchState, MTrpTransmissionMode, QclInfo, QclType, ReferenceSignal,
     TciDirectionMode, TrpBfdState, TrpChannelCondition, TrpId, UnifiedTciEngine, UnifiedTciMacCe,
     UnifiedTciState, MAX_TCI_STATES,
+};
+pub use nr_udc_engine::{
+    compute_udc_crc4, SlidingDictionary, UdcBufferSize, UdcCompressor, UdcConfig,
+    UdcDecompressor, UdcEngine, UdcFeedbackPdu, UdcHeader,
 };
 pub use nrf_5g::{
     DiscoveryQuery, DiscoveryResult, NfLifecycleEvent, NfProfileRecord, NfServiceRecord, NfStatus,
