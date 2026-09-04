@@ -264,6 +264,7 @@ pub mod netflow;
 pub mod netflow_v5;
 pub mod ngap_5g;
 pub mod nr_cell_reselection;
+pub mod nr_drx_engine;
 pub mod nr_lbt_unlicensed;
 pub mod nr_rach_5g;
 pub mod nr_rohc_engine;
@@ -1384,6 +1385,10 @@ pub use nr_cell_reselection::{
     FrequencyLayerConfig, MobilityState, MseConfig, NrCellIdentity, NrCellReselectionEngine,
     PlmnIdentity, ReselectionCause, SCriterionParams, SCriterionResult, ServingCellConfig,
     UnsuitableReason,
+};
+pub use nr_drx_engine::{
+    ActiveReason, DrxActivity, DrxConfig, DrxCycleMode, DrxMacCe, HarqProcessState, NrDrxEngine,
+    ShortDrxConfig,
 };
 pub use nr_lbt_unlicensed::{
     ChannelAccessPriorityClass, ChannelBandwidthMhz, ChannelReservationSignal, CotSharingInfo,
