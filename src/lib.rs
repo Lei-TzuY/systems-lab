@@ -268,6 +268,7 @@ pub mod nr_cell_reselection;
 pub mod nr_drx_engine;
 pub mod nr_lbt_unlicensed;
 pub mod nr_mbs_ptm;
+pub mod nr_positioning_lcs;
 pub mod nr_rach_5g;
 pub mod nr_rohc_engine;
 pub mod nr_rrc_inactive;
@@ -1410,6 +1411,12 @@ pub use nr_mbs_ptm::{
     MbsSessionInfo, MbsTmgi, McchConfig, McchStateMachine, MrbConfig, MrbEntity, MrbId, MrbPdcpSnSize,
     MrbPdu, NrMbsServiceType, PtmHarqManager, PtmHarqScheme, PtmPtpController,
     PtmPtpControllerConfig, SplitMrbRoutingPolicy, SwitchingDecision, UeTelemetry,
+};
+pub use nr_positioning_lcs::{
+    AngleMeasurement, AoATriangulationSolver, CoordinateTransformer, DlRstdMeasurement,
+    DlTdoaSolver, EcefPoint, EnuPoint, LppMessageType, LppPositioningMethod, LppTransactionManager,
+    MultiRttMeasurement, MultiRttSolver, NrppaEngine, NrppaMessage, PositioningEstimate,
+    SPEED_OF_LIGHT_M_S, TrpInfo, UncertaintyEllipse, Wgs84Point,
 };
 pub use nr_rach_5g::{
     MacRarPayload, Msg1PreambleState, Msg1Transmission, Msg2RarMessage, Msg3Transmission,
