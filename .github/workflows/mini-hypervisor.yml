@@ -53,7 +53,8 @@ jobs:
         working-directory: projects/mini-hypervisor
         run: |
           rustup toolchain install 1.74.0 --profile minimal
-          cargo +1.74.0 check --all-targets --all-features
+          # Match the source repository's MSRV contract: shipped library/binary targets only.
+          cargo +1.74.0 check --all-features
       - name: Strict KVM virtio-blk INTx completion proof
         working-directory: projects/mini-hypervisor
         shell: bash
