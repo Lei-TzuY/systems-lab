@@ -42,16 +42,26 @@
       "source_repository": "Lei-TzuY/minios-x86",
       "target_path": "projects/minios-x86",
       "layer": "operating-system-kernel",
-      "status": "ready-for-import",
+      "status": "imported-verified",
       "observed_main_sha": "e63d4218ea91069506b05944ead5a9198bf8568a",
+      "imported_source_sha": "e63d4218ea91069506b05944ead5a9198bf8568a",
+      "subtree_import_commit_sha": "56fec38f4af154e8c8dd7a993dcf70327c4ad7d0",
       "source_ci_run_id": 33974342424,
       "source_ci_conclusion": "success",
       "source_static_run_id": 33974342423,
       "source_tests_run_id": 33974342445,
       "source_kernel_run_id": 33974342424,
+      "bootstrap_run_id": 33975093404,
+      "import_pr_number": 9,
+      "import_pr_head_sha": "3a6bf88399eef68e438710c26b94658a753b9035",
+      "import_pr_manifest_run_id": 33975138166,
+      "import_pr_verification_run_id": 33975138165,
+      "merged_umbrella_sha": "2ba4b6cb2b394456df5319e7b9c980ae493aace2",
+      "umbrella_post_merge_manifest_run_id": 33975669912,
+      "umbrella_post_merge_verification_run_id": 33975669767,
       "blocker": null,
       "repository_hygiene_notes": "Frozen source contains C/assembly kernel and userspace sources, Makefile/test infrastructure, docs and read-only CI configuration. No .gitmodules declaration or obvious committed build/cache payload was observed in the frozen tree preflight.",
-      "attribution_notes": "Configured reachable-history commit-message searches for Co-Authored-By, Generated-By, Assisted-By, Signed-off-by, Anthropic and OpenAI returned zero matches before import.",
+      "attribution_notes": "Configured reachable-history commit-message searches for Co-Authored-By, Generated-By, Assisted-By, Signed-off-by, Anthropic and OpenAI returned zero matches before import. The exact source commit is retained as the second parent of subtree import commit 56fec38f..., and both PR and exact merged-main ancestry/tree/build/static/QEMU/sanitizer/mutant gates passed.",
       "source_equivalent_ci": [
         "make all -j4",
         "make static-analysis",
@@ -59,7 +69,7 @@
         "make sanitize",
         "make test-stress-mutants"
       ],
-      "integration_notes": "Ready only for history-preserving import. No mini-hypervisor guest compatibility, filesystem interoperability or networking integration is claimed until a bounded executable shared contract proves it."
+      "integration_notes": "Import verification is complete. No mini-hypervisor guest compatibility, filesystem interoperability or networking integration is claimed until a bounded executable shared contract proves it."
     },
     {
       "name": "filesystem-lab",
@@ -113,15 +123,26 @@
       "source_ci_conclusion": "success",
       "blocker": "Open implementation PR #392 is still integrating OCI process defaults into public run admission; wait for that implementation checkpoint before freezing the source.",
       "integration_notes": "This remains a Linux-host subsystem based on namespaces/cgroups/process primitives. It is not placed under minios-x86 in the architecture graph."
-    }
-  ],
-  "secondary_candidates": [
+    },
     {
       "name": "systems-conformance-lab",
       "source_repository": "Lei-TzuY/systems-conformance-lab",
-      "observed_main_sha": "dac29d7d97bdebe5e9b65fbd50621f7e9955582c",
-      "status": "deferred",
-      "reason": "Useful cross-cutting conformance tooling, but core systems imports remain the current priority."
+      "target_path": "projects/systems-conformance-lab",
+      "layer": "cross-cutting-correctness-infrastructure",
+      "status": "ready-for-import",
+      "observed_main_sha": "b7df22b7004838b55054ec3d8d7b7a3b34df8137",
+      "source_ci_run_id": 33974760080,
+      "source_ci_conclusion": "success",
+      "blocker": null,
+      "repository_hygiene_notes": "Frozen source contains Python package metadata, docs, source, tests and CI configuration. Recursive tree inspection showed no .gitmodules entry or obvious committed build/cache payload; project metadata declares MIT licensing.",
+      "attribution_notes": "Configured reachable-history commit-message searches for Co-Authored-By, Generated-By, Assisted-By, Signed-off-by, Anthropic and OpenAI returned zero matches before import.",
+      "source_equivalent_ci": [
+        "Ubuntu/macOS/Windows x Python 3.11/3.13: python -m pip install -e .[dev]",
+        "Ubuntu/macOS/Windows x Python 3.11/3.13: python -m pytest",
+        "Ubuntu/macOS/Windows x Python 3.11/3.13: python -m ruff check ."
+      ],
+      "integration_notes": "Ready only for history-preserving import as a target-independent correctness substrate. No target-specific conformance edge is claimed until an adapter and executable regression prove it."
     }
-  ]
+  ],
+  "secondary_candidates": []
 }
