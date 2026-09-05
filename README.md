@@ -8,15 +8,18 @@ The goal is **not** to dump similarly themed repositories into one directory or 
 
 | Project | Systems layer | Live Phase 0 status |
 | --- | --- | --- |
-| [mini-hypervisor](https://github.com/Lei-TzuY/mini-hypervisor) | virtualization / VM execution | HOLD — implementation PR #94 active; observed main `78ce397e...` |
+| [mini-hypervisor](https://github.com/Lei-TzuY/mini-hypervisor) | virtualization / VM execution | **IMPORTED / VERIFIED** — source `d32685b5...`, umbrella main `f436b886...` |
 | [minios-x86](https://github.com/Lei-TzuY/minios-x86) | x86 operating-system kernel | HOLD — implementation PR #35 active; observed main `0276b532...` |
 | [filesystem-lab](https://github.com/Lei-TzuY/filesystem-lab) | filesystem / storage semantics | **IMPORTED / VERIFIED** — source `1414e9fc...`, umbrella main `16ec3164...` |
 | [userspace-tcpip-stack](https://github.com/Lei-TzuY/userspace-tcpip-stack) | userspace networking / protocols | HOLD — implementation PR #330 active; observed main `34782067...` |
 | [mini-container-runtime](https://github.com/Lei-TzuY/mini-container-runtime) | Linux namespaces/cgroups/process lifecycle | HOLD — implementation PR #392 active; observed main `b660e8d1...` |
 
-`filesystem-lab` is the first completed core migration. Non-squashed subtree commit `8b2d286e...` retains exact source `1414e9fc4646b6c482d23d0741a0e420e8fd396c` as its second parent. PR #3 independently passed ancestry/tree identity, format, Clippy, and all-target/all-feature tests; exact merged-main verification repeated the same contract successfully.
+Two core histories are now imported and independently verified.
 
-`systems-conformance-lab` remains a plausible cross-cutting systems tool, but it is deferred until the next deliberate Phase 1 decision. Components already consolidated into `compiler-runtime-lab` are not duplicated here simply because they touch low-level runtime topics.
+- `filesystem-lab`: non-squashed subtree commit `8b2d286e...` retains exact source `1414e9fc4646b6c482d23d0741a0e420e8fd396c` as its second parent. PR #3 and exact merged-main verification passed ancestry/tree identity, format, Clippy, and all-target/all-feature tests.
+- `mini-hypervisor`: non-squashed subtree commit `70929104...` retains exact source `d32685b5453c3d1ae86ff76d0beac2b4af47094f` as its second parent. PR #6 and exact merged-main verification passed ancestry/tree identity, format, Clippy, tests, build, rustdoc, the source MSRV contract, and the strict real-KVM virtio-blk INTx proof.
+
+`systems-conformance-lab` remains a plausible cross-cutting systems tool, but it is deferred until the next deliberate scope decision. Components already consolidated into `compiler-runtime-lab` are not duplicated here simply because they touch low-level runtime topics.
 
 No source repository is deleted as part of consolidation.
 
@@ -59,11 +62,11 @@ Examples of acceptable future edges include:
 
 A README arrow, matching vocabulary, or two projects both being written in Rust/C/C++ is not integration evidence.
 
-## Phase 0 executable evidence
+## Executable migration evidence
 
 `projects/manifest.json` is a machine-checked migration ledger, not a decorative inventory. Pull requests and `main` run `scripts/validate_manifest.py`, which rejects duplicate project identities, malformed source freezes, HOLD entries without blockers, READY entries without successful source-CI evidence, and verified imports whose target subtree does not exist.
 
-The permanent `Filesystem migration` workflow verifies preserved source ancestry and exact subtree identity before running the imported project contract from `projects/filesystem-lab`:
+The permanent `Filesystem migration` workflow verifies preserved source ancestry and exact subtree identity before running:
 
 ```text
 cargo fmt --all -- --check
@@ -71,7 +74,9 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-targets --all-features
 ```
 
-For the first import, source CI run `33971985113`, bootstrap run `33972535890`, PR verification run `33972592139`, PR manifest run `33972592152`, merged-main manifest run `33972631312`, and merged-main filesystem run `33972631346` all succeeded.
+The permanent `Hypervisor migration` workflow verifies preserved source ancestry and exact subtree identity before running stable Rust format/Clippy/tests/build/rustdoc, the source repository's Rust 1.74 shipped-target contract (`cargo check --all-features`), and the strict real-KVM virtio-blk INTx completion proof.
+
+Hypervisor evidence includes source-main CI `33972996585`, source strict-KVM run `33972996539`, bootstrap `33973179661`, PR manifest `33973305830`, PR verification `33973305829`, merged-main manifest `33973353798`, and merged-main hypervisor verification `33973353484`; all completed successfully.
 
 ## Migration invariants
 
