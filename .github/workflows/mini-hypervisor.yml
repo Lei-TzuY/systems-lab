@@ -1,0 +1,78 @@
+name: Hypervisor migration
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "projects/mini-hypervisor/**"
+  pull_request:
+    paths:
+      - "projects/mini-hypervisor/**"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      SOURCE_SHA: d32685b5453c3d1ae86ff76d0beac2b4af47094f
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify preserved source ancestry and tree
+        run: |
+          set -euo pipefail
+          git cat-file -e "${SOURCE_SHA}^{commit}"
+          git merge-base --is-ancestor "$SOURCE_SHA" HEAD
+          source_tree="$(git rev-parse "${SOURCE_SHA}^{tree}")"
+          imported_tree="$(git rev-parse 'HEAD:projects/mini-hypervisor')"
+          test "$source_tree" = "$imported_tree"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Format
+        working-directory: projects/mini-hypervisor
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        working-directory: projects/mini-hypervisor
+        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Test
+        working-directory: projects/mini-hypervisor
+        run: cargo test --all-targets --all-features
+      - name: Build
+        working-directory: projects/mini-hypervisor
+        run: cargo build --all-targets --all-features
+      - name: Rustdoc
+        working-directory: projects/mini-hypervisor
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --no-deps --all-features
+      - name: Rust 1.74 compatibility
+        working-directory: projects/mini-hypervisor
+        run: |
+          rustup toolchain install 1.74.0 --profile minimal
+          cargo +1.74.0 check --all-targets --all-features
+      - name: Strict KVM virtio-blk INTx completion proof
+        working-directory: projects/mini-hypervisor
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -e /dev/kvm
+          sudo chmod a+rw /dev/kvm
+          output="$(cargo run --quiet --bin virtio-blk-intx-completion)"
+          printf '%s\n' "$output"
+          grep -F 'virtio-blk INTx GSI: 0' <<<"$output"
+          grep -F 'virtio-blk INTx vector: 0x40' <<<"$output"
+          grep -F 'virtio-blk INTx assert events: 1' <<<"$output"
+          grep -F 'virtio-blk INTx deassert events: 1' <<<"$output"
+          grep -F 'virtio-blk INTx driver features: 0x100000000' <<<"$output"
+          grep -F 'virtio-blk INTx queue enabled: true' <<<"$output"
+          grep -F 'virtio-blk INTx completion: 0/513/0' <<<"$output"
+          grep -F 'virtio-blk INTx used: 1/0/513' <<<"$output"
+          grep -F 'virtio-blk INTx request status: 0' <<<"$output"
+          grep -F 'virtio-blk INTx data bytes: 512' <<<"$output"
+          grep -F 'virtio-blk INTx port-I/O exits: 21' <<<"$output"
+          grep -F 'virtio-blk INTx MMIO exits: 22' <<<"$output"
+          grep -F 'virtio-blk INTx proof: [80, 66, 78, 73, 65, 82, 68]' <<<"$output"
