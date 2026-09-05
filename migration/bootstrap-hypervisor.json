@@ -1,0 +1,7 @@
+{
+  "source_repository": "Lei-TzuY/mini-hypervisor",
+  "source_sha": "d32685b5453c3d1ae86ff76d0beac2b4af47094f",
+  "target_path": "projects/mini-hypervisor",
+  "target_branch": "migration/mini-hypervisor-d32685b5",
+  "mode": "history-preserving-subtree"
+}
