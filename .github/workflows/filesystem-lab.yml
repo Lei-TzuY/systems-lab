@@ -1,0 +1,43 @@
+name: Filesystem migration
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "projects/filesystem-lab/**"
+  pull_request:
+    paths:
+      - "projects/filesystem-lab/**"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      SOURCE_SHA: 1414e9fc4646b6c482d23d0741a0e420e8fd396c
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify preserved source ancestry and tree
+        run: |
+          set -euo pipefail
+          git cat-file -e "${SOURCE_SHA}^{commit}"
+          git merge-base --is-ancestor "$SOURCE_SHA" HEAD
+          source_tree="$(git rev-parse "${SOURCE_SHA}^{tree}")"
+          imported_tree="$(git rev-parse "HEAD:projects/filesystem-lab")"
+          test "$source_tree" = "$imported_tree"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Format
+        working-directory: projects/filesystem-lab
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        working-directory: projects/filesystem-lab
+        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Test
+        working-directory: projects/filesystem-lab
+        run: cargo test --all-targets --all-features

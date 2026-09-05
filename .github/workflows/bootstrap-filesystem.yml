@@ -1,0 +1,41 @@
+name: Bootstrap filesystem import
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "migration/bootstrap-filesystem.json"
+
+permissions:
+  contents: write
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    env:
+      SOURCE_SHA: 1414e9fc4646b6c482d23d0741a0e420e8fd396c
+      SOURCE_REPOSITORY: https://github.com/Lei-TzuY/filesystem-lab.git
+      IMPORT_BRANCH: migration/filesystem-lab-1414e9fc
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Recheck frozen source
+        run: |
+          set -euo pipefail
+          remote_main="$(git ls-remote "$SOURCE_REPOSITORY" refs/heads/main | cut -f1)"
+          test "$remote_main" = "$SOURCE_SHA"
+          open_prs="$(curl -fsSL 'https://api.github.com/repos/Lei-TzuY/filesystem-lab/pulls?state=open&per_page=1' | python -c 'import json,sys; print(len(json.load(sys.stdin)))')"
+          test "$open_prs" -eq 0
+      - name: Import source with full ancestry
+        run: |
+          set -euo pipefail
+          git config user.name "LeiZ"
+          git config user.email "52287354+Lei-TzuY@users.noreply.github.com"
+          git remote add filesystem-source "$SOURCE_REPOSITORY"
+          git fetch filesystem-source "$SOURCE_SHA"
+          git switch -c "$IMPORT_BRANCH"
+          git subtree add --prefix=projects/filesystem-lab "$SOURCE_SHA"
+          git merge-base --is-ancestor "$SOURCE_SHA" HEAD
+          test "$(git rev-parse "${SOURCE_SHA}^{tree}")" = "$(git rev-parse 'HEAD:projects/filesystem-lab')"
+          git push origin "HEAD:refs/heads/$IMPORT_BRANCH"
