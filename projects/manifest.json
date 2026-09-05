@@ -42,12 +42,24 @@
       "source_repository": "Lei-TzuY/minios-x86",
       "target_path": "projects/minios-x86",
       "layer": "operating-system-kernel",
-      "status": "hold",
-      "observed_main_sha": "0276b5326a1fbd00d2d2de26b128704b3098e42d",
-      "source_ci_run_id": 33534489935,
+      "status": "ready-for-import",
+      "observed_main_sha": "e63d4218ea91069506b05944ead5a9198bf8568a",
+      "source_ci_run_id": 33974342424,
       "source_ci_conclusion": "success",
-      "blocker": "Open implementation PR #35 owns concurrent child-wait correctness work; do not freeze the source while that implementation is active.",
-      "integration_notes": "Potential future guest for mini-hypervisor and consumer of explicitly specified filesystem/network boundaries; no such umbrella edge is currently verified."
+      "source_static_run_id": 33974342423,
+      "source_tests_run_id": 33974342445,
+      "source_kernel_run_id": 33974342424,
+      "blocker": null,
+      "repository_hygiene_notes": "Frozen source contains C/assembly kernel and userspace sources, Makefile/test infrastructure, docs and read-only CI configuration. No .gitmodules declaration or obvious committed build/cache payload was observed in the frozen tree preflight.",
+      "attribution_notes": "Configured reachable-history commit-message searches for Co-Authored-By, Generated-By, Assisted-By, Signed-off-by, Anthropic and OpenAI returned zero matches before import.",
+      "source_equivalent_ci": [
+        "make all -j4",
+        "make static-analysis",
+        "make test",
+        "make sanitize",
+        "make test-stress-mutants"
+      ],
+      "integration_notes": "Ready only for history-preserving import. No mini-hypervisor guest compatibility, filesystem interoperability or networking integration is claimed until a bounded executable shared contract proves it."
     },
     {
       "name": "filesystem-lab",

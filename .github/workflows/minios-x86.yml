@@ -1,0 +1,55 @@
+name: MinIOS migration
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "projects/minios-x86/**"
+  pull_request:
+    paths:
+      - "projects/minios-x86/**"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SOURCE_SHA: e63d4218ea91069506b05944ead5a9198bf8568a
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify preserved source ancestry and tree
+        run: |
+          set -euo pipefail
+          git cat-file -e "${SOURCE_SHA}^{commit}"
+          git merge-base --is-ancestor "$SOURCE_SHA" HEAD
+          source_tree="$(git rev-parse "${SOURCE_SHA}^{tree}")"
+          imported_tree="$(git rev-parse 'HEAD:projects/minios-x86')"
+          test "$source_tree" = "$imported_tree"
+      - name: Install x86, boot-test and analysis toolchains
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential gcc-multilib qemu-system-x86 \
+            grub-pc-bin grub-common xorriso mtools cppcheck
+      - name: Clean build
+        working-directory: projects/minios-x86
+        run: |
+          make clean
+          make all -j4
+      - name: Static analysis
+        working-directory: projects/minios-x86
+        run: make static-analysis
+      - name: Native and QEMU regression suites
+        working-directory: projects/minios-x86
+        run: make test
+      - name: Host ASan and UBSan suites
+        working-directory: projects/minios-x86
+        run: make sanitize
+      - name: Prove stress assertions kill kernel mutants
+        working-directory: projects/minios-x86
+        run: make test-stress-mutants
