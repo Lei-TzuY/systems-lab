@@ -32,19 +32,29 @@
       "source_repository": "Lei-TzuY/filesystem-lab",
       "target_path": "projects/filesystem-lab",
       "layer": "filesystem-storage",
-      "status": "ready-for-import",
+      "status": "imported-verified",
       "observed_main_sha": "1414e9fc4646b6c482d23d0741a0e420e8fd396c",
+      "imported_source_sha": "1414e9fc4646b6c482d23d0741a0e420e8fd396c",
+      "subtree_import_commit_sha": "8b2d286e864edbdbd22d9add82c025a9dddb9604",
       "source_ci_run_id": 33971985113,
       "source_ci_conclusion": "success",
+      "bootstrap_run_id": 33972535890,
+      "import_pr_number": 3,
+      "import_pr_head_sha": "d41f34a53a18353a67225e69b2a17bc6129e4b38",
+      "import_pr_manifest_run_id": 33972592152,
+      "import_pr_verification_run_id": 33972592139,
+      "merged_umbrella_sha": "16ec31643891fe6d587339f1bea543fefee2189f",
+      "umbrella_post_merge_manifest_run_id": 33972631312,
+      "umbrella_post_merge_verification_run_id": 33972631346,
       "blocker": null,
-      "repository_hygiene_notes": "Frozen source contains Cargo metadata, README, docs, Rust source, tests and CI configuration. No top-level LICENSE file, nested repository, vendored cache or generated binary payload was observed; preserve that source state rather than inventing metadata.",
-      "attribution_notes": "Configured reachable-history commit-message searches returned no disallowed attribution matches before selection. Re-run the scan immediately before the actual import if source main moves.",
+      "repository_hygiene_notes": "Frozen source contains Cargo metadata, README, docs, Rust source, tests and CI configuration. No top-level LICENSE file, nested repository, vendored cache or generated binary payload was observed; the import preserves that source state rather than inventing metadata.",
+      "attribution_notes": "Configured reachable-history commit-message searches returned no disallowed attribution matches before import. The exact source commit is retained as the second parent of subtree import commit 8b2d286e..., the imported subtree matched the frozen source tree exactly, and both PR and exact merged-main verification gates passed.",
       "source_equivalent_ci": [
         "cargo fmt --all -- --check",
         "cargo clippy --all-targets --all-features -- -D warnings",
         "cargo test --all-targets --all-features"
       ],
-      "integration_notes": "Do not claim minios-x86 integration until both sides share an explicit image/format/replay contract with executable tests."
+      "integration_notes": "Import verification is complete. No minios-x86 integration is claimed until both sides share an explicit image/format/replay contract with executable tests."
     },
     {
       "name": "userspace-tcpip-stack",
