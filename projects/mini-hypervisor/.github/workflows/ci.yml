@@ -1,0 +1,496 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Test
+        run: cargo test --all-targets --all-features
+      - name: Build
+        run: cargo build --all-targets --all-features
+      - name: Rustdoc
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --no-deps --all-features
+      - name: Strict KVM long-mode proof
+        shell: bash
+        run: |
+          test -e /dev/kvm
+          sudo chmod a+rw /dev/kvm
+          output="$(cargo run --quiet --bin mini-hypervisor -- run-long-mode)"
+          printf '%s\n' "$output"
+          grep -F 'long-mode proof: [76, 77, 54, 52]' <<<"$output"
+          report="$(grep -F 'vCPU 0 exit Hlt: rip=0x10024, rflags=' <<<"$output")"
+          rflags_hex="${report##*rflags=}"
+          [[ "$rflags_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          rflags=$((rflags_hex))
+          (( (rflags & 0x2) == 0x2 ))
+      - name: Strict KVM ELF64 execution proof
+        shell: bash
+        run: |
+          test -e /dev/kvm
+          sudo chmod a+rw /dev/kvm
+          output="$(cargo run --quiet --bin mini-hypervisor -- run-elf64)"
+          printf '%s\n' "$output"
+          grep -F 'elf64 proof: [76, 77, 54, 52]' <<<"$output"
+          report="$(grep -F 'vCPU 0 exit Hlt: rip=0x400124, rflags=' <<<"$output")"
+          rflags_hex="${report##*rflags=}"
+          [[ "$rflags_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          rflags=$((rflags_hex))
+          (( (rflags & 0x2) == 0x2 ))
+      - name: Strict KVM MMIO execution proof
+        shell: bash
+        run: |
+          test -e /dev/kvm
+          sudo chmod a+rw /dev/kvm
+          output="$(cargo run --quiet --bin mini-hypervisor -- run-mmio)"
+          printf '%s\n' "$output"
+          grep -F 'mmio writes: [87]' <<<"$output"
+          grep -F 'mmio proof: [82, 77, 73, 79]' <<<"$output"
+          report="$(grep -F 'vCPU 0 exit Hlt: rip=0x117, rflags=' <<<"$output")"
+          rflags_hex="${report##*rflags=}"
+          [[ "$rflags_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          rflags=$((rflags_hex))
+          (( (rflags & 0x2) == 0x2 ))
+      - name: Strict KVM long-mode virtual MMIO proof
+        shell: bash
+        run: |
+          test -e /dev/kvm
+          sudo chmod a+rw /dev/kvm
+          output="$(cargo run --quiet --bin mini-hypervisor -- run-long-mode-mmio)"
+          printf '%s\n' "$output"
+          grep -F 'long-mode mmio writes: [87]' <<<"$output"
+          grep -F 'long-mode mmio proof: [82, 54, 52, 77]' <<<"$output"
+          report="$(grep -F 'vCPU 0 exit Hlt: rip=0x1001e, rflags=' <<<"$output")"
+          rflags_hex="${report##*rflags=}"
+          [[ "$rflags_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          rflags=$((rflags_hex))
+          (( (rflags & 0x2) == 0x2 ))
+      - name: Strict KVM direct interrupt execution proof
+        shell: bash
+        run: |
+          test -e /dev/kvm
+          sudo chmod a+rw /dev/kvm
+          output="$(cargo run --quiet --bin mini-hypervisor -- run-interrupt)"
+          printf '%s\n' "$output"
+          grep -F 'interrupt vector: 0x40' <<<"$output"
+          grep -F 'interrupt proof: [73, 77]' <<<"$output"
+          report="$(grep -F 'vCPU 0 exit Hlt: rip=0x10007, rflags=' <<<"$output")"
+          rflags_hex="${report##*rflags=}"
+          [[ "$rflags_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          rflags=$((rflags_hex))
+          (( (rflags & 0x2) == 0x2 ))
+          (( (rflags & 0x200) == 0x200 ))
+      - name: Strict KVM irqchip GSI execution proof
+        shell: bash
+        run: |
+          test -e /dev/kvm
+          sudo chmod a+rw /dev/kvm
+          output="$(cargo run --quiet --bin irqchip-gsi)"
+          printf '%s\n' "$output"
+          grep -F 'irqchip GSI: 0' <<<"$output"
+          grep -F 'irqchip vector: 0x40' <<<"$output"
+          spiv_line="$(grep -F 'irqchip LAPIC SPIV:' <<<"$output")"
+          spiv_hex="${spiv_line##*: }"
+          [[ "$spiv_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          spiv=$((spiv_hex))
+          (( (spiv & 0x100) == 0x100 ))
+          lint0_line="$(grep -F 'irqchip LAPIC LINT0:' <<<"$output")"
+          lint0_hex="${lint0_line##*: }"
+          [[ "$lint0_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          lint0=$((lint0_hex))
+          (( (lint0 & 0x700) == 0x700 ))
+          (( (lint0 & 0x10000) == 0 ))
+          armed="$(grep -F 'irqchip armed rflags:' <<<"$output")"
+          armed_rflags_hex="${armed##*rflags: }"
+          [[ "$armed_rflags_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          armed_rflags=$((armed_rflags_hex))
+          (( (armed_rflags & 0x2) == 0x2 ))
+          (( (armed_rflags & 0x200) == 0x200 ))
+          completion="$(grep -F 'irqchip completion rflags:' <<<"$output")"
+          completion_rflags_hex="${completion##*rflags: }"
+          [[ "$completion_rflags_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          completion_rflags=$((completion_rflags_hex))
+          (( (completion_rflags & 0x2) == 0x2 ))
+          (( (completion_rflags & 0x200) == 0x200 ))
+          grep -F 'irqchip proof: [82, 65, 73, 77, 68]' <<<"$output"
+      - name: Strict KVM MMIO device interrupt proof
+        shell: bash
+        run: |
+          test -e /dev/kvm
+          sudo chmod a+rw /dev/kvm
+          output="$(cargo run --quiet --bin mmio-device-interrupt)"
+          printf '%s\n' "$output"
+          grep -F 'mmio interrupt GSI: 0' <<<"$output"
+          grep -F 'mmio interrupt vector: 0x40' <<<"$output"
+          grep -F 'mmio interrupt device events: 1' <<<"$output"
+          grep -F 'mmio interrupt writes: [87]' <<<"$output"
+          spiv_line="$(grep -F 'mmio interrupt LAPIC SPIV:' <<<"$output")"
+          spiv_hex="${spiv_line##*: }"
+          [[ "$spiv_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          spiv=$((spiv_hex))
+          (( (spiv & 0x100) == 0x100 ))
+          lint0_line="$(grep -F 'mmio interrupt LAPIC LINT0:' <<<"$output")"
+          lint0_hex="${lint0_line##*: }"
+          [[ "$lint0_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          lint0=$((lint0_hex))
+          (( (lint0 & 0x700) == 0x700 ))
+          (( (lint0 & 0x10000) == 0 ))
+          armed="$(grep -F 'mmio interrupt armed rflags:' <<<"$output")"
+          armed_rflags_hex="${armed##*rflags: }"
+          [[ "$armed_rflags_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          armed_rflags=$((armed_rflags_hex))
+          (( (armed_rflags & 0x2) == 0x2 ))
+          (( (armed_rflags & 0x200) == 0x200 ))
+          completion="$(grep -F 'mmio interrupt completion rflags:' <<<"$output")"
+          completion_rflags_hex="${completion##*rflags: }"
+          [[ "$completion_rflags_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          completion_rflags=$((completion_rflags_hex))
+          (( (completion_rflags & 0x2) == 0x2 ))
+          (( (completion_rflags & 0x200) == 0x200 ))
+          grep -F 'mmio interrupt proof: [65, 73, 77, 68]' <<<"$output"
+      - name: Strict KVM MMIO level interrupt lifecycle proof
+        shell: bash
+        run: |
+          test -e /dev/kvm
+          sudo chmod a+rw /dev/kvm
+          output="$(cargo run --quiet --bin mmio-level-interrupt)"
+          printf '%s\n' "$output"
+          grep -F 'level interrupt GSI: 0' <<<"$output"
+          grep -F 'level interrupt vector: 0x40' <<<"$output"
+          grep -F 'level interrupt assert events: 1' <<<"$output"
+          grep -F 'level interrupt deassert events: 1' <<<"$output"
+          grep -F 'level interrupt writes: [87, 1]' <<<"$output"
+          spiv_line="$(grep -F 'level interrupt LAPIC SPIV:' <<<"$output")"
+          spiv_hex="${spiv_line##*: }"
+          [[ "$spiv_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          spiv=$((spiv_hex))
+          (( (spiv & 0x100) == 0x100 ))
+          lint0_line="$(grep -F 'level interrupt LAPIC LINT0:' <<<"$output")"
+          lint0_hex="${lint0_line##*: }"
+          [[ "$lint0_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          lint0=$((lint0_hex))
+          (( (lint0 & 0x700) == 0x700 ))
+          (( (lint0 & 0x10000) == 0 ))
+          armed="$(grep -F 'level interrupt armed rflags:' <<<"$output")"
+          armed_rflags_hex="${armed##*rflags: }"
+          [[ "$armed_rflags_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          armed_rflags=$((armed_rflags_hex))
+          (( (armed_rflags & 0x2) == 0x2 ))
+          (( (armed_rflags & 0x200) == 0x200 ))
+          completion="$(grep -F 'level interrupt completion rflags:' <<<"$output")"
+          completion_rflags_hex="${completion##*rflags: }"
+          [[ "$completion_rflags_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          completion_rflags=$((completion_rflags_hex))
+          (( (completion_rflags & 0x2) == 0x2 ))
+          (( (completion_rflags & 0x200) == 0x200 ))
+          grep -F 'level interrupt proof: [65, 73, 83, 67, 77, 68]' <<<"$output"
+      - name: Strict KVM multi-device MMIO proof
+        shell: bash
+        run: |
+          test -e /dev/kvm
+          sudo chmod a+rw /dev/kvm
+          output="$(cargo run --quiet --bin mmio-multi-device)"
+          printf '%s\n' "$output"
+          grep -F 'multi-device first writes: [88]' <<<"$output"
+          grep -F 'multi-device second writes: [89]' <<<"$output"
+          grep -F 'multi-device MMIO exits: 5' <<<"$output"
+          grep -F 'multi-device proof: [65, 66, 65, 77]' <<<"$output"
+          report="$(grep -F 'vCPU 0 exit Hlt: rip=0x1002b, rflags=' <<<"$output")"
+          rflags_hex="${report##*rflags=}"
+          [[ "$rflags_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          rflags=$((rflags_hex))
+          (( (rflags & 0x2) == 0x2 ))
+      - name: Strict KVM dual-source MMIO interrupt routing proof
+        shell: bash
+        run: |
+          test -e /dev/kvm
+          sudo chmod a+rw /dev/kvm
+          output="$(cargo run --quiet --bin mmio-dual-source-interrupt)"
+          printf '%s\n' "$output"
+          grep -F 'dual-source first route: device=0x10000000 gsi=0 vector=0x40' <<<"$output"
+          grep -F 'dual-source second route: device=0x10001000 gsi=1 vector=0x41' <<<"$output"
+          grep -F 'dual-source assert events: 2' <<<"$output"
+          grep -F 'dual-source deassert events: 2' <<<"$output"
+          grep -F 'dual-source MMIO exits: 6' <<<"$output"
+          grep -F 'dual-source first writes: [87, 1]' <<<"$output"
+          grep -F 'dual-source second writes: [87, 1]' <<<"$output"
+          spiv_line="$(grep -F 'dual-source LAPIC SPIV:' <<<"$output")"
+          spiv_hex="${spiv_line##*: }"
+          [[ "$spiv_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          spiv=$((spiv_hex))
+          (( (spiv & 0x100) == 0x100 ))
+          lint0_line="$(grep -F 'dual-source LAPIC LINT0:' <<<"$output")"
+          lint0_hex="${lint0_line##*: }"
+          [[ "$lint0_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          lint0=$((lint0_hex))
+          (( (lint0 & 0x700) == 0x700 ))
+          (( (lint0 & 0x10000) == 0 ))
+          for label in 'dual-source first armed rflags:' 'dual-source second armed rflags:' 'dual-source completion rflags:'; do
+            line="$(grep -F "$label" <<<"$output")"
+            rflags_hex="${line##*: }"
+            [[ "$rflags_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+            rflags=$((rflags_hex))
+            (( (rflags & 0x2) == 0x2 ))
+            (( (rflags & 0x200) == 0x200 ))
+          done
+          grep -F 'dual-source proof: [65, 48, 83, 67, 77, 66, 49, 84, 69, 78, 68]' <<<"$output"
+      - name: Strict KVM async timer interrupt proof
+        shell: bash
+        run: |
+          test -e /dev/kvm
+          sudo chmod a+rw /dev/kvm
+          output="$(cargo run --quiet --bin async-timer-interrupt)"
+          printf '%s\n' "$output"
+          grep -F 'async timer GSI: 0' <<<"$output"
+          grep -F 'async timer vector: 0x40' <<<"$output"
+          spiv_line="$(grep -F 'async timer LAPIC SPIV:' <<<"$output")"
+          spiv_hex="${spiv_line##*: }"
+          [[ "$spiv_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          spiv=$((spiv_hex))
+          (( (spiv & 0x100) == 0x100 ))
+          lint0_line="$(grep -F 'async timer LAPIC LINT0:' <<<"$output")"
+          lint0_hex="${lint0_line##*: }"
+          [[ "$lint0_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          lint0=$((lint0_hex))
+          (( (lint0 & 0x700) == 0x700 ))
+          (( (lint0 & 0x10000) == 0 ))
+          armed="$(grep -F 'async timer armed rflags:' <<<"$output")"
+          armed_rflags_hex="${armed##*rflags: }"
+          [[ "$armed_rflags_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          armed_rflags=$((armed_rflags_hex))
+          (( (armed_rflags & 0x2) == 0x2 ))
+          (( (armed_rflags & 0x200) == 0 ))
+          completion="$(grep -F 'async timer completion rflags:' <<<"$output")"
+          completion_rflags_hex="${completion##*rflags: }"
+          [[ "$completion_rflags_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          completion_rflags=$((completion_rflags_hex))
+          (( (completion_rflags & 0x2) == 0x2 ))
+          (( (completion_rflags & 0x200) == 0x200 ))
+          grep -F 'async timer proof: [82, 65, 84, 87, 68]' <<<"$output"
+      - name: Strict KVM irqfd timer interrupt proof
+        shell: bash
+        run: |
+          test -e /dev/kvm
+          sudo chmod a+rw /dev/kvm
+          output="$(cargo run --quiet --bin irqfd-timer-interrupt)"
+          printf '%s\n' "$output"
+          grep -F 'irqfd timer capability: KVM_CAP_IRQFD' <<<"$output"
+          grep -F 'irqfd timer GSI: 0' <<<"$output"
+          grep -F 'irqfd timer vector: 0x40' <<<"$output"
+          spiv_line="$(grep -F 'irqfd timer LAPIC SPIV:' <<<"$output")"
+          spiv_hex="${spiv_line##*: }"
+          [[ "$spiv_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          spiv=$((spiv_hex))
+          (( (spiv & 0x100) == 0x100 ))
+          lint0_line="$(grep -F 'irqfd timer LAPIC LINT0:' <<<"$output")"
+          lint0_hex="${lint0_line##*: }"
+          [[ "$lint0_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          lint0=$((lint0_hex))
+          (( (lint0 & 0x700) == 0x700 ))
+          (( (lint0 & 0x10000) == 0 ))
+          armed="$(grep -F 'irqfd timer armed rflags:' <<<"$output")"
+          armed_rflags_hex="${armed##*rflags: }"
+          [[ "$armed_rflags_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          armed_rflags=$((armed_rflags_hex))
+          (( (armed_rflags & 0x2) == 0x2 ))
+          (( (armed_rflags & 0x200) == 0 ))
+          completion="$(grep -F 'irqfd timer completion rflags:' <<<"$output")"
+          completion_rflags_hex="${completion##*rflags: }"
+          [[ "$completion_rflags_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          completion_rflags=$((completion_rflags_hex))
+          (( (completion_rflags & 0x2) == 0x2 ))
+          (( (completion_rflags & 0x200) == 0x200 ))
+          grep -F 'irqfd timer proof: [82, 65, 84, 87, 68]' <<<"$output"
+      - name: Strict KVM ioeventfd to irqfd round-trip proof
+        shell: bash
+        run: |
+          test -e /dev/kvm
+          sudo chmod a+rw /dev/kvm
+          output="$(cargo run --quiet --bin ioeventfd-irqfd-roundtrip)"
+          printf '%s\n' "$output"
+          grep -F 'ioeventfd capability: KVM_CAP_IOEVENTFD' <<<"$output"
+          grep -F 'irqfd capability: KVM_CAP_IRQFD' <<<"$output"
+          grep -F 'round-trip doorbell GPA: 0x10000000' <<<"$output"
+          grep -F 'round-trip doorbell value: 90' <<<"$output"
+          grep -F 'round-trip doorbell events: 1' <<<"$output"
+          grep -F 'round-trip GSI: 0' <<<"$output"
+          grep -F 'round-trip vector: 0x40' <<<"$output"
+          spiv_line="$(grep -F 'round-trip LAPIC SPIV:' <<<"$output")"
+          spiv_hex="${spiv_line##*: }"
+          [[ "$spiv_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          spiv=$((spiv_hex))
+          (( (spiv & 0x100) == 0x100 ))
+          lint0_line="$(grep -F 'round-trip LAPIC LINT0:' <<<"$output")"
+          lint0_hex="${lint0_line##*: }"
+          [[ "$lint0_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          lint0=$((lint0_hex))
+          (( (lint0 & 0x700) == 0x700 ))
+          (( (lint0 & 0x10000) == 0 ))
+          armed="$(grep -F 'round-trip armed rflags:' <<<"$output")"
+          armed_rflags_hex="${armed##*rflags: }"
+          [[ "$armed_rflags_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          armed_rflags=$((armed_rflags_hex))
+          (( (armed_rflags & 0x2) == 0x2 ))
+          (( (armed_rflags & 0x200) == 0 ))
+          completion="$(grep -F 'round-trip completion rflags:' <<<"$output")"
+          completion_rflags_hex="${completion##*rflags: }"
+          [[ "$completion_rflags_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          completion_rflags=$((completion_rflags_hex))
+          (( (completion_rflags & 0x2) == 0x2 ))
+          (( (completion_rflags & 0x200) == 0x200 ))
+          grep -F 'round-trip proof: [82, 65, 84, 87, 68]' <<<"$output"
+      - name: Strict KVM PCI configuration BAR discovery proof
+        shell: bash
+        run: |
+          test -e /dev/kvm
+          sudo chmod a+rw /dev/kvm
+          output="$(cargo run --quiet --bin pci-config-bar-discovery)"
+          printf '%s\n' "$output"
+          grep -F 'pci function: 00:01.0' <<<"$output"
+          grep -F 'pci identity: vendor=0xcafe device=0x0001' <<<"$output"
+          grep -F 'pci class: 0xff' <<<"$output"
+          grep -F 'pci BAR0: 0x10000000' <<<"$output"
+          grep -F 'pci BAR writes: [87]' <<<"$output"
+          grep -F 'pci config/MMIO proof: [80, 67, 66, 77]' <<<"$output"
+          grep -F 'pci port-I/O exits: 10' <<<"$output"
+          grep -F 'pci MMIO exits: 1' <<<"$output"
+          report="$(grep -F 'vCPU 0 exit Hlt: rip=0x10065, rflags=' <<<"$output")"
+          rflags_hex="${report##*rflags=}"
+          [[ "$rflags_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          rflags=$((rflags_hex))
+          (( (rflags & 0x2) == 0x2 ))
+      - name: Strict KVM virtio-rng PCI request proof
+        shell: bash
+        run: |
+          test -e /dev/kvm
+          sudo chmod a+rw /dev/kvm
+          output="$(cargo run --quiet --bin virtio-rng-pci-request)"
+          printf '%s\n' "$output"
+          grep -F 'virtio-rng PCI identity: vendor=0x1af4 device=0x1044' <<<"$output"
+          grep -F 'virtio-rng BAR0: 0x10000000' <<<"$output"
+          grep -F 'virtio-rng driver features: 0x100000000' <<<"$output"
+          grep -F 'virtio-rng device status: 0x0f' <<<"$output"
+          grep -F 'virtio-rng queue enabled: true' <<<"$output"
+          grep -F 'virtio-rng used: idx=1 id=0 len=8' <<<"$output"
+          grep -F 'virtio-rng payload: [82, 78, 71, 68, 65, 84, 65, 33]' <<<"$output"
+          grep -F 'virtio-rng proof: [80, 86, 78, 82]' <<<"$output"
+          grep -F 'virtio-rng port-I/O exits: 16' <<<"$output"
+          grep -F 'virtio-rng MMIO exits: 19' <<<"$output"
+          report="$(grep -F 'vCPU 0 exit Hlt: rip=' <<<"$output")"
+          rflags_hex="${report##*rflags=}"
+          [[ "$rflags_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          rflags=$((rflags_hex))
+          (( (rflags & 0x2) == 0x2 ))
+      - name: Strict KVM virtio-rng completion interrupt proof
+        shell: bash
+        run: |
+          test -e /dev/kvm
+          sudo chmod a+rw /dev/kvm
+          output="$(cargo run --quiet --bin virtio-rng-completion-interrupt)"
+          printf '%s\n' "$output"
+          grep -F 'virtio-rng interrupt GSI: 0' <<<"$output"
+          grep -F 'virtio-rng interrupt vector: 0x40' <<<"$output"
+          grep -F 'virtio-rng interrupt lifecycle: assert=1 deassert=1' <<<"$output"
+          grep -F 'virtio-rng interrupt used: idx=1 id=0 len=8' <<<"$output"
+          grep -F 'virtio-rng interrupt payload: [82, 78, 71, 68, 65, 84, 65, 33]' <<<"$output"
+          grep -F 'virtio-rng interrupt proof: [80, 86, 78, 73, 65, 82, 68]' <<<"$output"
+          grep -F 'virtio-rng interrupt port-I/O exits: 19' <<<"$output"
+          grep -F 'virtio-rng interrupt MMIO exits: 21' <<<"$output"
+          spiv_line="$(grep -F 'virtio-rng interrupt LAPIC SPIV:' <<<"$output")"
+          spiv_hex="${spiv_line##*: }"
+          [[ "$spiv_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          spiv=$((spiv_hex))
+          (( (spiv & 0x100) == 0x100 ))
+          lint0_line="$(grep -F 'virtio-rng interrupt LAPIC LINT0:' <<<"$output")"
+          lint0_hex="${lint0_line##*: }"
+          [[ "$lint0_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          lint0=$((lint0_hex))
+          (( (lint0 & 0x700) == 0x700 ))
+          (( (lint0 & 0x10000) == 0 ))
+          completion="$(grep -F 'virtio-rng interrupt completion rflags:' <<<"$output")"
+          completion_rflags_hex="${completion##*rflags: }"
+          [[ "$completion_rflags_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          completion_rflags=$((completion_rflags_hex))
+          (( (completion_rflags & 0x2) == 0x2 ))
+          (( (completion_rflags & 0x200) == 0x200 ))
+      - name: Strict KVM virtio-rng MSI completion proof
+        shell: bash
+        run: |
+          test -e /dev/kvm
+          sudo chmod a+rw /dev/kvm
+          output="$(cargo run --quiet --bin virtio-rng-msi-completion)"
+          printf '%s\n' "$output"
+          grep -F 'virtio-rng MSI address: 0xfee00000' <<<"$output"
+          grep -F 'virtio-rng MSI data: 0x50' <<<"$output"
+          grep -F 'virtio-rng MSI vector: 0x50' <<<"$output"
+          grep -F 'virtio-rng MSI delivery count: 1' <<<"$output"
+          grep -F 'virtio-rng MSI used: idx=1 id=0 len=8' <<<"$output"
+          grep -F 'virtio-rng MSI payload: [82, 78, 71, 68, 65, 84, 65, 33]' <<<"$output"
+          grep -F 'virtio-rng MSI proof: [80, 86, 78, 77, 65, 82, 68]' <<<"$output"
+          grep -F 'virtio-rng MSI port-I/O exits: 27' <<<"$output"
+          grep -F 'virtio-rng MSI MMIO exits: 21' <<<"$output"
+          spiv_line="$(grep -F 'virtio-rng MSI LAPIC SPIV:' <<<"$output")"
+          spiv_hex="${spiv_line##*: }"
+          [[ "$spiv_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          spiv=$((spiv_hex))
+          (( (spiv & 0x100) == 0x100 ))
+          completion="$(grep -F 'virtio-rng MSI completion rflags:' <<<"$output")"
+          completion_rflags_hex="${completion##*rflags: }"
+          [[ "$completion_rflags_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          completion_rflags=$((completion_rflags_hex))
+          (( (completion_rflags & 0x2) == 0x2 ))
+          (( (completion_rflags & 0x200) == 0x200 ))
+      - name: Strict KVM virtio-blk PCI read proof
+        shell: bash
+        run: |
+          test -e /dev/kvm
+          sudo chmod a+rw /dev/kvm
+          output="$(cargo run --quiet --bin virtio-blk-pci-read)"
+          printf '%s\n' "$output"
+          grep -F 'virtio-blk PCI identity: vendor=0x1af4 device=0x1042' <<<"$output"
+          grep -F 'virtio-blk BAR0: 0x10000000' <<<"$output"
+          grep -F 'virtio-blk capacity sectors: 1' <<<"$output"
+          grep -F 'virtio-blk driver features: 0x100000000' <<<"$output"
+          grep -F 'virtio-blk device status: 0x0f' <<<"$output"
+          grep -F 'virtio-blk queue enabled: true' <<<"$output"
+          grep -F 'virtio-blk completion: id=0 len=513 sector=0' <<<"$output"
+          grep -F 'virtio-blk used: idx=1 id=0 len=513' <<<"$output"
+          grep -F 'virtio-blk request status: 0' <<<"$output"
+          grep -F 'virtio-blk data boundary: first=[66, 76, 75, 45, 83, 69, 67, 84, 79, 82, 45, 48, 48, 48, 48, 33] last=[66, 76, 75, 69, 78, 68, 33, 33]' <<<"$output"
+          grep -F 'virtio-blk proof: [80, 66, 78, 82]' <<<"$output"
+          grep -F 'virtio-blk port-I/O exits: 18' <<<"$output"
+          grep -F 'virtio-blk MMIO exits: 21' <<<"$output"
+          report="$(grep -F 'vCPU 0 exit Hlt: rip=' <<<"$output")"
+          rflags_hex="${report##*rflags=}"
+          [[ "$rflags_hex" =~ ^0x[0-9a-fA-F]+$ ]]
+          rflags=$((rflags_hex))
+          (( (rflags & 0x2) == 0x2 ))
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.74.0
+      - name: Check MSRV shipped targets
+        # The manifest's rust-version contract applies to shipped library/binary targets.
+        # Stable CI above still compiles and executes every test target.
+        run: cargo check --all-features

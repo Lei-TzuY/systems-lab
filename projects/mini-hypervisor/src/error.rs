@@ -1,0 +1,798 @@
+use std::fmt;
+use std::io;
+
+#[derive(Debug)]
+pub enum Error {
+    HostEnvironment(HostEnvironmentError),
+    KvmCapability(KvmCapabilityError),
+    Configuration(ConfigurationError),
+    GuestMemory(GuestMemoryError),
+    GuestImage(GuestImageError),
+    VmExit(VmExitError),
+    PortIo(PortIoError),
+    Mmio(MmioError),
+}
+
+#[derive(Debug)]
+pub enum HostEnvironmentError {
+    KvmUnavailable {
+        source: io::Error,
+    },
+    PermissionDenied {
+        source: io::Error,
+    },
+    VmCreation {
+        source: io::Error,
+    },
+    VmOperation {
+        operation: &'static str,
+        source: io::Error,
+    },
+    VcpuCreation {
+        id: u16,
+        source: io::Error,
+    },
+    VcpuRunMapping {
+        id: u16,
+        source: io::Error,
+    },
+    VcpuOperation {
+        id: u16,
+        operation: &'static str,
+        source: io::Error,
+    },
+    VcpuMsrPartialWrite {
+        id: u16,
+        requested: usize,
+        processed: usize,
+        first_unwritten_index: u32,
+    },
+    VcpuMsrInvalidWriteCompletion {
+        id: u16,
+        requested: usize,
+        processed: usize,
+    },
+    Io {
+        operation: &'static str,
+        source: io::Error,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KvmCapabilityError {
+    UnsupportedApiVersion { expected: i32, actual: i32 },
+    MissingExtension { name: &'static str, id: i32 },
+    InvalidVcpuMmapSize { size: i32 },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigurationError {
+    UnsupportedVcpuCount { requested: u16, supported: u16 },
+    RealModeEntryOutOfRange { entry: u64, maximum: u64 },
+}
+
+#[derive(Debug)]
+pub enum GuestMemoryError {
+    ZeroSizedRegion,
+    MisalignedRegion {
+        field: &'static str,
+        value: u64,
+        alignment: u64,
+    },
+    AddressSpaceOverflow {
+        base: u64,
+        size: u64,
+    },
+    HostSizeOverflow {
+        size: u64,
+    },
+    AccessLengthTooLarge {
+        length: usize,
+    },
+    AccessOverflow {
+        address: u64,
+        length: usize,
+    },
+    AccessOutOfBounds {
+        address: u64,
+        length: usize,
+        region_base: u64,
+        region_size: u64,
+    },
+    ReservedRangeOverlap {
+        region_base: u64,
+        region_size: u64,
+        reserved_base: u64,
+        reserved_size: u64,
+    },
+    Mapping {
+        source: io::Error,
+    },
+    Registration {
+        source: io::Error,
+    },
+    AlreadyRegistered,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GuestImageError {
+    EmptyFlatBinary,
+    ImageLengthTooLarge {
+        length: usize,
+    },
+    ImageRangeOverflow {
+        load_address: u64,
+        length: usize,
+    },
+    EntryOutsideImage {
+        entry: u64,
+        load_address: u64,
+        length: usize,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VmExitError {
+    Unhandled {
+        vcpu_id: u16,
+        reason: u32,
+        rip: u64,
+        rflags: u64,
+        exit_reasons: Vec<u32>,
+    },
+    KvmUnknownExit {
+        vcpu_id: u16,
+        hardware_exit_reason: u64,
+        exit_reasons: Vec<u32>,
+    },
+    KvmUnknownPayloadUnavailable {
+        vcpu_id: u16,
+        exit_reason: u32,
+    },
+    Exception {
+        vcpu_id: u16,
+        exception: u32,
+        error_code: u32,
+        exit_reasons: Vec<u32>,
+    },
+    ExceptionPayloadUnavailable {
+        vcpu_id: u16,
+        exit_reason: u32,
+    },
+    EntryFailure {
+        vcpu_id: u16,
+        hardware_entry_failure_reason: u64,
+        cpu: u32,
+        exit_reasons: Vec<u32>,
+    },
+    FailEntryPayloadUnavailable {
+        vcpu_id: u16,
+        exit_reason: u32,
+    },
+    InternalError {
+        vcpu_id: u16,
+        suberror: u32,
+        data: Option<Vec<u64>>,
+        exit_reasons: Vec<u32>,
+    },
+    InternalErrorPayloadUnavailable {
+        vcpu_id: u16,
+        exit_reason: u32,
+    },
+    InvalidInternalErrorDataCount {
+        vcpu_id: u16,
+        suberror: u32,
+        ndata: u32,
+        capacity: usize,
+        exit_reasons: Vec<u32>,
+    },
+    UnsupportedSystemEvent {
+        vcpu_id: u16,
+        event_type: u32,
+        data: Vec<u64>,
+        rip: u64,
+        rflags: u64,
+        exit_reasons: Vec<u32>,
+    },
+    SystemEventPayloadUnavailable {
+        vcpu_id: u16,
+        exit_reason: u32,
+    },
+    InvalidSystemEventDataCount {
+        vcpu_id: u16,
+        ndata: u32,
+        capacity: usize,
+        exit_reasons: Vec<u32>,
+    },
+    IoPayloadUnavailable {
+        vcpu_id: u16,
+        exit_reason: u32,
+    },
+    InvalidIoDirection {
+        vcpu_id: u16,
+        direction: u8,
+    },
+    InvalidIoDataRange {
+        vcpu_id: u16,
+        data_offset: u64,
+        size: u8,
+        count: u32,
+        mapping_size: usize,
+    },
+    IoResponseForNonInput {
+        vcpu_id: u16,
+        direction: u8,
+    },
+    InvalidIoResponseLength {
+        vcpu_id: u16,
+        port: u16,
+        expected: usize,
+        actual: usize,
+    },
+    MmioPayloadUnavailable {
+        vcpu_id: u16,
+        exit_reason: u32,
+    },
+    InvalidMmioDirection {
+        vcpu_id: u16,
+        is_write: u8,
+    },
+    InvalidMmioLength {
+        vcpu_id: u16,
+        address: u64,
+        length: u32,
+        capacity: usize,
+    },
+    MmioResponseForWrite {
+        vcpu_id: u16,
+        address: u64,
+    },
+    InvalidMmioResponseLength {
+        vcpu_id: u16,
+        address: u64,
+        expected: usize,
+        actual: usize,
+    },
+    ExitBudgetExhausted {
+        vcpu_id: u16,
+        budget: u32,
+        completed: u32,
+        last_exit_reason: Option<u32>,
+        exit_reasons: Vec<u32>,
+    },
+    UnexpectedSequence {
+        stage: &'static str,
+        expected_reason: u32,
+        actual_reason: u32,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PortIoError {
+    UnhandledPort {
+        port: u16,
+        direction: u8,
+        size: u8,
+        count: u32,
+    },
+    UnsupportedDebugAccess {
+        port: u16,
+        direction: u8,
+        size: u8,
+        count: u32,
+    },
+    InvalidOutputPayload {
+        port: u16,
+        expected: usize,
+        actual: usize,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MmioError {
+    UnhandledAddress {
+        address: u64,
+        direction: u8,
+        length: u32,
+    },
+    UnsupportedByteDeviceAccess {
+        address: u64,
+        direction: u8,
+        length: u32,
+    },
+    InvalidWritePayload {
+        address: u64,
+        expected: usize,
+        actual: usize,
+    },
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::HostEnvironment(error) => error.fmt(f),
+            Self::KvmCapability(error) => error.fmt(f),
+            Self::Configuration(error) => error.fmt(f),
+            Self::GuestMemory(error) => error.fmt(f),
+            Self::GuestImage(error) => error.fmt(f),
+            Self::VmExit(error) => error.fmt(f),
+            Self::PortIo(error) => error.fmt(f),
+            Self::Mmio(error) => error.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::HostEnvironment(error) => error.source(),
+            Self::GuestMemory(error) => error.source(),
+            Self::KvmCapability(_)
+            | Self::Configuration(_)
+            | Self::GuestImage(_)
+            | Self::VmExit(_)
+            | Self::PortIo(_)
+            | Self::Mmio(_) => None,
+        }
+    }
+}
+
+impl fmt::Display for HostEnvironmentError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::KvmUnavailable { .. } => write!(f, "/dev/kvm is unavailable"),
+            Self::PermissionDenied { .. } => write!(f, "permission denied while opening /dev/kvm"),
+            Self::VmCreation { .. } => write!(f, "KVM failed to create a VM"),
+            Self::VmOperation { operation, .. } => {
+                write!(f, "KVM VM operation {operation} failed")
+            }
+            Self::VcpuCreation { id, .. } => write!(f, "KVM failed to create vCPU {id}"),
+            Self::VcpuRunMapping { id, .. } => {
+                write!(f, "failed to map the kvm_run structure for vCPU {id}")
+            }
+            Self::VcpuOperation { id, operation, .. } => {
+                write!(f, "KVM vCPU {id} operation {operation} failed")
+            }
+            Self::VcpuMsrPartialWrite {
+                id,
+                requested,
+                processed,
+                first_unwritten_index,
+            } => write!(
+                f,
+                "KVM_SET_MSRS partially updated vCPU {id}: processed {processed} of {requested} MSRs; first unwritten index {first_unwritten_index:#x}"
+            ),
+            Self::VcpuMsrInvalidWriteCompletion {
+                id,
+                requested,
+                processed,
+            } => write!(
+                f,
+                "KVM_SET_MSRS returned invalid processed count {processed} for vCPU {id} after {requested} requested MSRs"
+            ),
+            Self::Io { operation, .. } => write!(f, "host I/O failure during {operation}"),
+        }
+    }
+}
+
+impl std::error::Error for HostEnvironmentError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::KvmUnavailable { source }
+            | Self::PermissionDenied { source }
+            | Self::VmCreation { source }
+            | Self::VmOperation { source, .. }
+            | Self::VcpuCreation { source, .. }
+            | Self::VcpuRunMapping { source, .. }
+            | Self::VcpuOperation { source, .. }
+            | Self::Io { source, .. } => Some(source),
+            Self::VcpuMsrPartialWrite { .. } | Self::VcpuMsrInvalidWriteCompletion { .. } => None,
+        }
+    }
+}
+
+impl fmt::Display for KvmCapabilityError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnsupportedApiVersion { expected, actual } => write!(
+                f,
+                "unsupported KVM API version: expected {expected}, got {actual}"
+            ),
+            Self::MissingExtension { name, id } => {
+                write!(f, "required KVM extension {name} (id {id}) is unavailable")
+            }
+            Self::InvalidVcpuMmapSize { size } => {
+                write!(f, "KVM reported invalid vCPU mmap size {size}")
+            }
+        }
+    }
+}
+
+impl fmt::Display for ConfigurationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnsupportedVcpuCount {
+                requested,
+                supported,
+            } => write!(
+                f,
+                "requested {requested} vCPUs, but this milestone supports exactly {supported}"
+            ),
+            Self::RealModeEntryOutOfRange { entry, maximum } => write!(
+                f,
+                "real-mode entry {entry:#x} exceeds the current CS=0 RIP limit {maximum:#x}"
+            ),
+        }
+    }
+}
+
+impl fmt::Display for GuestMemoryError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ZeroSizedRegion => write!(f, "guest RAM region must be non-zero"),
+            Self::MisalignedRegion {
+                field,
+                value,
+                alignment,
+            } => write!(
+                f,
+                "guest RAM {field} {value:#x} is not aligned to {alignment:#x} bytes"
+            ),
+            Self::AddressSpaceOverflow { base, size } => write!(
+                f,
+                "guest RAM range overflows the physical address space: base={base:#x}, size={size:#x}"
+            ),
+            Self::HostSizeOverflow { size } => {
+                write!(f, "guest RAM size {size:#x} does not fit the host address space")
+            }
+            Self::AccessLengthTooLarge { length } => {
+                write!(f, "guest-memory access length {length} does not fit in a guest address")
+            }
+            Self::AccessOverflow { address, length } => write!(
+                f,
+                "guest-memory access overflows: address={address:#x}, length={length}"
+            ),
+            Self::AccessOutOfBounds {
+                address,
+                length,
+                region_base,
+                region_size,
+            } => write!(
+                f,
+                "guest-memory access is outside RAM: address={address:#x}, length={length}, region={region_base:#x}+{region_size:#x}"
+            ),
+            Self::ReservedRangeOverlap {
+                region_base,
+                region_size,
+                reserved_base,
+                reserved_size,
+            } => write!(
+                f,
+                "guest RAM region {region_base:#x}+{region_size:#x} overlaps reserved KVM x86 range {reserved_base:#x}+{reserved_size:#x}"
+            ),
+            Self::Mapping { .. } => write!(f, "failed to map guest RAM on the host"),
+            Self::Registration { .. } => write!(f, "KVM failed to register guest RAM"),
+            Self::AlreadyRegistered => write!(f, "this VM already owns its single guest RAM region"),
+        }
+    }
+}
+
+impl std::error::Error for GuestMemoryError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Mapping { source } | Self::Registration { source } => Some(source),
+            Self::ZeroSizedRegion
+            | Self::MisalignedRegion { .. }
+            | Self::AddressSpaceOverflow { .. }
+            | Self::HostSizeOverflow { .. }
+            | Self::AccessLengthTooLarge { .. }
+            | Self::AccessOverflow { .. }
+            | Self::AccessOutOfBounds { .. }
+            | Self::ReservedRangeOverlap { .. }
+            | Self::AlreadyRegistered => None,
+        }
+    }
+}
+
+impl fmt::Display for GuestImageError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EmptyFlatBinary => write!(f, "flat guest image must contain at least one byte"),
+            Self::ImageLengthTooLarge { length } => {
+                write!(f, "flat guest image length {length} does not fit a guest address")
+            }
+            Self::ImageRangeOverflow {
+                load_address,
+                length,
+            } => write!(
+                f,
+                "flat guest image range overflows: load_address={load_address:#x}, length={length}"
+            ),
+            Self::EntryOutsideImage {
+                entry,
+                load_address,
+                length,
+            } => write!(
+                f,
+                "guest entry {entry:#x} is outside flat image at {load_address:#x} with length {length}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for GuestImageError {}
+
+impl fmt::Display for VmExitError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unhandled {
+                vcpu_id,
+                reason,
+                rip,
+                rflags,
+                ..
+            } => write!(
+                f,
+                "unhandled VM exit on vCPU {vcpu_id}: reason={reason}, rip={rip:#x}, rflags={rflags:#x}"
+            ),
+            Self::KvmUnknownExit {
+                vcpu_id,
+                hardware_exit_reason,
+                ..
+            } => write!(
+                f,
+                "KVM reported unknown hardware exit on vCPU {vcpu_id}: hardware_exit_reason={hardware_exit_reason:#x}"
+            ),
+            Self::KvmUnknownPayloadUnavailable {
+                vcpu_id,
+                exit_reason,
+            } => write!(
+                f,
+                "vCPU {vcpu_id} has no KVM-unknown payload for exit reason {exit_reason}"
+            ),
+            Self::Exception {
+                vcpu_id,
+                exception,
+                error_code,
+                ..
+            } => write!(
+                f,
+                "KVM reported exception exit on vCPU {vcpu_id}: exception={exception}, error_code={error_code:#x}"
+            ),
+            Self::ExceptionPayloadUnavailable {
+                vcpu_id,
+                exit_reason,
+            } => write!(
+                f,
+                "vCPU {vcpu_id} has no exception payload for exit reason {exit_reason}"
+            ),
+            Self::EntryFailure {
+                vcpu_id,
+                hardware_entry_failure_reason,
+                cpu,
+                ..
+            } => write!(
+                f,
+                "KVM failed to enter vCPU {vcpu_id}: hardware_entry_failure_reason={hardware_entry_failure_reason:#x}, cpu={cpu}"
+            ),
+            Self::FailEntryPayloadUnavailable {
+                vcpu_id,
+                exit_reason,
+            } => write!(
+                f,
+                "vCPU {vcpu_id} has no fail-entry payload for exit reason {exit_reason}"
+            ),
+            Self::InternalError {
+                vcpu_id, suberror, ..
+            } => write!(
+                f,
+                "KVM reported internal error on vCPU {vcpu_id}: suberror={suberror}"
+            ),
+            Self::InternalErrorPayloadUnavailable {
+                vcpu_id,
+                exit_reason,
+            } => write!(
+                f,
+                "vCPU {vcpu_id} has no internal-error payload for exit reason {exit_reason}"
+            ),
+            Self::InvalidInternalErrorDataCount {
+                vcpu_id,
+                suberror,
+                ndata,
+                capacity,
+                ..
+            } => write!(
+                f,
+                "vCPU {vcpu_id} reported invalid KVM internal-error data count {ndata} for suberror {suberror}; capacity is {capacity}"
+            ),
+            Self::UnsupportedSystemEvent {
+                vcpu_id,
+                event_type,
+                data,
+                rip,
+                rflags,
+                ..
+            } => write!(
+                f,
+                "unsupported KVM system event on vCPU {vcpu_id}: type={event_type}, data={data:?}, rip={rip:#x}, rflags={rflags:#x}"
+            ),
+            Self::SystemEventPayloadUnavailable {
+                vcpu_id,
+                exit_reason,
+            } => write!(
+                f,
+                "vCPU {vcpu_id} has no system-event payload for exit reason {exit_reason}"
+            ),
+            Self::InvalidSystemEventDataCount {
+                vcpu_id,
+                ndata,
+                capacity,
+                ..
+            } => write!(
+                f,
+                "vCPU {vcpu_id} reported invalid KVM system-event data count {ndata}; capacity is {capacity}"
+            ),
+            Self::IoPayloadUnavailable {
+                vcpu_id,
+                exit_reason,
+            } => write!(
+                f,
+                "vCPU {vcpu_id} has no port-I/O payload for exit reason {exit_reason}"
+            ),
+            Self::InvalidIoDirection { vcpu_id, direction } => write!(
+                f,
+                "vCPU {vcpu_id} reported invalid KVM port-I/O direction {direction}"
+            ),
+            Self::InvalidIoDataRange {
+                vcpu_id,
+                data_offset,
+                size,
+                count,
+                mapping_size,
+            } => write!(
+                f,
+                "vCPU {vcpu_id} reported invalid KVM port-I/O data range: offset={data_offset:#x}, size={size}, count={count}, mapping_size={mapping_size}"
+            ),
+            Self::IoResponseForNonInput { vcpu_id, direction } => write!(
+                f,
+                "cannot write a port-I/O response for vCPU {vcpu_id} direction {direction}"
+            ),
+            Self::InvalidIoResponseLength {
+                vcpu_id,
+                port,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "invalid port-I/O input response for vCPU {vcpu_id} port {port:#x}: expected {expected} bytes, got {actual}"
+            ),
+            Self::MmioPayloadUnavailable {
+                vcpu_id,
+                exit_reason,
+            } => write!(
+                f,
+                "vCPU {vcpu_id} has no MMIO payload for exit reason {exit_reason}"
+            ),
+            Self::InvalidMmioDirection { vcpu_id, is_write } => write!(
+                f,
+                "vCPU {vcpu_id} reported invalid KVM MMIO is_write value {is_write}"
+            ),
+            Self::InvalidMmioLength {
+                vcpu_id,
+                address,
+                length,
+                capacity,
+            } => write!(
+                f,
+                "vCPU {vcpu_id} reported invalid KVM MMIO length {length} at {address:#x}; fixed data capacity is {capacity}"
+            ),
+            Self::MmioResponseForWrite { vcpu_id, address } => write!(
+                f,
+                "cannot write an MMIO read response for vCPU {vcpu_id} write access at {address:#x}"
+            ),
+            Self::InvalidMmioResponseLength {
+                vcpu_id,
+                address,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "invalid MMIO read response for vCPU {vcpu_id} address {address:#x}: expected {expected} bytes, got {actual}"
+            ),
+            Self::ExitBudgetExhausted {
+                vcpu_id,
+                budget,
+                completed,
+                last_exit_reason,
+                ..
+            } => match last_exit_reason {
+                Some(reason) => write!(
+                    f,
+                    "vCPU {vcpu_id} exhausted VM-exit budget {budget} after {completed} completed exits; last exit reason={reason}"
+                ),
+                None => write!(
+                    f,
+                    "vCPU {vcpu_id} cannot run with VM-exit budget {budget}; no VM exit has completed"
+                ),
+            },
+            Self::UnexpectedSequence {
+                stage,
+                expected_reason,
+                actual_reason,
+            } => write!(
+                f,
+                "unexpected VM-exit sequence during {stage}: expected reason {expected_reason}, got {actual_reason}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for VmExitError {}
+
+impl fmt::Display for PortIoError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnhandledPort {
+                port,
+                direction,
+                size,
+                count,
+            } => write!(
+                f,
+                "unhandled port-I/O access: port={port:#x}, direction={direction}, size={size}, count={count}"
+            ),
+            Self::UnsupportedDebugAccess {
+                port,
+                direction,
+                size,
+                count,
+            } => write!(
+                f,
+                "unsupported debug-port access: port={port:#x}, direction={direction}, size={size}, count={count}"
+            ),
+            Self::InvalidOutputPayload {
+                port,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "invalid output payload for port {port:#x}: expected {expected} bytes, got {actual}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for PortIoError {}
+
+impl fmt::Display for MmioError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnhandledAddress {
+                address,
+                direction,
+                length,
+            } => write!(
+                f,
+                "unhandled MMIO access: address={address:#x}, direction={direction}, length={length}"
+            ),
+            Self::UnsupportedByteDeviceAccess {
+                address,
+                direction,
+                length,
+            } => write!(
+                f,
+                "unsupported byte MMIO device access: address={address:#x}, direction={direction}, length={length}"
+            ),
+            Self::InvalidWritePayload {
+                address,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "invalid MMIO write payload at {address:#x}: expected {expected} bytes, got {actual}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for MmioError {}
