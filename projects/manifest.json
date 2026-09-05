@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "umbrella": "Lei-TzuY/systems-lab",
+  "generated_from_preflight_date": "2026-09-05",
+  "projects": [
+    {
+      "name": "mini-hypervisor",
+      "source_repository": "Lei-TzuY/mini-hypervisor",
+      "target_path": "projects/mini-hypervisor",
+      "layer": "virtualization",
+      "status": "pre-flight",
+      "observed_main_sha": null,
+      "blocker": null,
+      "integration_notes": "Potential future edge to minios-x86 requires a deterministic bootable guest artifact and machine-observable guest milestone; no compatibility claim exists yet."
+    },
+    {
+      "name": "minios-x86",
+      "source_repository": "Lei-TzuY/minios-x86",
+      "target_path": "projects/minios-x86",
+      "layer": "operating-system-kernel",
+      "status": "pre-flight",
+      "observed_main_sha": null,
+      "blocker": null,
+      "integration_notes": "Potential future guest for mini-hypervisor and consumer of explicitly specified filesystem/network boundaries; no such umbrella edge is currently verified."
+    },
+    {
+      "name": "filesystem-lab",
+      "source_repository": "Lei-TzuY/filesystem-lab",
+      "target_path": "projects/filesystem-lab",
+      "layer": "filesystem-storage",
+      "status": "pre-flight",
+      "observed_main_sha": null,
+      "blocker": null,
+      "integration_notes": "Do not claim minios-x86 integration until both sides share an explicit image/format/replay contract with executable tests."
+    },
+    {
+      "name": "userspace-tcpip-stack",
+      "source_repository": "Lei-TzuY/userspace-tcpip-stack",
+      "target_path": "projects/userspace-tcpip-stack",
+      "layer": "userspace-networking",
+      "status": "pre-flight",
+      "observed_main_sha": null,
+      "blocker": null,
+      "integration_notes": "Possible TAP/TUN, namespace, or packet-fixture integrations must be bounded and executable. The userspace stack is not assumed to be a minios-x86 network stack or Linux kernel replacement."
+    },
+    {
+      "name": "mini-container-runtime",
+      "source_repository": "Lei-TzuY/mini-container-runtime",
+      "target_path": "projects/mini-container-runtime",
+      "layer": "linux-container-runtime",
+      "status": "pre-flight",
+      "observed_main_sha": null,
+      "blocker": null,
+      "integration_notes": "This remains a Linux-host subsystem based on namespaces/cgroups/process primitives. It is not placed under minios-x86 in the architecture graph."
+    }
+  ]
+}
