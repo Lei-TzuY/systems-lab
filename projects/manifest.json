@@ -121,7 +121,7 @@
       "observed_main_sha": "b660e8d14aebf181e29ad844c18f7133ad0334ea",
       "source_ci_run_id": 33942938557,
       "source_ci_conclusion": "success",
-      "blocker": "Open implementation PR #392 is still integrating OCI process defaults into public run admission; wait for that implementation checkpoint before freezing the source.",
+      "blocker": "Open draft implementation PR #392 still owns OCI image Entrypoint/Cmd run-admission integration; do not freeze until that source checkpoint closes cleanly.",
       "integration_notes": "This remains a Linux-host subsystem based on namespaces/cgroups/process primitives. It is not placed under minios-x86 in the architecture graph."
     },
     {
@@ -129,19 +129,29 @@
       "source_repository": "Lei-TzuY/systems-conformance-lab",
       "target_path": "projects/systems-conformance-lab",
       "layer": "cross-cutting-correctness-infrastructure",
-      "status": "ready-for-import",
+      "status": "imported-verified",
       "observed_main_sha": "b7df22b7004838b55054ec3d8d7b7a3b34df8137",
+      "imported_source_sha": "b7df22b7004838b55054ec3d8d7b7a3b34df8137",
+      "subtree_import_commit_sha": "3ba8a9c3adbddb39121b82691a93573286d555e3",
       "source_ci_run_id": 33974760080,
       "source_ci_conclusion": "success",
+      "bootstrap_run_id": 33976134168,
+      "import_pr_number": 11,
+      "import_pr_head_sha": "6ea0d5182e3432f47701197d1826b9e8b46c18d0",
+      "import_pr_manifest_run_id": 33976223333,
+      "import_pr_verification_run_id": 33976223338,
+      "merged_umbrella_sha": "7f639e3ec6e12f14a370e874faad837409c0ccec",
+      "umbrella_post_merge_manifest_run_id": 33976275067,
+      "umbrella_post_merge_verification_run_id": 33976275089,
       "blocker": null,
       "repository_hygiene_notes": "Frozen source contains Python package metadata, docs, source, tests and CI configuration. Recursive tree inspection showed no .gitmodules entry or obvious committed build/cache payload; project metadata declares MIT licensing.",
-      "attribution_notes": "Configured reachable-history commit-message searches for Co-Authored-By, Generated-By, Assisted-By, Signed-off-by, Anthropic and OpenAI returned zero matches before import.",
+      "attribution_notes": "Configured reachable-history commit-message searches for Co-Authored-By, Generated-By, Assisted-By, Signed-off-by, Anthropic and OpenAI returned zero matches before import. The exact source commit is retained as the second parent of subtree import commit 3ba8a9c3..., and PR plus exact merged-main ancestry/tree and six-platform-version matrix verification passed.",
       "source_equivalent_ci": [
         "Ubuntu/macOS/Windows x Python 3.11/3.13: python -m pip install -e .[dev]",
         "Ubuntu/macOS/Windows x Python 3.11/3.13: python -m pytest",
         "Ubuntu/macOS/Windows x Python 3.11/3.13: python -m ruff check ."
       ],
-      "integration_notes": "Ready only for history-preserving import as a target-independent correctness substrate. No target-specific conformance edge is claimed until an adapter and executable regression prove it."
+      "integration_notes": "Import verification is complete as a target-independent correctness substrate. No target-specific conformance edge is claimed until an adapter and executable regression prove it."
     }
   ],
   "secondary_candidates": []

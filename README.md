@@ -1,31 +1,34 @@
 # Systems Lab
 
-A portfolio-oriented umbrella for low-level systems projects spanning virtualization, operating systems, filesystems, networking, and container/process isolation.
+A portfolio-oriented umbrella for low-level systems projects spanning virtualization, operating systems, filesystems, networking, container/process isolation, and cross-cutting correctness infrastructure.
 
-The goal is **not** to dump similarly themed repositories into one directory or to pretend that every project already composes into one operating system. Projects enter this umbrella through history-preserving migration, source-equivalent CI, and explicit integration contracts. An edge is shown as verified only when an executable regression proves it.
+The goal is **not** to dump similarly themed repositories into one directory or pretend that every project already composes into one operating system. Projects enter this umbrella through history-preserving migration, source-equivalent CI, and explicit integration contracts. An edge is shown as verified only when an executable regression proves it.
 
-## Candidate project map
+## Phase 0 checkpoint
 
-| Project | Systems layer | Live Phase 0 status |
+Four source histories are now independently imported and verified:
+
+| Project | Systems layer | Status |
 | --- | --- | --- |
-| [mini-hypervisor](https://github.com/Lei-TzuY/mini-hypervisor) | virtualization / VM execution | **IMPORTED / VERIFIED** — source `d32685b5...`, umbrella main `f436b886...` |
-| [minios-x86](https://github.com/Lei-TzuY/minios-x86) | x86 operating-system kernel | HOLD — implementation PR #35 active; observed main `0276b532...` |
-| [filesystem-lab](https://github.com/Lei-TzuY/filesystem-lab) | filesystem / storage semantics | **IMPORTED / VERIFIED** — source `1414e9fc...`, umbrella main `16ec3164...` |
-| [userspace-tcpip-stack](https://github.com/Lei-TzuY/userspace-tcpip-stack) | userspace networking / protocols | HOLD — implementation PR #330 active; observed main `34782067...` |
-| [mini-container-runtime](https://github.com/Lei-TzuY/mini-container-runtime) | Linux namespaces/cgroups/process lifecycle | HOLD — implementation PR #392 active; observed main `b660e8d1...` |
+| [mini-hypervisor](https://github.com/Lei-TzuY/mini-hypervisor) | virtualization / VM execution | **IMPORTED / VERIFIED** — source `d32685b5...`, subtree `70929104...` |
+| [minios-x86](https://github.com/Lei-TzuY/minios-x86) | x86 operating-system kernel | **IMPORTED / VERIFIED** — source `e63d4218...`, subtree `56fec38f...` |
+| [filesystem-lab](https://github.com/Lei-TzuY/filesystem-lab) | filesystem / storage semantics | **IMPORTED / VERIFIED** — source `1414e9fc...`, subtree `8b2d286e...` |
+| [systems-conformance-lab](https://github.com/Lei-TzuY/systems-conformance-lab) | differential/fuzz/fault/repro correctness substrate | **IMPORTED / VERIFIED** — source `b7df22b7...`, subtree `3ba8a9c3...` |
+| [userspace-tcpip-stack](https://github.com/Lei-TzuY/userspace-tcpip-stack) | userspace networking / protocols | **HOLD** — implementation PR #330 active |
+| [mini-container-runtime](https://github.com/Lei-TzuY/mini-container-runtime) | Linux namespaces/cgroups/process lifecycle | **HOLD** — draft implementation PR #392 active |
 
-Two core histories are now imported and independently verified.
-
-- `filesystem-lab`: non-squashed subtree commit `8b2d286e...` retains exact source `1414e9fc4646b6c482d23d0741a0e420e8fd396c` as its second parent. PR #3 and exact merged-main verification passed ancestry/tree identity, format, Clippy, and all-target/all-feature tests.
-- `mini-hypervisor`: non-squashed subtree commit `70929104...` retains exact source `d32685b5453c3d1ae86ff76d0beac2b4af47094f` as its second parent. PR #6 and exact merged-main verification passed ancestry/tree identity, format, Clippy, tests, build, rustdoc, the source MSRV contract, and the strict real-KVM virtio-blk INTx proof.
-
-`systems-conformance-lab` remains a plausible cross-cutting systems tool, but it is deferred until the next deliberate scope decision. Components already consolidated into `compiler-runtime-lab` are not duplicated here simply because they touch low-level runtime topics.
+Each verified import is a non-squashed subtree migration whose exact source commit remains reachable as Git ancestry and whose imported subtree was checked for exact tree equality. Permanent migration workflows are read-only and repeat source-equivalent validation on pull requests and exact merged main.
 
 No source repository is deleted as part of consolidation.
 
 ## Architectural map
 
 ```text
+                    cross-cutting correctness
+                systems-conformance-lab
+                         │ adapters only
+                         │ future verified edges
+                         ▼
                    virtualization layer
                     mini-hypervisor
                           │
@@ -48,35 +51,28 @@ Linux-host systems lane
                host-facing protocol/data-plane experiments
 ```
 
-The arrows labeled `future` are **not current interoperability claims**. `mini-container-runtime` is intentionally shown as a Linux-host lane rather than falsely placed inside `minios-x86`: a container runtime depends on Linux kernel primitives, while `minios-x86` is itself a kernel project.
+Every arrow labeled `future` is an architecture hypothesis, **not** a current interoperability claim. `systems-conformance-lab` is target-independent infrastructure; importing it does not imply that any target already has an adapter. `mini-container-runtime` remains a Linux-host lane rather than being falsely placed inside `minios-x86`.
+
+## Verified migration evidence
+
+- `filesystem-lab`: source `1414e9fc4646b6c482d23d0741a0e420e8fd396c`; subtree `8b2d286e864edbdbd22d9add82c025a9dddb9604`; PR #3 and exact merged-main format/Clippy/test gates passed.
+- `mini-hypervisor`: source `d32685b5453c3d1ae86ff76d0beac2b4af47094f`; subtree `709291040efb288315d3d81e26b6f4e2dfe5760b`; PR #6 and exact merged-main format/Clippy/test/build/rustdoc/MSRV/strict-KVM gates passed.
+- `minios-x86`: source `e63d4218ea91069506b05944ead5a9198bf8568a`; subtree `56fec38f4af154e8c8dd7a993dcf70327c4ad7d0`; PR #9 and exact merged-main build/static/QEMU/ASan/UBSan/stress-mutant gates passed.
+- `systems-conformance-lab`: source `b7df22b7004838b55054ec3d8d7b7a3b34df8137`; subtree `3ba8a9c3adbddb39121b82691a93573286d555e3`; PR #11 and exact merged-main ancestry/tree plus Ubuntu/macOS/Windows × Python 3.11/3.13 `pytest` + `ruff` matrix passed.
+
+`projects/manifest.json` is a machine-checked evidence ledger. Pull requests and `main` run `scripts/validate_manifest.py`, which rejects malformed freezes, HOLD entries without blockers, READY entries without successful source-CI evidence, duplicate project identities, and verified imports whose target subtree is missing.
 
 ## What would count as real integration?
 
 Examples of acceptable future edges include:
 
-- booting a deterministic `minios-x86` image under `mini-hypervisor` and checking a machine-observable guest milestone;
-- mounting or replaying a shared, explicitly specified filesystem image/format through both a filesystem laboratory tool and an OS-side reader;
-- driving `userspace-tcpip-stack` through a real TAP/TUN, namespace, or packet-fixture boundary owned by another systems component;
-- connecting `mini-container-runtime` network-namespace hooks to a bounded userspace networking fixture without pretending to replace the host kernel stack;
-- sharing low-level executable/image artifacts only where the binary/ABI contract is explicit and tested.
+- booting a deterministic `minios-x86` artifact under `mini-hypervisor` and asserting a machine-observable guest milestone;
+- mounting or replaying a shared, explicitly specified filesystem image through both an OS-side reader and `filesystem-lab`;
+- driving `userspace-tcpip-stack` through a concrete TAP/TUN, namespace, packet-fixture, device, or driver boundary owned by another component;
+- using a `systems-conformance-lab` adapter to compare/fuzz/fault-inject an actual target boundary and retaining the regression permanently;
+- connecting `mini-container-runtime` network namespace hooks to a bounded networking fixture without pretending to replace Linux kernel networking.
 
-A README arrow, matching vocabulary, or two projects both being written in Rust/C/C++ is not integration evidence.
-
-## Executable migration evidence
-
-`projects/manifest.json` is a machine-checked migration ledger, not a decorative inventory. Pull requests and `main` run `scripts/validate_manifest.py`, which rejects duplicate project identities, malformed source freezes, HOLD entries without blockers, READY entries without successful source-CI evidence, and verified imports whose target subtree does not exist.
-
-The permanent `Filesystem migration` workflow verifies preserved source ancestry and exact subtree identity before running:
-
-```text
-cargo fmt --all -- --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-targets --all-features
-```
-
-The permanent `Hypervisor migration` workflow verifies preserved source ancestry and exact subtree identity before running stable Rust format/Clippy/tests/build/rustdoc, the source repository's Rust 1.74 shipped-target contract (`cargo check --all-features`), and the strict real-KVM virtio-blk INTx completion proof.
-
-Hypervisor evidence includes source-main CI `33972996585`, source strict-KVM run `33972996539`, bootstrap `33973179661`, PR manifest `33973305830`, PR verification `33973305829`, merged-main manifest `33973353798`, and merged-main hypervisor verification `33973353484`; all completed successfully.
+Matching vocabulary, a README arrow, or merely living in the same umbrella is not integration evidence.
 
 ## Migration invariants
 
@@ -91,4 +87,4 @@ Hypervisor evidence includes source-main CI `33972996585`, source strict-KVM run
 9. Do not add AI/bot attribution trailers to new umbrella commits.
 10. Never claim cross-project interoperability that an executable integration test does not prove.
 
-See [ROADMAP.md](ROADMAP.md) for the consolidation sequence and [docs/MIGRATION.md](docs/MIGRATION.md) for the evidence ledger.
+See [ROADMAP.md](ROADMAP.md) for the consolidation sequence and [docs/MIGRATION.md](docs/MIGRATION.md) for the durable evidence ledger.
