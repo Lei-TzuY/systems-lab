@@ -8,12 +8,23 @@
       "source_repository": "Lei-TzuY/mini-hypervisor",
       "target_path": "projects/mini-hypervisor",
       "layer": "virtualization",
-      "status": "hold",
-      "observed_main_sha": "78ce397e587e6ef1adb0677b766ea5eeb6123a75",
-      "source_ci_run_id": 33970802001,
+      "status": "ready-for-import",
+      "observed_main_sha": "d32685b5453c3d1ae86ff76d0beac2b4af47094f",
+      "source_ci_run_id": 33972996585,
       "source_ci_conclusion": "success",
-      "blocker": "Open implementation PR #94 owns the current virtio-blk interrupt milestone; recheck source head, PR state and exact-head CI after it resolves.",
-      "integration_notes": "Potential future edge to minios-x86 requires a deterministic bootable guest artifact and machine-observable guest milestone; no compatibility claim exists yet."
+      "blocker": null,
+      "repository_hygiene_notes": "Frozen source contains Cargo metadata, architecture/development/roadmap docs, Rust source, tests and CI configuration. No top-level generated binary/cache payload or nested repository was observed in the frozen root listing.",
+      "attribution_notes": "Configured reachable-history commit-message searches returned no matches for Co-Authored-By, Generated-By, Assisted-By, Signed-off-by, Anthropic or OpenAI before selection.",
+      "source_equivalent_ci": [
+        "cargo fmt --all -- --check",
+        "cargo clippy --all-targets --all-features -- -D warnings",
+        "cargo test --all-targets --all-features",
+        "cargo build --all-targets --all-features",
+        "RUSTDOCFLAGS='-D warnings' cargo doc --no-deps --all-features",
+        "Rust 1.74 all-target/all-feature check",
+        "strict KVM virtio-blk INTx completion proof"
+      ],
+      "integration_notes": "Import candidacy is verified only for source preservation and source-critical execution. No mini-hypervisor to minios-x86 guest compatibility is claimed yet."
     },
     {
       "name": "minios-x86",
@@ -87,7 +98,7 @@
       "source_repository": "Lei-TzuY/systems-conformance-lab",
       "observed_main_sha": "dac29d7d97bdebe5e9b65fbd50621f7e9955582c",
       "status": "deferred",
-      "reason": "Useful cross-cutting conformance tooling, but Phase 0 should first land one core systems source and prove umbrella migration mechanics before widening scope."
+      "reason": "Useful cross-cutting conformance tooling, but core systems imports remain the current priority."
     }
   ]
 }
