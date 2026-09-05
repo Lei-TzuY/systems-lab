@@ -1,6 +1,0 @@
-{
-  "source_repository": "Lei-TzuY/minios-x86",
-  "source_sha": "e63d4218ea91069506b05944ead5a9198bf8568a",
-  "target_path": "projects/minios-x86",
-  "import_branch": "migration/minios-x86-e63d4218"
-}
