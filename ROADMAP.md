@@ -5,8 +5,11 @@
 - [x] create the public `systems-lab` repository;
 - [x] define systems-layer boundaries and forbid fake interoperability claims;
 - [x] select the first candidate set: hypervisor, OS, filesystem, networking, container runtime;
-- [ ] complete live source preflight for all five candidates;
-- [ ] choose the first history-preserving import from a stable source checkpoint.
+- [x] complete the first live source preflight across all five core candidates;
+- [x] choose `filesystem-lab` as the first history-preserving import candidate;
+- [x] record exact source freezes, current implementation blockers and source CI evidence in the manifest/ledger;
+- [ ] execute the first non-squashed Git import and prove source ancestry/tree equivalence;
+- [ ] run source-equivalent `filesystem-lab` CI from the umbrella path and merge only when the exact candidate is green.
 
 ## Phase 1 — Source preflight
 
@@ -14,13 +17,15 @@ Every candidate must be rechecked immediately before migration for exact `main`,
 
 Candidate order is determined by **stability + integration value**, not by repository age or size.
 
-- [ ] `mini-hypervisor`
-- [ ] `minios-x86`
-- [ ] `filesystem-lab`
-- [ ] `userspace-tcpip-stack`
-- [ ] `mini-container-runtime`
+- [ ] `mini-hypervisor` — HOLD while PR #94 is active; observed main `78ce397e...`, main CI successful.
+- [ ] `minios-x86` — HOLD while PR #35 is active; observed main `0276b532...`, observed main static-analysis gate successful.
+- [x] `filesystem-lab` — READY FOR IMPORT at `1414e9fc...`; no open PR, exact main CI successful, history/hygiene preflight clean.
+- [ ] `userspace-tcpip-stack` — HOLD while PR #330 is active; observed main `34782067...`, observed main Clippy gate successful.
+- [ ] `mini-container-runtime` — HOLD while PR #392 is active; observed main `b660e8d1...`, observed main Tests gate successful.
 
-A project with an active implementation PR or moving source head may be deferred without blocking Phase 0.
+A project with an active implementation PR or moving source head is deferred without blocking Phase 0. A previous green source run never overrides a later source change.
+
+`systems-conformance-lab` is a useful secondary candidate, but it remains deferred until the umbrella has proven one core migration end to end. Projects already imported into `compiler-runtime-lab` are intentionally not duplicated here.
 
 ## Phase 2 — History-preserving imports
 
@@ -35,6 +40,8 @@ For each selected source:
 7. publish a migration PR;
 8. merge with a normal merge commit;
 9. rerun exact merged-main CI.
+
+The first planned source-equivalent gate is the `filesystem-lab` native contract: format check, Clippy with warnings denied, then all-target/all-feature tests from `projects/filesystem-lab`.
 
 ## Phase 3 — Executable systems integration
 
