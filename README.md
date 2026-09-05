@@ -10,13 +10,13 @@ The goal is **not** to dump similarly themed repositories into one directory or 
 | --- | --- | --- |
 | [mini-hypervisor](https://github.com/Lei-TzuY/mini-hypervisor) | virtualization / VM execution | HOLD — implementation PR #94 active; observed main `78ce397e...` |
 | [minios-x86](https://github.com/Lei-TzuY/minios-x86) | x86 operating-system kernel | HOLD — implementation PR #35 active; observed main `0276b532...` |
-| [filesystem-lab](https://github.com/Lei-TzuY/filesystem-lab) | filesystem / storage semantics | **READY FOR IMPORT** — `1414e9fc...`, no open PR, exact main CI green |
+| [filesystem-lab](https://github.com/Lei-TzuY/filesystem-lab) | filesystem / storage semantics | **IMPORTED / VERIFIED** — source `1414e9fc...`, umbrella main `16ec3164...` |
 | [userspace-tcpip-stack](https://github.com/Lei-TzuY/userspace-tcpip-stack) | userspace networking / protocols | HOLD — implementation PR #330 active; observed main `34782067...` |
 | [mini-container-runtime](https://github.com/Lei-TzuY/mini-container-runtime) | Linux namespaces/cgroups/process lifecycle | HOLD — implementation PR #392 active; observed main `b660e8d1...` |
 
-The first selected import candidate is `filesystem-lab`. Selection is deliberately separate from import: it does not become `IMPORTED / VERIFIED` until a real non-squashed Git migration retains the source commit as umbrella ancestry, the imported subtree matches the frozen source, and source-equivalent CI passes from the umbrella path.
+`filesystem-lab` is the first completed core migration. Non-squashed subtree commit `8b2d286e...` retains exact source `1414e9fc4646b6c482d23d0741a0e420e8fd396c` as its second parent. PR #3 independently passed ancestry/tree identity, format, Clippy, and all-target/all-feature tests; exact merged-main verification repeated the same contract successfully.
 
-`systems-conformance-lab` is also a plausible cross-cutting systems tool, but it is deferred until the first core import proves the migration machinery. Components already consolidated into `compiler-runtime-lab` are not duplicated here simply because they touch low-level runtime topics.
+`systems-conformance-lab` remains a plausible cross-cutting systems tool, but it is deferred until the next deliberate Phase 1 decision. Components already consolidated into `compiler-runtime-lab` are not duplicated here simply because they touch low-level runtime topics.
 
 No source repository is deleted as part of consolidation.
 
@@ -61,9 +61,9 @@ A README arrow, matching vocabulary, or two projects both being written in Rust/
 
 ## Phase 0 executable evidence
 
-`projects/manifest.json` is a machine-checked migration ledger, not a decorative inventory. Pull requests and `main` run `scripts/validate_manifest.py`, which rejects duplicate project identities, malformed source freezes, HOLD entries without blockers, and READY entries without successful source-CI evidence. Future imported states additionally require the target subtree to exist.
+`projects/manifest.json` is a machine-checked migration ledger, not a decorative inventory. Pull requests and `main` run `scripts/validate_manifest.py`, which rejects duplicate project identities, malformed source freezes, HOLD entries without blockers, READY entries without successful source-CI evidence, and verified imports whose target subtree does not exist.
 
-For the selected `filesystem-lab` freeze, the source-equivalent umbrella contract is:
+The permanent `Filesystem migration` workflow verifies preserved source ancestry and exact subtree identity before running the imported project contract from `projects/filesystem-lab`:
 
 ```text
 cargo fmt --all -- --check
@@ -71,7 +71,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-targets --all-features
 ```
 
-Those commands must run from `projects/filesystem-lab` after the actual history-preserving import. Passing the manifest validator alone is never sufficient to call a source imported.
+For the first import, source CI run `33971985113`, bootstrap run `33972535890`, PR verification run `33972592139`, PR manifest run `33972592152`, merged-main manifest run `33972631312`, and merged-main filesystem run `33972631346` all succeeded.
 
 ## Migration invariants
 
