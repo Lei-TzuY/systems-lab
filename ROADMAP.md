@@ -8,8 +8,10 @@
 - [x] complete the first live source preflight across all five core candidates;
 - [x] choose `filesystem-lab` as the first history-preserving import candidate;
 - [x] record exact source freezes, current implementation blockers and source CI evidence in the manifest/ledger;
-- [ ] execute the first non-squashed Git import and prove source ancestry/tree equivalence;
-- [ ] run source-equivalent `filesystem-lab` CI from the umbrella path and merge only when the exact candidate is green.
+- [x] execute the first non-squashed Git import and prove source ancestry/tree equivalence;
+- [x] run source-equivalent `filesystem-lab` CI from the umbrella path, normal-merge PR #3, and re-run exact merged-main verification.
+
+Phase 0 first-import checkpoint: source `filesystem-lab@1414e9fc4646b6c482d23d0741a0e420e8fd396c` is retained in umbrella ancestry through subtree commit `8b2d286e864edbdbd22d9add82c025a9dddb9604`; exact imported main is `16ec31643891fe6d587339f1bea543fefee2189f` and both permanent gates passed there.
 
 ## Phase 1 — Source preflight
 
@@ -19,13 +21,13 @@ Candidate order is determined by **stability + integration value**, not by repos
 
 - [ ] `mini-hypervisor` — HOLD while PR #94 is active; observed main `78ce397e...`, main CI successful.
 - [ ] `minios-x86` — HOLD while PR #35 is active; observed main `0276b532...`, observed main static-analysis gate successful.
-- [x] `filesystem-lab` — READY FOR IMPORT at `1414e9fc...`; no open PR, exact main CI successful, history/hygiene preflight clean.
+- [x] `filesystem-lab` — IMPORTED / VERIFIED from `1414e9fc...`; PR #3 and exact merged-main ancestry/tree/native CI all successful.
 - [ ] `userspace-tcpip-stack` — HOLD while PR #330 is active; observed main `34782067...`, observed main Clippy gate successful.
 - [ ] `mini-container-runtime` — HOLD while PR #392 is active; observed main `b660e8d1...`, observed main Tests gate successful.
 
-A project with an active implementation PR or moving source head is deferred without blocking Phase 0. A previous green source run never overrides a later source change.
+A project with an active implementation PR or moving source head is deferred without blocking progress. A previous green source run never overrides a later source change.
 
-`systems-conformance-lab` is a useful secondary candidate, but it remains deferred until the umbrella has proven one core migration end to end. Projects already imported into `compiler-runtime-lab` are intentionally not duplicated here.
+`systems-conformance-lab` is a useful secondary candidate, but it remains deferred until the next deliberate expansion decision. Projects already imported into `compiler-runtime-lab` are intentionally not duplicated here.
 
 ## Phase 2 — History-preserving imports
 
@@ -41,7 +43,7 @@ For each selected source:
 8. merge with a normal merge commit;
 9. rerun exact merged-main CI.
 
-The first planned source-equivalent gate is the `filesystem-lab` native contract: format check, Clippy with warnings denied, then all-target/all-feature tests from `projects/filesystem-lab`.
+`filesystem-lab` is the reference implementation of this procedure. Future sources must meet the same evidence bar rather than copying its status mechanically.
 
 ## Phase 3 — Executable systems integration
 
