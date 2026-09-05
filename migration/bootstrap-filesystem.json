@@ -1,7 +1,0 @@
-{
-  "source_repository": "Lei-TzuY/filesystem-lab",
-  "source_sha": "1414e9fc4646b6c482d23d0741a0e420e8fd396c",
-  "target_path": "projects/filesystem-lab",
-  "target_branch": "migration/filesystem-lab-1414e9fc",
-  "mode": "history-preserving-subtree"
-}
