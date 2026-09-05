@@ -1,0 +1,122 @@
+name: import-mini-hypervisor
+
+on:
+  push:
+    branches: [migration/mini-hypervisor]
+    paths:
+      - ".github/workflows/import-mini-hypervisor.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  import-and-verify:
+    runs-on: ubuntu-latest
+    env:
+      UMBRELLA_BASE: c57772354dddded4b89c679ded484a3c1fdfcf1c
+      SOURCE_SHA: 78ce397e587e6ef1adb0677b766ea5eeb6123a75
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: migration/mini-hypervisor
+
+      - name: Verify frozen state
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "$UMBRELLA_BASE"
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$UMBRELLA_BASE"
+          git remote add source-hv https://github.com/Lei-TzuY/mini-hypervisor.git
+          git fetch source-hv --tags
+          test "$(git rev-parse source-hv/main)" = "$SOURCE_SHA"
+
+      - name: Audit complete reachable source history
+        shell: bash
+        run: |
+          set -euo pipefail
+          matches="$(git log "$SOURCE_SHA" --format='%H%x00%an%x00%ae%x00%B' | grep -Eai 'co-authored-by|generated-by|assisted-by|signed-off-by|anthropic|claude|openai' || true)"
+          if [ -n "$matches" ]; then
+            printf '%s\n' "$matches"
+            echo "Configured attribution pattern matched reachable source history" >&2
+            exit 1
+          fi
+
+      - name: Import source history without squashing
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "LeiZ"
+          git config user.email "52287354+Lei-TzuY@users.noreply.github.com"
+          git subtree add \
+            --prefix=projects/mini-hypervisor \
+            source-hv "$SOURCE_SHA" \
+            -m "chore: import mini-hypervisor history"
+          git merge-base --is-ancestor "$SOURCE_SHA" HEAD
+          test "$(git rev-parse "$SOURCE_SHA^{tree}")" = "$(git rev-parse HEAD:projects/mini-hypervisor)"
+
+      - name: Run source core gates from umbrella path
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup component add rustfmt clippy
+          cd projects/mini-hypervisor
+          cargo fmt --all -- --check
+          cargo clippy --all-targets --all-features -- -D warnings
+          cargo test --all-targets --all-features
+          cargo build --all-targets --all-features
+          RUSTDOCFLAGS='-D warnings' cargo doc --no-deps --all-features
+
+      - name: Generate permanent path-scoped source-equivalent CI
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          src = Path("projects/mini-hypervisor/.github/workflows/ci.yml").read_text()
+          old_on = """on:
+            push:
+              branches: [main]
+            pull_request:
+          """
+          new_on = """on:
+            push:
+              branches: [main]
+              paths:
+                - \"projects/mini-hypervisor/**\"
+                - \".github/workflows/mini-hypervisor.yml\"
+            pull_request:
+              paths:
+                - \"projects/mini-hypervisor/**\"
+                - \".github/workflows/mini-hypervisor.yml\"
+          """
+          if old_on not in src:
+              raise SystemExit("source workflow trigger block drifted")
+          src = src.replace(old_on, new_on, 1)
+          marker = "permissions:\n  contents: read\n\n"
+          defaults = marker + "defaults:\n  run:\n    working-directory: projects/mini-hypervisor\n\n"
+          if marker not in src:
+              raise SystemExit("source workflow permissions block drifted")
+          src = src.replace(marker, defaults, 1)
+          Path(".github/workflows/mini-hypervisor.yml").write_text(src)
+          PY
+
+          grep -F 'working-directory: projects/mini-hypervisor' .github/workflows/mini-hypervisor.yml
+          grep -F 'Strict KVM virtio-blk PCI read proof' .github/workflows/mini-hypervisor.yml
+
+      - name: Final race check and publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git ls-remote origin refs/heads/main | cut -f1)" = "$UMBRELLA_BASE"
+          test "$(git ls-remote source-hv refs/heads/main | cut -f1)" = "$SOURCE_SHA"
+          git config user.name "LeiZ"
+          git config user.email "52287354+Lei-TzuY@users.noreply.github.com"
+          git add .github/workflows/mini-hypervisor.yml
+          git rm .github/workflows/import-mini-hypervisor.yml
+          git commit -m "ci: mirror mini-hypervisor source gates"
+          git merge-base --is-ancestor "$SOURCE_SHA" HEAD
+          test "$(git rev-parse "$SOURCE_SHA^{tree}")" = "$(git rev-parse HEAD:projects/mini-hypervisor)"
+          test -z "$(git status --short)"
+          git push origin HEAD:migration/mini-hypervisor
