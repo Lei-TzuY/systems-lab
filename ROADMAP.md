@@ -6,12 +6,16 @@
 - [x] define systems-layer boundaries and forbid fake interoperability claims;
 - [x] select the first candidate set: hypervisor, OS, filesystem, networking, container runtime;
 - [x] complete the first live source preflight across all five core candidates;
-- [x] choose `filesystem-lab` as the first history-preserving import candidate;
-- [x] record exact source freezes, current implementation blockers and source CI evidence in the manifest/ledger;
-- [x] execute the first non-squashed Git import and prove source ancestry/tree equivalence;
-- [x] run source-equivalent `filesystem-lab` CI from the umbrella path, normal-merge PR #3, and re-run exact merged-main verification.
+- [x] import and verify `filesystem-lab` with preserved source ancestry;
+- [x] import and verify `mini-hypervisor` with preserved source ancestry;
+- [x] keep executable manifest and project-specific migration gates on exact merged main.
 
-Phase 0 first-import checkpoint: source `filesystem-lab@1414e9fc4646b6c482d23d0741a0e420e8fd396c` is retained in umbrella ancestry through subtree commit `8b2d286e864edbdbd22d9add82c025a9dddb9604`; exact imported main is `16ec31643891fe6d587339f1bea543fefee2189f` and both permanent gates passed there.
+Phase 0 now has two verified core imports:
+
+- `filesystem-lab@1414e9fc4646b6c482d23d0741a0e420e8fd396c` through subtree commit `8b2d286e864edbdbd22d9add82c025a9dddb9604`;
+- `mini-hypervisor@d32685b5453c3d1ae86ff76d0beac2b4af47094f` through subtree commit `709291040efb288315d3d81e26b6f4e2dfe5760b`.
+
+Both imports were normal-merged only after exact PR verification and then re-verified on exact merged main.
 
 ## Phase 1 — Source preflight
 
@@ -19,15 +23,15 @@ Every candidate must be rechecked immediately before migration for exact `main`,
 
 Candidate order is determined by **stability + integration value**, not by repository age or size.
 
-- [ ] `mini-hypervisor` — HOLD while PR #94 is active; observed main `78ce397e...`, main CI successful.
-- [ ] `minios-x86` — HOLD while PR #35 is active; observed main `0276b532...`, observed main static-analysis gate successful.
-- [x] `filesystem-lab` — IMPORTED / VERIFIED from `1414e9fc...`; PR #3 and exact merged-main ancestry/tree/native CI all successful.
-- [ ] `userspace-tcpip-stack` — HOLD while PR #330 is active; observed main `34782067...`, observed main Clippy gate successful.
-- [ ] `mini-container-runtime` — HOLD while PR #392 is active; observed main `b660e8d1...`, observed main Tests gate successful.
+- [x] `mini-hypervisor` — IMPORTED / VERIFIED from `d32685b5...`; PR #6 and exact merged-main ancestry/tree/native/MSRV/real-KVM verification successful.
+- [ ] `minios-x86` — HOLD while PR #35 is active; do not freeze while concurrent child-wait correctness work remains in flight.
+- [x] `filesystem-lab` — IMPORTED / VERIFIED from `1414e9fc...`; PR #3 and exact merged-main ancestry/tree/native CI successful.
+- [ ] `userspace-tcpip-stack` — HOLD while PR #330 is active.
+- [ ] `mini-container-runtime` — HOLD while PR #392 is active.
 
 A project with an active implementation PR or moving source head is deferred without blocking progress. A previous green source run never overrides a later source change.
 
-`systems-conformance-lab` is a useful secondary candidate, but it remains deferred until the next deliberate expansion decision. Projects already imported into `compiler-runtime-lab` are intentionally not duplicated here.
+`systems-conformance-lab` remains a secondary candidate. Projects already imported into `compiler-runtime-lab` are intentionally not duplicated here.
 
 ## Phase 2 — History-preserving imports
 
@@ -43,17 +47,19 @@ For each selected source:
 8. merge with a normal merge commit;
 9. rerun exact merged-main CI.
 
-`filesystem-lab` is the reference implementation of this procedure. Future sources must meet the same evidence bar rather than copying its status mechanically.
+`filesystem-lab` and `mini-hypervisor` are now reference implementations of this procedure. The hypervisor import additionally demonstrates that source-specific hardware execution gates can remain explicit rather than being replaced by generic build success.
 
 ## Phase 3 — Executable systems integration
 
-Possible edges must be proven, not assumed:
+Import verification is not integration verification. Possible edges must be proven, not assumed:
 
 - [ ] `mini-hypervisor` → `minios-x86`: boot a deterministic guest artifact and assert a bounded guest-visible milestone;
 - [ ] `minios-x86` ↔ `filesystem-lab`: define an explicit shared image/format or replay contract before claiming filesystem interoperability;
 - [ ] `minios-x86` ↔ networking: only after a concrete packet/device/driver boundary exists;
 - [ ] `mini-container-runtime` ↔ `userspace-tcpip-stack`: explore a bounded network-namespace/TAP/TUN/packet fixture without pretending the userspace stack replaces Linux kernel networking;
 - [ ] define common top-level developer entrypoints while preserving project-local build systems.
+
+The highest-value next integration edge is likely `mini-hypervisor` → `minios-x86`, but it must wait until the `minios-x86` implementation lane reaches a clean frozen checkpoint. Until then, do not fabricate a guest contract from unrelated artifacts.
 
 ## Phase 4 — Systems flagship checkpoint
 

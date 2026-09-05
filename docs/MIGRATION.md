@@ -12,61 +12,89 @@ This document is the durable preflight and migration evidence ledger for `system
 
 ## Candidate ledger — checkpoint 2026-09-05
 
-| Project | Layer | Exact observed `main` | Source CI evidence | Status / blocker |
+| Project | Layer | Frozen / observed source | Source CI evidence | Status / blocker |
 | --- | --- | --- | --- | --- |
-| `mini-hypervisor` | virtualization | `78ce397e587e6ef1adb0677b766ea5eeb6123a75` | CI run `33970802001` success | **HOLD** — implementation PR #94 is active |
-| `minios-x86` | operating-system kernel | `0276b5326a1fbd00d2d2de26b128704b3098e42d` | Static analysis run `33534489935` success | **HOLD** — implementation PR #35 is active |
-| `filesystem-lab` | filesystem/storage | `1414e9fc4646b6c482d23d0741a0e420e8fd396c` | CI run `33971985113` success | **IMPORTED / VERIFIED** |
-| `userspace-tcpip-stack` | userspace networking/protocols | `347820674b71f1b8203d52366604e32b0ca3fb1d` | Clippy run `33962740171` success | **HOLD** — implementation PR #330 is active |
-| `mini-container-runtime` | Linux container/process isolation | `b660e8d14aebf181e29ad844c18f7133ad0334ea` | Tests run `33942938557` success | **HOLD** — implementation PR #392 is active |
+| `mini-hypervisor` | virtualization | `d32685b5453c3d1ae86ff76d0beac2b4af47094f` | CI `33972996585` + strict KVM `33972996539` success | **IMPORTED / VERIFIED** |
+| `minios-x86` | operating-system kernel | observed `0276b5326a1fbd00d2d2de26b128704b3098e42d` | prior static-analysis evidence successful | **HOLD** — implementation PR #35 active |
+| `filesystem-lab` | filesystem/storage | `1414e9fc4646b6c482d23d0741a0e420e8fd396c` | CI `33971985113` success | **IMPORTED / VERIFIED** |
+| `userspace-tcpip-stack` | userspace networking/protocols | observed `347820674b71f1b8203d52366604e32b0ca3fb1d` | prior Clippy evidence successful | **HOLD** — implementation PR #330 active |
+| `mini-container-runtime` | Linux container/process isolation | observed `b660e8d14aebf181e29ad844c18f7133ad0334ea` | prior Tests evidence successful | **HOLD** — implementation PR #392 active |
 
-The source CI column records the observed successful exact-main workflow relevant to this checkpoint. Every future import or refresh is rechecked immediately before execution; a successful historical run does not override a later moving head, active implementation PR, or new failure.
+Every future import or refresh is rechecked immediately before execution; historical green evidence never overrides a later moving head, active implementation PR, or new failure.
 
-## First completed import: `filesystem-lab`
+## Completed import 1: `filesystem-lab`
 
 Frozen source: `1414e9fc4646b6c482d23d0741a0e420e8fd396c`.
 
 ### Pre-import evidence
 
-- no open pull request was present on the source repository;
-- exact source-main CI run `33971985113` completed successfully;
-- native source gate: `cargo fmt --all -- --check`, `cargo clippy --all-targets --all-features -- -D warnings`, and `cargo test --all-targets --all-features`;
-- configured reachable-history commit-message searches returned no disallowed attribution matches;
-- the frozen tree contains Cargo metadata, README, docs, Rust source, tests and CI configuration, with no top-level LICENSE file and no observed nested repository, vendored cache, or generated binary payload.
+- zero open source PRs immediately before import;
+- exact source-main CI `33971985113` successful;
+- configured reachable-history attribution scan clean;
+- source tree/hygiene recorded without inventing missing metadata;
+- source-native contract fixed before migration: format, Clippy with warnings denied, and all-target/all-feature tests.
 
 ### History-preservation evidence
 
-One-shot bootstrap run `33972535890` rechecked that source `main` still equaled the frozen SHA and that the source had zero open PRs immediately before import. It then executed a non-squashed subtree add.
+Bootstrap `33972535890` repeated source-head and zero-open-PR checks immediately before executing the non-squashed subtree add.
 
 Subtree commit `8b2d286e864edbdbd22d9add82c025a9dddb9604` has:
 
 - first parent `91247951d26fbe4ac9a229ec518343792400c40b` from `systems-lab`;
-- second parent `1414e9fc4646b6c482d23d0741a0e420e8fd396c` from the source repository;
+- second parent `1414e9fc4646b6c482d23d0741a0e420e8fd396c` from the source;
 - an imported `projects/filesystem-lab` tree exactly equal to the frozen source tree.
 
-This is preserved Git ancestry, not a current-tree copy or squashed replay.
+Import PR #3 head `d41f34a53a18353a67225e69b2a17bc6129e4b38` passed manifest `33972592152` and project verification `33972592139`. It was normal-merged as `16ec31643891fe6d587339f1bea543fefee2189f`, whose exact merged-main manifest `33972631312` and filesystem verification `33972631346` also succeeded.
+
+The temporary write-capable bootstrap workflow/trigger did not remain on final main. The permanent filesystem gate is read-only.
+
+No `minios-x86` ↔ `filesystem-lab` integration is implied by import verification.
+
+## Completed import 2: `mini-hypervisor`
+
+Frozen source: `d32685b5453c3d1ae86ff76d0beac2b4af47094f`, created by normal-merging source PR #94 after its exact candidate was green.
+
+### Pre-import evidence
+
+- source PR #94 exact candidate passed its main CI and strict real-KVM INTx workflow before source merge;
+- exact merged source main passed CI `33972996585` and strict real-KVM INTx `33972996539`;
+- source had zero open PRs at final freeze and again at migration-time bootstrap;
+- configured reachable-history attribution searches returned no configured disallowed matches;
+- root hygiene inspection found source metadata/docs/Rust source/tests/workflows with no observed generated binary/cache payload or nested repository.
+
+### History-preservation evidence
+
+Bootstrap `33973179661` repeated exact source-main and zero-open-PR checks and then performed a non-squashed subtree add.
+
+Subtree commit `709291040efb288315d3d81e26b6f4e2dfe5760b` has:
+
+- first parent `237278c8fcf96cb0b4e3c2ff337d3bcdc21497d8` from `systems-lab`;
+- second parent `d32685b5453c3d1ae86ff76d0beac2b4af47094f` from `mini-hypervisor`;
+- an imported `projects/mini-hypervisor` tree exactly equal to the frozen source tree.
+
+This is preserved Git ancestry, not a current-tree copy or squash.
 
 ### PR and merged-main verification
 
-Import PR #3 exact head `d41f34a53a18353a67225e69b2a17bc6129e4b38` passed:
+The first PR #6 verification attempt correctly failed because the umbrella MSRV command used `--all-targets`, while the source repository intentionally applies Rust 1.74 only to shipped library/binary targets; test-only code uses newer `offset_of!`. The gate was corrected to the source contract, `cargo +1.74.0 check --all-features`, without modifying imported source or weakening ancestry/tree/KVM verification.
 
-- manifest run `33972592152`;
-- filesystem verification run `33972592139`, including ancestry, exact tree equality, format, Clippy, and all-target/all-feature tests.
+Final import PR #6 head `238a8695f00515ad1540fa847fbbedab880776db` passed:
 
-PR #3 was normal-merged as `16ec31643891fe6d587339f1bea543fefee2189f`. Exact merged main then passed:
+- manifest `33973305830`;
+- hypervisor verification `33973305829`: ancestry, exact tree identity, format, Clippy, all-target/all-feature tests, build, rustdoc warnings denied, Rust 1.74 shipped-target check, and strict real-KVM virtio-blk INTx proof.
 
-- manifest run `33972631312`;
-- filesystem verification run `33972631346`, repeating ancestry/tree/native checks on the actual integrated commit.
+PR #6 was normal-merged as `f436b8863a688fcc34300577263d7dab7d00407f`. Exact merged main then passed:
 
-The temporary write-capable bootstrap workflow and trigger were removed by the migration PR. The permanent read-only filesystem verification workflow remains.
+- manifest `33973353798`;
+- hypervisor verification `33973353484`, repeating the same permanent contract on the integrated commit.
 
-No cross-project `minios-x86` ↔ `filesystem-lab` integration is claimed by this import alone.
+The temporary write-capable hypervisor bootstrap workflow and trigger were removed before the import PR merged. The permanent `Hypervisor migration` workflow remains read-only.
+
+No `mini-hypervisor` → `minios-x86` interoperability is claimed by this import. That edge requires a deterministic guest artifact and executable guest-visible contract.
 
 ## Secondary systems candidate
 
-`systems-conformance-lab` is a plausible cross-cutting conformance/integration tool and was observed at `dac29d7d97bdebe5e9b65fbd50621f7e9955582c`. It remains deliberately deferred pending the next scope decision.
-
-Projects already owned by `compiler-runtime-lab`, including its imported debugger, libc, ELF toolchain, runtime, compiler and language-server components, are not duplicated here merely because they also touch systems topics.
+`systems-conformance-lab` remains a plausible cross-cutting conformance/integration tool and is deliberately deferred pending a later scope decision. Projects already consolidated into `compiler-runtime-lab` are not duplicated here merely because they also touch systems topics.
 
 ## Preflight gate
 
@@ -74,16 +102,16 @@ Immediately before each import or refresh:
 
 1. record exact source `main` SHA and umbrella `main` SHA;
 2. confirm no active implementation PR owns the same source surface;
-3. confirm exact candidate CI/checks required by the source project are successful;
-4. inspect recent commits so the source freeze is not accidentally taken during a moving architectural rewrite;
-5. run complete reachable-history attribution scanning for the first import, or newly reachable-history scanning for a refresh;
-6. preserve source README/docs/licenses and explicitly record absence of top-level licensing metadata rather than inventing it;
-7. inspect generated artifacts, caches, large binaries, secrets, platform-specific fixtures, hardware/manual test requirements and nested repositories;
-8. define the exact source-equivalent umbrella CI contract before merge.
+3. confirm exact source CI/checks required by that repository are successful;
+4. inspect recent commits so the freeze is not taken during a moving architectural rewrite;
+5. scan reachable history for configured attribution policy;
+6. preserve source metadata as-is rather than cosmetically rewriting it;
+7. inspect generated artifacts, caches, large binaries, secrets, platform-specific fixtures, hardware/manual requirements and nested repositories;
+8. define the source-equivalent umbrella CI contract before merge.
 
 ## History-preserving procedure
 
-Use non-squashed subtree operations. A source commit selected for import must remain reachable from umbrella history.
+Use non-squashed subtree operations. A selected source commit must remain reachable from umbrella history.
 
 ```bash
 git remote add source-project https://github.com/Lei-TzuY/<project>.git
@@ -93,17 +121,11 @@ git subtree add --prefix=projects/<project> source-project <frozen-sha>
 
 For refreshes, use a non-squashed `git subtree pull` and separately audit newly reachable source history.
 
-A current-tree copy, generated archive, or squash migration does **not** satisfy this ledger even if the resulting files are identical. Import status may advance to **IMPORTED / VERIFIED** only after ancestry, tree equivalence, and umbrella-path CI have all been proven.
+A current-tree copy, archive, or squash migration does **not** satisfy this ledger even if the files are identical. Import status advances to **IMPORTED / VERIFIED** only after ancestry, tree equivalence, and umbrella-path CI are all proven.
 
 ## Integration evidence rule
 
-Projects sharing a systems theme are not automatically integrated. A verified edge needs:
-
-- a named artifact/protocol/device/process boundary;
-- deterministic setup where practical;
-- executable assertions for success and failure behavior;
-- CI ownership and platform constraints documented honestly;
-- no claim broader than the exercised contract.
+Projects sharing a systems theme are not automatically integrated. A verified edge needs a named artifact/protocol/device/process boundary, deterministic setup where practical, executable assertions, honest platform constraints, and claims no broader than the exercised contract.
 
 Examples: boot image ↔ hypervisor, disk image ↔ filesystem implementation, TAP/TUN packet boundary ↔ network stack, namespace lifecycle ↔ container runtime.
 
