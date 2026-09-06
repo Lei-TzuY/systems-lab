@@ -196,13 +196,32 @@ The proof then captures MinIOS's existing port-`0xE9` debug console through the 
 
 This is an **INTEGRATION VERIFIED** edge only for early MinIOS boot through the first intentionally unsupported legacy PIC I/O access. It does not claim PIC/PIT/keyboard/ATA emulation, interrupt delivery, a shell or userspace session, filesystem/network interoperability, security, performance, or a complete MinIOS boot.
 
-`integrations/manifest.json` records both verified edges separately from project import state. `scripts/validate_integrations.py` cross-checks participant source SHAs against the import ledger, requires existing integration/workflow paths, and requires explicit scope, limitations, PR evidence and exact merged-main evidence.
+## Verified integration 3 — filesystem persisted-directory differential conformance
 
-## Current HOLD lane
+Participants:
 
-### `mini-container-runtime`
+- `systems-conformance-lab@b7df22b7004838b55054ec3d8d7b7a3b34df8137`;
+- `filesystem-lab@1414e9fc4646b6c482d23d0741a0e420e8fd396c`.
 
-Draft implementation PR #392 (`feat(image): wire OCI Entrypoint and Cmd into run admission`) explicitly remains in progress until public CLI semantics are complete and exact candidate CI is green. Do not freeze or import this source yet.
+Boundary: `integrations/filesystem-directory-conformance/`.
+
+The candidate is a Rust process adapter linked directly to the imported `filesystem-lab` crate and invoking `filesystem_lab::directory_codec::decode_directory_entry`. The independent Python oracle implements the bounded persisted `DNT1` little-endian record contract: magic/version, exact total/name lengths, reserved fields, CRC32 with the checksum field zeroed, nonzero parent/target inode IDs, UTF-8 decoding, and valid single-component names. `systems-conformance-lab` executes the candidate and oracle through real subprocess targets and compares canonical decoded parent/target/name bytes or stable error classes.
+
+The reviewed corpus includes ASCII, Unicode and maximum-length valid records, plus empty/torn/trailing records, bad magic, nonzero reserved fields, zero inode IDs, invalid UTF-8/path components and checksum corruption. `DeterministicByteMutations` plus `run_fuzz_campaign` also exhaust every configured single-bit mutation of two valid persisted records.
+
+### Integration evidence
+
+- integration PR #23 final head `93aaeb22c7f2ea7e9f0b73b98caeb4168c740c49`;
+- exact PR-head umbrella manifest `34063201170` success;
+- exact PR-head Filesystem directory conformance `34063201197` success after Rust 1.81 formatting/Clippy/build, ruff and differential/mutation testing;
+- PR #23 normal-merged as `637ad2012d22058d961825bae2b07bac5f595de3`;
+- exact merged-main umbrella manifest `34063294027` success;
+- exact merged-main Filesystem directory conformance `34063294035` success, repeating the same executable contract;
+- permanent `.github/workflows/filesystem-directory-conformance.yml` is read-only and retriggers when the integration or either participating imported subtree changes.
+
+This is an **INTEGRATION VERIFIED** edge only for the persisted directory-record codec semantics exercised by the contract. It does not claim complete filesystem-image compatibility, journal/recovery behavior, crash consistency, MinIOS filesystem interoperability, security, or performance.
+
+`integrations/manifest.json` records all three verified edges separately from project import state. `scripts/validate_integrations.py` cross-checks participant source SHAs against the import ledger, requires existing integration/workflow paths, and requires explicit scope, limitations, PR evidence and exact merged-main evidence.
 
 ## Preflight gate
 
@@ -231,16 +250,17 @@ For refreshes, use a non-squashed `git subtree pull` and separately audit newly 
 
 ## Integration evidence rule
 
-The current checkpoint verifies **five imports and two cross-project integration edges**. Import verification and integration verification remain separate claims.
+The current checkpoint verifies **six imports and three cross-project integration edges**. Import verification and integration verification remain separate claims.
 
 A verified edge needs a named artifact/protocol/device/process boundary, deterministic setup where practical, executable assertions, honest platform constraints, and claims no broader than the exercised contract. Each verified edge is recorded in `integrations/manifest.json` with pinned participant source SHAs, exact PR and merged-main evidence, verification contract and limitations.
 
-The two verified edges intentionally cover distinct architectural surfaces:
+The three verified edges intentionally cover distinct architectural surfaces:
 
 1. `systems-conformance-lab` → `userspace-tcpip-stack`: TFTP parser differential conformance through real subprocess execution and deterministic mutation scheduling.
 2. `mini-hypervisor` → `minios-x86`: real-KVM ELF32/Multiboot early kernel boot through the exact first unsupported PIC-remap I/O boundary.
+3. `systems-conformance-lab` → `filesystem-lab`: persisted `DNT1` directory-record differential conformance through real subprocess execution and deterministic mutation scheduling.
 
-The originally defined Phase 4 criteria remain met, so the umbrella may claim a strengthened **Systems flagship checkpoint**. This is a milestone, not a terminal state: `mini-container-runtime` remains on HOLD, the VM/OS edge deliberately stops at the PIC boundary, and filesystem/network/device integrations remain open work.
+The originally defined Phase 4 criteria remain met, so the umbrella may claim a strengthened **Systems flagship checkpoint**. This is a milestone, not a terminal state: the VM/OS edge deliberately stops at the PIC boundary, the filesystem conformance edge is intentionally narrower than MinIOS ↔ filesystem interoperability, and MinIOS networking plus container-network integration remain open work.
 
 ## Original repository policy
 
