@@ -1,0 +1,63 @@
+name: Hypervisor MinIOS boot integration
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "integrations/hypervisor-minios-boot/**"
+      - "projects/mini-hypervisor/**"
+      - "projects/minios-x86/**"
+      - ".github/workflows/hypervisor-minios-boot.yml"
+  pull_request:
+    paths:
+      - "integrations/hypervisor-minios-boot/**"
+      - "projects/mini-hypervisor/**"
+      - "projects/minios-x86/**"
+      - ".github/workflows/hypervisor-minios-boot.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  real-kvm-early-boot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.74.0
+        with:
+          components: rustfmt, clippy
+      - name: Install 32-bit MinIOS build toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential gcc-multilib binutils
+      - name: Build real MinIOS ELF32 kernel
+        run: make -C projects/minios-x86 kernel.bin -j4
+      - name: Build guest-owned Multiboot bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          as --32 integrations/hypervisor-minios-boot/bridge.S -o /tmp/minios-bridge.o
+          ld -m elf_i386 -Ttext 0x7000 --oformat binary \
+            /tmp/minios-bridge.o -o /tmp/minios-bridge.bin
+          test -s /tmp/minios-bridge.bin
+          test "$(stat -c %s /tmp/minios-bridge.bin)" -lt $((0x10000 - 0x7000))
+      - name: Check harness formatting
+        run: cargo fmt --manifest-path integrations/hypervisor-minios-boot/Cargo.toml -- --check
+      - name: Lint harness on hypervisor MSRV
+        run: cargo clippy --manifest-path integrations/hypervisor-minios-boot/Cargo.toml --no-deps -- -D warnings
+      - name: Build harness on hypervisor MSRV
+        run: cargo build --manifest-path integrations/hypervisor-minios-boot/Cargo.toml
+      - name: Prove real KVM MinIOS early boot
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -e /dev/kvm
+          sudo chmod a+rw /dev/kvm
+          output="$(timeout 30s cargo run --quiet \
+            --manifest-path integrations/hypervisor-minios-boot/Cargo.toml -- \
+            projects/minios-x86/kernel.bin /tmp/minios-bridge.bin)"
+          printf '%s\n' "$output"
+          grep -F 'MinIOS Multiboot magic: 0x2badb002' <<<"$output"
+          grep -F 'MinIOS boundary: OUT port=0x20 size=1 count=1' <<<"$output"
+          grep -F 'hypervisor -> MinIOS early-boot proof: VERIFIED' <<<"$output"
