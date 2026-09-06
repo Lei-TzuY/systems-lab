@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "umbrella": "Lei-TzuY/systems-lab",
-  "generated_from_preflight_date": "2026-09-05",
+  "generated_from_preflight_date": "2026-09-06",
   "projects": [
     {
       "name": "mini-hypervisor",
@@ -105,11 +105,22 @@
       "source_repository": "Lei-TzuY/userspace-tcpip-stack",
       "target_path": "projects/userspace-tcpip-stack",
       "layer": "userspace-networking",
-      "status": "hold",
-      "observed_main_sha": "347820674b71f1b8203d52366604e32b0ca3fb1d",
-      "source_ci_run_id": 33962740171,
+      "status": "ready-for-import",
+      "observed_main_sha": "2e4a58c027a18a4c3dc1d466d3adbe8b13550a0d",
+      "source_ci_run_id": 34024025353,
       "source_ci_conclusion": "success",
-      "blocker": "Open implementation PR #330 owns PTP transparent-clock correctness work; recheck the resulting source checkpoint before migration.",
+      "source_clippy_run_id": 34024025409,
+      "blocker": null,
+      "repository_hygiene_notes": "Frozen source contains Cargo metadata, license and README, Rust source, tests, fuzz targets, samples and read-only CI configuration. No .gitmodules declaration or obvious committed top-level build/cache payload was observed at the frozen source tree.",
+      "attribution_notes": "Previously reviewed reachable history remained unchanged below checkpoint 34782067...; the seven commits from that checkpoint through frozen source 2e4a58c0... were audited for Co-Authored-By, Generated-By, Assisted-By, Signed-off-by, Anthropic and OpenAI with zero matches. The import must retain the exact frozen source commit as Git ancestry and prove exact subtree tree equality.",
+      "source_equivalent_ci": [
+        "cargo fmt --all -- --check",
+        "Ubuntu/macOS/Windows: cargo test --locked --all-targets --verbose",
+        "Ubuntu/macOS/Windows: cargo test --locked --doc --verbose",
+        "Ubuntu/macOS/Windows: cargo build --locked --release --verbose",
+        "Rust 1.88: cargo test --locked --all-targets --verbose",
+        "cargo clippy --locked --all-targets --all-features -- -D clippy::correctness"
+      ],
       "integration_notes": "Possible TAP/TUN, namespace, or packet-fixture integrations must be bounded and executable. The userspace stack is not assumed to be a minios-x86 network stack or Linux kernel replacement."
     },
     {
