@@ -10,7 +10,7 @@ This document is the durable preflight and migration evidence ledger for `system
 - **IMPORTED / VERIFIED** — non-squashed source history is retained as umbrella ancestry, selected tree matches source, and source-equivalent umbrella CI is green.
 - **INTEGRATION VERIFIED** — an executable cross-project contract is permanently tested in addition to import verification.
 
-## Candidate ledger — four-import checkpoint 2026-09-05
+## Candidate ledger — five-import checkpoint 2026-09-06
 
 | Project | Layer | Frozen / observed source | Source CI evidence | Status / blocker |
 | --- | --- | --- | --- | --- |
@@ -18,7 +18,7 @@ This document is the durable preflight and migration evidence ledger for `system
 | `minios-x86` | operating-system kernel | `e63d4218ea91069506b05944ead5a9198bf8568a` | Static `33974342423`, Tests `33974342445`, Kernel `33974342424` | **IMPORTED / VERIFIED** |
 | `filesystem-lab` | filesystem/storage | `1414e9fc4646b6c482d23d0741a0e420e8fd396c` | CI `33971985113` | **IMPORTED / VERIFIED** |
 | `systems-conformance-lab` | cross-cutting correctness | `b7df22b7004838b55054ec3d8d7b7a3b34df8137` | CI `33974760080` | **IMPORTED / VERIFIED** |
-| `userspace-tcpip-stack` | userspace networking/protocols | observed `347820674b71f1b8203d52366604e32b0ca3fb1d` | prior source evidence successful | **HOLD** — implementation PR #330 active |
+| `userspace-tcpip-stack` | userspace networking/protocols | `2e4a58c027a18a4c3dc1d466d3adbe8b13550a0d` | Rust CI `34024025353` + Clippy `34024025409` | **IMPORTED / VERIFIED** |
 | `mini-container-runtime` | Linux container/process isolation | observed `b660e8d14aebf181e29ad844c18f7133ad0334ea` | prior source evidence successful | **HOLD** — draft implementation PR #392 active |
 
 Every future import or refresh is rechecked immediately before execution; historical green evidence never overrides a moving head, active implementation PR, or new failure.
@@ -96,11 +96,33 @@ The source is treated as target-independent correctness infrastructure: differen
 
 The permanent Conformance workflow is read-only. No conformance → target integration is claimed until a named adapter and executable regression exercise a real boundary.
 
-## Current HOLD lanes
+## Completed import 5 — `userspace-tcpip-stack`
 
-### `userspace-tcpip-stack`
+Frozen source: `2e4a58c027a18a4c3dc1d466d3adbe8b13550a0d`.
 
-Open implementation PR #330 (`fix(ptp-tc): fail closed on invalid timing arithmetic`) still owns source correctness work. Do not freeze or import while that implementation remains active.
+The source was not frozen while PR #330 was red or active. Its checked PTP transparent-clock arithmetic change first required a shell caller repair so new fallible APIs were handled without panics or false success output. Only after source PR #330 was repaired, normal-merged, and exact merged-main Rust/Clippy gates were green was migration allowed.
+
+### Pre-import evidence
+
+- source Rust CI `34024025353` success: rustfmt, Ubuntu/macOS/Windows all-target tests + doctests + release builds, and Rust 1.88 MSRV tests;
+- source Clippy `34024025409` success with `-D clippy::correctness`;
+- zero open source PRs at freeze and again inside bootstrap;
+- no `.gitmodules` declaration or obvious committed top-level build/cache payload observed;
+- newly reachable commits from the prior reviewed checkpoint through `2e4a58c0...` were audited for configured disallowed attribution markers with zero matches.
+
+### History and umbrella evidence
+
+- bootstrap `34024737036` rechecked exact frozen source and zero open PRs, then performed the non-squashed subtree import;
+- subtree commit `24b537605193adf21b20849255eff3279ae26f7a` has exact source `2e4a58c0...` as second parent;
+- imported subtree tree `ff5bc2211c2574e0b4c53d8bb5189a1c471b6974` exactly equals the frozen source tree;
+- temporary write-capable `bootstrap-tcp.yml` and its trigger were removed from the migration branch before the import PR;
+- import PR #14 head `4b35f467b8486d8adc03d52ef931ff84df90f86c` passed manifest `34024889338` and Userspace TCP/IP migration `34024889259`; the migration run passed preserved-history/tree proof, rustfmt, Clippy, Ubuntu/macOS/Windows tests + doctests + release builds, and Rust 1.88 MSRV;
+- PR #14 normal-merged as `218cd62eebc248a025107231bd959dfed34f8697`;
+- exact merged main passed manifest `34025487651` and Userspace TCP/IP migration `34025487653`, repeating all seven migration jobs successfully.
+
+The permanent TCP/IP workflow is read-only. This import proves preserved history, exact tree identity, and source-equivalent standalone correctness only. It does **not** prove a MinIOS network stack, container-network integration, TAP/TUN interoperability, or any other cross-project networking edge.
+
+## Current HOLD lane
 
 ### `mini-container-runtime`
 
@@ -133,7 +155,7 @@ For refreshes, use a non-squashed `git subtree pull` and separately audit newly 
 
 ## Integration evidence rule
 
-The current checkpoint verifies **four imports, zero cross-project integration edges**. That distinction is intentional.
+The current checkpoint verifies **five imports, zero cross-project integration edges**. That distinction is intentional.
 
 A verified edge needs a named artifact/protocol/device/process boundary, deterministic setup where practical, executable assertions, honest platform constraints, and claims no broader than the exercised contract. Candidate examples include a MinIOS guest artifact booted by the hypervisor, a shared filesystem image contract, an explicit TAP/TUN/network device fixture, or a conformance adapter against a real target.
 
