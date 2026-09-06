@@ -181,9 +181,10 @@ impl GtpPacket {
 
         let has_optional = ext_flag || seq_flag || npdu_flag;
         let header_len = if has_optional { 12 } else { 8 };
+        let frame_len = GTP_U_HEADER_LEN + usize::from(length);
 
-        if data.len() < header_len {
-            return Err(GtpError::PacketTooShort(data.len()));
+        if frame_len < header_len || data.len() < frame_len {
+            return Err(GtpError::InvalidLength);
         }
 
         let (seq_num, npdu_num, next_ext) = if has_optional {
@@ -195,7 +196,7 @@ impl GtpPacket {
             (None, None, None)
         };
 
-        let payload = data[header_len..].to_vec();
+        let payload = data[header_len..frame_len].to_vec();
 
         Ok(GtpPacket {
             header: GtpHeader {
@@ -252,6 +253,33 @@ mod tests {
         assert_eq!(parsed.header.msg_type, GTP_MSG_GPDU);
         assert_eq!(parsed.header.teid, teid);
         assert_eq!(parsed.payload, inner_ip_pkt);
+    }
+
+    #[test]
+    fn parse_rejects_truncated_declared_frame() {
+        let pkt = GtpPacket::build_gpdu(0x01020304, b"payload");
+        let mut raw = pkt.serialize();
+        raw[2..4].copy_from_slice(&(8u16).to_be_bytes());
+
+        assert_eq!(GtpPacket::parse(&raw), Err(GtpError::InvalidLength));
+    }
+
+    #[test]
+    fn parse_constrains_payload_to_declared_frame() {
+        let pkt = GtpPacket::build_gpdu(0x01020304, b"payload");
+        let mut raw = pkt.serialize();
+        raw.extend_from_slice(b"transport trailing bytes");
+
+        let parsed = GtpPacket::parse(&raw).unwrap();
+        assert_eq!(parsed.payload, b"payload");
+    }
+
+    #[test]
+    fn parse_rejects_optional_header_outside_declared_frame() {
+        let mut raw = GtpPacket::build_echo_request(0, 100).serialize();
+        raw[2..4].copy_from_slice(&(3u16).to_be_bytes());
+
+        assert_eq!(GtpPacket::parse(&raw), Err(GtpError::InvalidLength));
     }
 
     #[test]
