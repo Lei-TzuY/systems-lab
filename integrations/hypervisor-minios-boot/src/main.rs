@@ -39,7 +39,11 @@ fn invalid(message: impl Into<String>) -> Box<dyn Error> {
     Box::new(io::Error::new(io::ErrorKind::InvalidData, message.into()))
 }
 
-fn checked_range(length: usize, offset: usize, size: usize) -> Result<std::ops::Range<usize>, Box<dyn Error>> {
+fn checked_range(
+    length: usize,
+    offset: usize,
+    size: usize,
+) -> Result<std::ops::Range<usize>, Box<dyn Error>> {
     let end = offset
         .checked_add(size)
         .ok_or_else(|| invalid("ELF range overflow"))?;
@@ -53,7 +57,10 @@ fn checked_range(length: usize, offset: usize, size: usize) -> Result<std::ops::
 
 fn read_u16(bytes: &[u8], offset: usize) -> Result<u16, Box<dyn Error>> {
     let range = checked_range(bytes.len(), offset, 2)?;
-    Ok(u16::from_le_bytes([bytes[range.start], bytes[range.start + 1]]))
+    Ok(u16::from_le_bytes([
+        bytes[range.start],
+        bytes[range.start + 1],
+    ]))
 }
 
 fn read_u32(bytes: &[u8], offset: usize) -> Result<u32, Box<dyn Error>> {
@@ -74,7 +81,9 @@ fn parse_elf32(bytes: &[u8]) -> Result<Elf32Image, Box<dyn Error>> {
         return Err(invalid("MinIOS kernel is not ELF"));
     }
     if bytes[4] != 1 || bytes[5] != 1 || bytes[6] != 1 {
-        return Err(invalid("MinIOS kernel must be ELF32 little-endian version 1"));
+        return Err(invalid(
+            "MinIOS kernel must be ELF32 little-endian version 1",
+        ));
     }
     if read_u16(bytes, 16)? != 2 {
         return Err(invalid("MinIOS kernel must be an ELF executable"));
@@ -99,7 +108,11 @@ fn parse_elf32(bytes: &[u8]) -> Result<Elf32Image, Box<dyn Error>> {
     let mut segments = Vec::new();
     for index in 0..phnum {
         let header = phoff
-            .checked_add(index.checked_mul(phentsize).ok_or_else(|| invalid("ELF32 program-header offset overflow"))?)
+            .checked_add(
+                index
+                    .checked_mul(phentsize)
+                    .ok_or_else(|| invalid("ELF32 program-header offset overflow"))?,
+            )
             .ok_or_else(|| invalid("ELF32 program-header offset overflow"))?;
         if read_u32(bytes, header)? != PT_LOAD {
             continue;
@@ -142,13 +155,19 @@ fn parse_elf32(bytes: &[u8]) -> Result<Elf32Image, Box<dyn Error>> {
         return Err(invalid("MinIOS kernel contains no PT_LOAD segments"));
     }
     if u64::from(entry) >= GUEST_RAM_SIZE {
-        return Err(invalid(format!("MinIOS entry {entry:#x} lies outside guest RAM")));
+        return Err(invalid(format!(
+            "MinIOS entry {entry:#x} lies outside guest RAM"
+        )));
     }
 
     Ok(Elf32Image { entry, segments })
 }
 
-fn load_elf32(memory: &mut GuestMemory, bytes: &[u8], image: &Elf32Image) -> Result<(), Box<dyn Error>> {
+fn load_elf32(
+    memory: &mut GuestMemory,
+    bytes: &[u8],
+    image: &Elf32Image,
+) -> Result<(), Box<dyn Error>> {
     for segment in &image.segments {
         let file = checked_range(bytes.len(), segment.file_offset, segment.file_size)?;
         memory.write(GuestPhysAddr::new(segment.load_address), &bytes[file])?;
@@ -187,7 +206,9 @@ fn run(kernel_path: &Path, bridge_path: &Path) -> Result<(), Box<dyn Error>> {
         .checked_add(u64::try_from(bridge.len())?)
         .ok_or_else(|| invalid("Multiboot bridge range overflow"))?;
     if bridge_end >= 0x1_0000 {
-        return Err(invalid("Multiboot bridge no longer fits the real-mode low-memory window"));
+        return Err(invalid(
+            "Multiboot bridge no longer fits the real-mode low-memory window",
+        ));
     }
 
     let image = parse_elf32(&kernel)?;
@@ -251,7 +272,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             Path::new(&program).display()
         ))
     })?;
-    let bridge = args.next().ok_or_else(|| invalid("missing Multiboot bridge path"))?;
+    let bridge = args
+        .next()
+        .ok_or_else(|| invalid("missing Multiboot bridge path"))?;
     if args.next().is_some() {
         return Err(invalid("unexpected extra arguments"));
     }
