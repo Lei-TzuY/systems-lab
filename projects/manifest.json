@@ -105,14 +105,24 @@
       "source_repository": "Lei-TzuY/userspace-tcpip-stack",
       "target_path": "projects/userspace-tcpip-stack",
       "layer": "userspace-networking",
-      "status": "ready-for-import",
+      "status": "imported-verified",
       "observed_main_sha": "2e4a58c027a18a4c3dc1d466d3adbe8b13550a0d",
+      "imported_source_sha": "2e4a58c027a18a4c3dc1d466d3adbe8b13550a0d",
+      "subtree_import_commit_sha": "24b537605193adf21b20849255eff3279ae26f7a",
       "source_ci_run_id": 34024025353,
       "source_ci_conclusion": "success",
       "source_clippy_run_id": 34024025409,
+      "bootstrap_run_id": 34024737036,
+      "import_pr_number": 14,
+      "import_pr_head_sha": "4b35f467b8486d8adc03d52ef931ff84df90f86c",
+      "import_pr_manifest_run_id": 34024889338,
+      "import_pr_verification_run_id": 34024889259,
+      "merged_umbrella_sha": "218cd62eebc248a025107231bd959dfed34f8697",
+      "umbrella_post_merge_manifest_run_id": 34025487651,
+      "umbrella_post_merge_verification_run_id": 34025487653,
       "blocker": null,
       "repository_hygiene_notes": "Frozen source contains Cargo metadata, license and README, Rust source, tests, fuzz targets, samples and read-only CI configuration. No .gitmodules declaration or obvious committed top-level build/cache payload was observed at the frozen source tree.",
-      "attribution_notes": "Previously reviewed reachable history remained unchanged below checkpoint 34782067...; the seven commits from that checkpoint through frozen source 2e4a58c0... were audited for Co-Authored-By, Generated-By, Assisted-By, Signed-off-by, Anthropic and OpenAI with zero matches. The import must retain the exact frozen source commit as Git ancestry and prove exact subtree tree equality.",
+      "attribution_notes": "Previously reviewed reachable history remained unchanged below checkpoint 34782067...; the seven commits from that checkpoint through frozen source 2e4a58c0... were audited for Co-Authored-By, Generated-By, Assisted-By, Signed-off-by, Anthropic and OpenAI with zero matches. The exact source commit is retained as the second parent of subtree import commit 24b53760..., the imported subtree matched frozen source tree ff5bc2211c2574e0b4c53d8bb5189a1c471b6974 exactly, and both PR plus exact merged-main verification gates passed.",
       "source_equivalent_ci": [
         "cargo fmt --all -- --check",
         "Ubuntu/macOS/Windows: cargo test --locked --all-targets --verbose",
@@ -121,7 +131,7 @@
         "Rust 1.88: cargo test --locked --all-targets --verbose",
         "cargo clippy --locked --all-targets --all-features -- -D clippy::correctness"
       ],
-      "integration_notes": "Possible TAP/TUN, namespace, or packet-fixture integrations must be bounded and executable. The userspace stack is not assumed to be a minios-x86 network stack or Linux kernel replacement."
+      "integration_notes": "Import verification is complete. Possible TAP/TUN, namespace, packet-fixture, device or driver integrations remain hypotheses until a bounded executable cross-project regression proves them. The userspace stack is not assumed to be a minios-x86 network stack or Linux kernel replacement."
     },
     {
       "name": "mini-container-runtime",
