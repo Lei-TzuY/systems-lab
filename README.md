@@ -23,7 +23,7 @@ No source repository is deleted as part of consolidation.
 
 ## Verified cross-project integrations
 
-The umbrella now has **two independently verified executable edges**. They intentionally exercise different kinds of composition rather than multiplying cosmetic arrows.
+The umbrella now has **three independently verified executable edges**. They intentionally exercise different kinds of composition rather than multiplying cosmetic arrows.
 
 ### 1. `systems-conformance-lab` → `userspace-tcpip-stack`
 
@@ -52,6 +52,20 @@ Evidence:
 
 This is **not** a full MinIOS boot. It does not claim PIC/PIT/keyboard/ATA emulation, interrupts, shell/userspace execution, filesystem/network interoperability, security, or performance.
 
+### 3. `systems-conformance-lab` → `filesystem-lab`
+
+The bounded contract is **persisted `DNT1` directory-record differential conformance**. `integrations/filesystem-directory-conformance/` links a Rust process adapter directly to the imported `filesystem_lab::directory_codec::decode_directory_entry` implementation. An independent Python oracle implements the persisted little-endian record contract, including magic/version, exact length, reserved fields, CRC32, inode constraints, UTF-8 and single-component name rules. `systems-conformance-lab` executes both as real subprocess targets and requires equivalent canonical decoded results or stable error classes.
+
+The reviewed corpus covers ASCII, Unicode and maximum-length valid records plus torn headers/payloads, trailing bytes, invalid magic/reserved fields, zero inode IDs, invalid UTF-8/components and checksum corruption. The same permanent gate also exhausts deterministic single-bit mutations of two valid persisted records.
+
+Evidence:
+
+- integration PR #23 exact head `93aaeb22c7f2ea7e9f0b73b98caeb4168c740c49` passed umbrella manifest `34063201170` and Filesystem directory conformance `34063201197`;
+- PR #23 was normal-merged as `637ad2012d22058d961825bae2b07bac5f595de3`;
+- exact merged main passed umbrella manifest `34063294027` and Filesystem directory conformance `34063294035`.
+
+This is not a whole-filesystem interoperability claim. It proves the bounded persisted directory-record codec semantics exercised here; it does not prove complete filesystem images, journal/recovery behavior, crash consistency, or MinIOS filesystem integration.
+
 `integrations/manifest.json` is the machine-checked edge ledger. `scripts/validate_integrations.py` requires each verified edge to name at least two verified imported participants, pin their imported source SHAs, point to an existing integration path and workflow, and retain PR plus exact merged-main evidence and explicit scope/limitations.
 
 ## Architectural map
@@ -59,11 +73,11 @@ This is **not** a full MinIOS boot. It does not claim PIC/PIT/keyboard/ATA emula
 ```text
                     cross-cutting correctness
                 systems-conformance-lab
-                         │
-                         │ VERIFIED, narrow
-                         │ TFTP parser differential contract
-                         ▼
-                userspace-tcpip-stack
+                    ╱                 ╲
+                   ╱ VERIFIED          ╲ VERIFIED
+        DNT1 directory codec       TFTP parser differential
+                 ╱                       ╲
+        filesystem-lab          userspace-tcpip-stack
 
                    virtualization layer
                     mini-hypervisor
@@ -75,8 +89,9 @@ This is **not** a full MinIOS boot. It does not claim PIC/PIT/keyboard/ATA emula
                  kernel / OS services
                     ╱           ╲
                    ╱             ╲
-      future filesystem edge   future network edge
-                ╱                 ╲
+      future MinIOS/filesystem  future network edge
+          shared artifact             ╲
+                ╱                       ╲
       filesystem-lab       userspace-tcpip-stack
 
 Linux-host systems lane
@@ -88,7 +103,7 @@ Linux-host systems lane
                host-facing protocol/data-plane experiments
 ```
 
-Every arrow labeled `future` is an architecture hypothesis, **not** a current interoperability claim. The two arrows labeled `VERIFIED` have permanent executable workflows and exact PR plus merged-main evidence. `mini-container-runtime` remains a Linux-host lane rather than being falsely placed inside `minios-x86`.
+Every arrow labeled `future` is an architecture hypothesis, **not** a current interoperability claim. The three arrows labeled `VERIFIED` have permanent executable workflows and exact PR plus merged-main evidence. The verified filesystem edge is a conformance/artifact-codec edge; it does not turn the still-future MinIOS ↔ filesystem shared-artifact edge into a claim. `mini-container-runtime` remains a Linux-host lane rather than being falsely placed inside `minios-x86`.
 
 ## Verified migration evidence
 
@@ -103,9 +118,9 @@ Every arrow labeled `future` is an architecture hypothesis, **not** a current in
 
 ## Flagship checkpoint
 
-The original Phase 4 flagship criteria remain met and the architecture has moved beyond the minimum: all six selected source histories are preserved with exact merged-main CI and there are now **two non-trivial verified cross-project edges**, one correctness/protocol edge and one virtualization/OS real-KVM edge.
+The original Phase 4 flagship criteria remain met and the architecture has moved beyond the minimum: all six selected source histories are preserved with exact merged-main CI and there are now **three non-trivial verified cross-project edges** spanning protocol correctness, virtualization/OS execution, and persisted filesystem-record correctness.
 
-That makes this a stronger **Systems flagship checkpoint**, not the end state of the repository. Deeper work still includes extending the VM/OS contract beyond the first unsupported PIC access, defining a real filesystem artifact contract, integrating networking through a concrete device/packet boundary, and evaluating a bounded container/network edge from the now verified Container import.
+That makes this a stronger **Systems flagship checkpoint**, not the end state of the repository. Deeper work still includes extending the VM/OS contract beyond the first unsupported PIC access, defining a real MinIOS ↔ filesystem shared-artifact contract, integrating networking through a concrete device/packet boundary, and evaluating a bounded container/network edge from the verified Container import.
 
 ## Migration and integration invariants
 
