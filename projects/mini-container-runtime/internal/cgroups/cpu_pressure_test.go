@@ -1,0 +1,39 @@
+package cgroups
+
+import (
+	"os"
+	"path/filepath"
+	"runtime"
+	"testing"
+)
+
+func TestReadCPUPressureStallTotal_Missing(t *testing.T) {
+	tmpDir := t.TempDir()
+	total, err := ReadCPUPressureStallTotal(tmpDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if total != 0 {
+		t.Errorf("expected 0 for missing file, got %d", total)
+	}
+}
+
+func TestReadCPUPressureStallTotal_Success(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("cgroup file reading only works on Linux")
+	}
+
+	tmpDir := t.TempDir()
+	content := "some avg10=0.50 avg60=0.10 avg300=0.02 total=456789\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n"
+	if err := os.WriteFile(filepath.Join(tmpDir, "cpu.pressure"), []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	total, err := ReadCPUPressureStallTotal(tmpDir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if total != 456789 {
+		t.Errorf("expected 456789, got %d", total)
+	}
+}
