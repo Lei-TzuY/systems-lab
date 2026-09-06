@@ -12,7 +12,7 @@
 - [x] repair/freeze, import, and verify `userspace-tcpip-stack` with preserved source ancestry;
 - [x] keep exact merged-main verification green for all five imported projects.
 
-Phase 0 migration checkpoint now contains five verified histories:
+Phase 0 migration checkpoint contains five verified histories:
 
 - `filesystem-lab@1414e9fc4646b6c482d23d0741a0e420e8fd396c` via subtree `8b2d286e864edbdbd22d9add82c025a9dddb9604`;
 - `mini-hypervisor@d32685b5453c3d1ae86ff76d0beac2b4af47094f` via subtree `709291040efb288315d3d81e26b6f4e2dfe5760b`;
@@ -49,34 +49,43 @@ For every selected source:
 8. merge with a normal merge commit;
 9. rerun exact merged-main CI.
 
-Filesystem, hypervisor, MinIOS, conformance, and userspace networking imports are now reference implementations of this procedure across Rust, C/assembly/QEMU, and cross-platform Python projects.
+Filesystem, hypervisor, MinIOS, conformance, and userspace networking imports are reference implementations of this procedure across Rust, C/assembly/QEMU, and cross-platform Python projects.
 
 ## Phase 3 — Executable systems integration
 
-**Not complete.** Import verification is not integration verification.
+**First verified edge complete; broader integration continues.** Import verification is not integration verification.
 
-Candidate edges, in likely value order:
-
-- [ ] `mini-hypervisor` → `minios-x86`: boot a deterministic guest artifact and assert a bounded guest-visible milestone;
-- [ ] `systems-conformance-lab` → a real target adapter: compare/fuzz/fault-inject a named artifact/protocol/process boundary and retain a permanent regression;
+- [ ] `mini-hypervisor` → `minios-x86`: boot a deterministic guest artifact and assert a bounded guest-visible milestone. The current imported hypervisor exposes real-mode fixtures and an ELF64/long-mode loader, while MinIOS is an ELF32 Multiboot protected-mode kernel; do not fake this edge without a reusable protected-mode guest contract.
+- [x] `systems-conformance-lab` → `userspace-tcpip-stack`: **TFTP parser differential conformance**. A Rust adapter invokes the imported production parser, an independent Python oracle implements the bounded grammar, and `DifferentialHarness` plus deterministic mutation scheduling permanently compare both real processes. PR #16 and exact merged main both passed the dedicated integration gate.
 - [ ] `minios-x86` ↔ `filesystem-lab`: define and test an explicit shared image/format or replay contract;
 - [ ] `minios-x86` ↔ networking: only after a concrete packet/device/driver boundary exists;
 - [ ] `mini-container-runtime` ↔ `userspace-tcpip-stack`: bounded namespace/TAP/TUN/packet-fixture integration after the container source reaches a stable checkpoint;
+- [ ] additional `systems-conformance-lab` adapters against named real boundaries;
 - [ ] common top-level developer entrypoints where they do not weaken project-local build systems.
 
-The highest-value next integration candidate remains `mini-hypervisor` → `minios-x86`. It must be implemented as a deterministic executable contract; merely wiring paths, copying artifacts, or drawing an architecture arrow does not count.
+The TFTP edge is intentionally narrow: it proves parser-level differential agreement for the exercised corpus and deterministic mutation schedule, not whole-stack RFC conformance or transport interoperability.
+
+The deepest next candidate remains `mini-hypervisor` → `minios-x86`, but only an executable protected-mode/Multiboot contract can advance it.
 
 ## Phase 4 — Systems flagship checkpoint
 
-**Not yet complete.** A flagship checkpoint requires all of the following:
+**Complete at the first flagship checkpoint.** The originally defined criteria are now all met:
 
 - several source histories preserved with exact merged-main CI green — **met**;
-- at least one non-trivial cross-project systems edge executable and permanently tested — **not yet met**;
-- README/manifest/ledger distinguish verified edges from hypotheses — **met**;
+- at least one non-trivial cross-project systems edge executable and permanently tested — **met** by the TFTP parser differential contract;
+- README and machine ledgers distinguish verified edges from hypotheses — **met**;
 - original source repositories remain available — **met**;
-- no unresolved migration PR is falsely represented as completed work — **met at this checkpoint**.
+- no unresolved umbrella migration PR is falsely represented as completed work — **met at this checkpoint**.
 
-Therefore the current state is a **five-import migration checkpoint**, not a completed systems flagship.
+This status means the umbrella has crossed from verified consolidation into verified composition. It does **not** mean every source is imported or every architectural edge is complete: `mini-container-runtime` remains on HOLD, and deeper VM/OS/filesystem/network integrations remain future milestones.
+
+## Phase 5 — Deeper composition
+
+- [ ] add a reusable protected-mode guest primitive only when the `mini-hypervisor` source lane is stable, then prove a deterministic MinIOS Multiboot boot milestone;
+- [ ] extend conformance adapters to additional named boundaries without turning the framework into target-specific logic;
+- [ ] define a shared filesystem artifact contract before claiming MinIOS/filesystem interoperability;
+- [ ] import/refresh `mini-container-runtime` only after its source implementation lane is clean, then evaluate a bounded host-network integration;
+- [ ] keep every new edge independently machine-ledgered with exact PR and merged-main evidence.
 
 ## Non-goals
 
