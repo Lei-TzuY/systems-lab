@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "umbrella": "Lei-TzuY/systems-lab",
+  "verified_integrations": [
+    {
+      "name": "tftp-parser-differential-conformance",
+      "status": "integration-verified",
+      "participants": [
+        "systems-conformance-lab",
+        "userspace-tcpip-stack"
+      ],
+      "participant_source_shas": {
+        "systems-conformance-lab": "b7df22b7004838b55054ec3d8d7b7a3b34df8137",
+        "userspace-tcpip-stack": "2e4a58c027a18a4c3dc1d466d3adbe8b13550a0d"
+      },
+      "target_path": "integrations/tftp-conformance",
+      "workflow_path": ".github/workflows/tftp-conformance.yml",
+      "scope": "Real-process differential conformance for toy_tcpip::tftp::TftpPacket::parse against an independent Python oracle, covering reviewed valid/malformed TFTP packets plus a deterministic exhaustive single-bit mutation schedule over representative RRQ, ACK, and ERROR seeds.",
+      "pr_number": 16,
+      "pr_head_sha": "f2dc8bae2e77dfde0d14b428ac3e782717b3a264",
+      "pr_manifest_run_id": 34029446301,
+      "pr_verification_run_id": 34029446281,
+      "merged_umbrella_sha": "a38b878a28b80c08e2e034210dcbf1377b578df0",
+      "umbrella_post_merge_manifest_run_id": 34029528608,
+      "umbrella_post_merge_verification_run_id": 34029528620,
+      "verification_contract": [
+        "Rust 1.88 adapter formatting and Clippy -D warnings",
+        "build the adapter against the imported toy_tcpip crate",
+        "ruff-check the independent oracle and integration tests",
+        "DifferentialHarness executes the Rust candidate and Python oracle as real subprocess targets",
+        "reviewed valid and malformed TFTP corpus must produce equivalent canonical semantic results",
+        "DeterministicByteMutations plus run_fuzz_campaign must exhaust the representative single-bit mutation schedule without a product mismatch or infrastructure failure"
+      ],
+      "limitations": [
+        "does not claim whole-stack or whole-RFC TFTP conformance",
+        "does not exercise UDP sockets, packet transport, file transfer, or TFTP server behavior",
+        "does not prove MinIOS networking or container networking interoperability",
+        "does not make security or performance claims"
+      ]
+    }
+  ]
+}
