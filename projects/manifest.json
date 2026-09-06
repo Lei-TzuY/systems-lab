@@ -138,18 +138,28 @@
       "source_repository": "Lei-TzuY/mini-container-runtime",
       "target_path": "projects/mini-container-runtime",
       "layer": "linux-container-runtime",
-      "status": "ready-for-import",
+      "status": "imported-verified",
       "observed_main_sha": "3b96aca6d23289147fe1f21132a4503edaf19a06",
       "source_ci_run_id": 34037281275,
       "source_ci_conclusion": "success",
       "blocker": null,
-      "integration_notes": "Source is frozen and eligible for history-preserving import. This remains a Linux-host subsystem based on namespaces/cgroups/process primitives; no userspace-tcpip-stack integration is claimed without a bounded executable namespace/network contract.",
+      "integration_notes": "Import verification is complete. This remains a Linux-host subsystem based on namespaces/cgroups/process primitives; no userspace-tcpip-stack integration is claimed without a bounded executable namespace/network contract.",
       "repository_hygiene_notes": "Frozen source contains Go module metadata, MIT license, README/Makefile, Go source, tests, compose fixture and read-only CI. No .gitmodules declaration or obvious committed top-level build/cache payload was observed at the frozen tree.",
-      "attribution_notes": "Configured full-history commit-message searches for Co-Authored-By, Generated-By, Assisted-By, Signed-off-by, Anthropic and OpenAI returned zero matches before import.",
+      "attribution_notes": "Configured full-history commit-message searches for Co-Authored-By, Generated-By, Assisted-By, Signed-off-by, Anthropic and OpenAI returned zero matches before import. The exact source commit is retained as the second parent of subtree import commit 8dda315c..., the imported subtree tree 85ddb78af539a8821fa37922036079db07e3b586 matches the frozen source tree exactly, and PR plus exact merged-main ancestry/tree/vet/test gates passed.",
       "source_equivalent_ci": [
         "go vet ./...",
         "go test ./..."
-      ]
+      ],
+      "imported_source_sha": "3b96aca6d23289147fe1f21132a4503edaf19a06",
+      "subtree_import_commit_sha": "8dda315c9af7d5710de0e6b63ca4bf4e5155ad1b",
+      "bootstrap_run_id": 34037630438,
+      "import_pr_number": 21,
+      "import_pr_head_sha": "fd4fb843bf7d42654dfa219e4ab48fa9559b4975",
+      "import_pr_manifest_run_id": 34037860520,
+      "import_pr_verification_run_id": 34037860577,
+      "merged_umbrella_sha": "1fae9839c566128002867fef48f7b03a67841b98",
+      "umbrella_post_merge_manifest_run_id": 34037936580,
+      "umbrella_post_merge_verification_run_id": 34037936532
     },
     {
       "name": "systems-conformance-lab",
