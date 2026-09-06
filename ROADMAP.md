@@ -53,9 +53,9 @@ Filesystem, hypervisor, MinIOS, conformance, and userspace networking imports ar
 
 ## Phase 3 — Executable systems integration
 
-**First verified edge complete; broader integration continues.** Import verification is not integration verification.
+**Two independently verified edges complete; broader integration continues.** Import verification is not integration verification.
 
-- [ ] `mini-hypervisor` → `minios-x86`: boot a deterministic guest artifact and assert a bounded guest-visible milestone. The current imported hypervisor exposes real-mode fixtures and an ELF64/long-mode loader, while MinIOS is an ELF32 Multiboot protected-mode kernel; do not fake this edge without a reusable protected-mode guest contract.
+- [x] `mini-hypervisor` → `minios-x86`: **real-KVM early MinIOS boot**. The integration builds the real imported MinIOS ELF32 artifact, loads its `PT_LOAD` segments, enters through the hypervisor's public real-mode vCPU API, uses a guest-owned 16→32-bit protected-mode Multiboot bridge, reaches the exact `Booting Advanced OS...` kernel banner, and then requires the exact first unsupported PIC-remap `OUT 0x20` boundary. PR #18 and exact merged main both passed the permanent real-KVM gate.
 - [x] `systems-conformance-lab` → `userspace-tcpip-stack`: **TFTP parser differential conformance**. A Rust adapter invokes the imported production parser, an independent Python oracle implements the bounded grammar, and `DifferentialHarness` plus deterministic mutation scheduling permanently compare both real processes. PR #16 and exact merged main both passed the dedicated integration gate.
 - [ ] `minios-x86` ↔ `filesystem-lab`: define and test an explicit shared image/format or replay contract;
 - [ ] `minios-x86` ↔ networking: only after a concrete packet/device/driver boundary exists;
@@ -63,28 +63,28 @@ Filesystem, hypervisor, MinIOS, conformance, and userspace networking imports ar
 - [ ] additional `systems-conformance-lab` adapters against named real boundaries;
 - [ ] common top-level developer entrypoints where they do not weaken project-local build systems.
 
-The TFTP edge is intentionally narrow: it proves parser-level differential agreement for the exercised corpus and deterministic mutation schedule, not whole-stack RFC conformance or transport interoperability.
-
-The deepest next candidate remains `mini-hypervisor` → `minios-x86`, but only an executable protected-mode/Multiboot contract can advance it.
+The TFTP edge is intentionally parser-scoped. The VM/OS edge is intentionally early-boot-scoped: it proves real ELF32/Multiboot execution through `kernel_main`, but it stops at the first legacy PIC access because the imported hypervisor does not yet emulate MinIOS's PIC/PIT/keyboard/ATA platform.
 
 ## Phase 4 — Systems flagship checkpoint
 
-**Complete at the first flagship checkpoint.** The originally defined criteria are now all met:
+**Complete and strengthened beyond the minimum.** The originally defined criteria remain met:
 
 - several source histories preserved with exact merged-main CI green — **met**;
-- at least one non-trivial cross-project systems edge executable and permanently tested — **met** by the TFTP parser differential contract;
+- at least one non-trivial cross-project systems edge executable and permanently tested — **met twice**, by the TFTP differential edge and the real-KVM MinIOS early-boot edge;
 - README and machine ledgers distinguish verified edges from hypotheses — **met**;
 - original source repositories remain available — **met**;
 - no unresolved umbrella migration PR is falsely represented as completed work — **met at this checkpoint**.
 
-This status means the umbrella has crossed from verified consolidation into verified composition. It does **not** mean every source is imported or every architectural edge is complete: `mini-container-runtime` remains on HOLD, and deeper VM/OS/filesystem/network integrations remain future milestones.
+This status means the umbrella has crossed from verified consolidation into verified composition across two different architectural boundaries. It does **not** mean every source is imported or every architectural edge is complete: `mini-container-runtime` remains on HOLD, the VM/OS edge stops at the PIC boundary, and filesystem/network integrations remain future milestones.
 
 ## Phase 5 — Deeper composition
 
-- [ ] add a reusable protected-mode guest primitive only when the `mini-hypervisor` source lane is stable, then prove a deterministic MinIOS Multiboot boot milestone;
+- [ ] extend `mini-hypervisor` → `minios-x86` beyond the current exact PIC boundary only by implementing and verifying an explicit legacy-device/platform contract; never relabel early boot as full boot;
+- [ ] define a shared filesystem artifact contract and prove it through both MinIOS-side and `filesystem-lab` executable readers/writers before claiming filesystem interoperability;
+- [ ] add a concrete MinIOS networking device/packet boundary before claiming networking integration;
 - [ ] extend conformance adapters to additional named boundaries without turning the framework into target-specific logic;
-- [ ] define a shared filesystem artifact contract before claiming MinIOS/filesystem interoperability;
 - [ ] import/refresh `mini-container-runtime` only after its source implementation lane is clean, then evaluate a bounded host-network integration;
+- [ ] evaluate source-subtree refreshes independently from integration proof, preserving newly reachable history and expanded source-equivalent CI when the value justifies the migration cost;
 - [ ] keep every new edge independently machine-ledgered with exact PR and merged-main evidence.
 
 ## Non-goals
