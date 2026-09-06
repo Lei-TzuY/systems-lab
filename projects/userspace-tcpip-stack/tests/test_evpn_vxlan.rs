@@ -1,0 +1,807 @@
+//! MP-BGP EVPN over VXLAN, end to end on the leaf-spine-leaf fabric.
+//!
+//! The bar every test here has to clear: no test may write a remote MAC, a
+//! remote VTEP, or a tunnel destination into either leaf. Everything the overlay
+//! forwards on has to have arrived as an EVPN route over the real BGP session on
+//! TCP port 179, which itself crosses the real IP underlay through the spine.
+//!
+//! The fabric is built by `build_evpn_fabric`, which configures each leaf with
+//! nothing but its own VNI, RD, Route Targets and access port.
+
+mod common;
+
+use common::bgp_lab::RawBgpPeer;
+use toy_tcpip::bgp_caps::AfiSafi;
+use toy_tcpip::ethernet::{ETHERTYPE_IPV4, EtherType, EthernetFrame, MacAddress};
+use toy_tcpip::evpn::EvpnNlri;
+use toy_tcpip::icmp::{IcmpPacket, IcmpType};
+use toy_tcpip::ipv4::{IP_PROTO_UDP, Ipv4Address, Ipv4Packet};
+use toy_tcpip::lab::{VirtualLab, build_evpn_fabric};
+use toy_tcpip::udp::UdpDatagram;
+use toy_tcpip::vxlan::{VXLAN_UDP_PORT, VxlanPacket};
+
+const VNI: u32 = 5001;
+const AS1: u32 = 65001;
+const AS2: u32 = 65002;
+
+fn ip(a: u8, b: u8, c: u8, d: u8) -> Ipv4Address {
+    Ipv4Address::new(a, b, c, d)
+}
+
+const HOST_A: Ipv4Address = Ipv4Address([192, 168, 10, 11]);
+const HOST_B: Ipv4Address = Ipv4Address([192, 168, 10, 22]);
+const MAC_A: MacAddress = MacAddress([0x02, 0x00, 0x00, 0x00, 0x0A, 0x0A]);
+const MAC_B: MacAddress = MacAddress([0x02, 0x00, 0x00, 0x00, 0x0B, 0x0B]);
+const VTEP1: Ipv4Address = Ipv4Address([10, 0, 0, 1]);
+const VTEP2: Ipv4Address = Ipv4Address([10, 0, 0, 2]);
+
+/// Builds the fabric and gets both hosts talking, which is what makes each leaf
+/// learn its own local MAC and advertise it.
+fn converged_fabric() -> VirtualLab {
+    let mut lab = build_evpn_fabric(AS1, AS2);
+    // Let the BGP session come up over the underlay first.
+    lab.run_until(250, 60_000, |l| {
+        l.routers
+            .values()
+            .filter_map(|r| r.bgp())
+            .all(|b| b.peers().iter().all(|p| p.carries_evpn()))
+    });
+
+    // Host A pings host B. The first thing that produces is an ARP broadcast,
+    // which is the only way either leaf can learn anything at all.
+    let frame = lab
+        .host_mut("host_a")
+        .unwrap()
+        .stack
+        .ping4(HOST_B, 0x1234, 1, b"evpn")
+        .expect("host_a produced no frame");
+    lab.send_from_host("host_a", frame);
+    lab.run_until(250, 60_000, |_| false);
+    lab
+}
+
+fn remote_mac(lab: &VirtualLab, leaf: &str, mac: MacAddress) -> Option<Ipv4Address> {
+    lab.router(leaf)?.vtep()?.lookup_remote(VNI, &mac)
+}
+
+// ============================================================================
+// Capability negotiation and session
+// ============================================================================
+
+#[test]
+fn test_the_leaves_negotiate_evpn_over_a_multihop_session_through_the_spine() {
+    let mut lab = build_evpn_fabric(AS1, AS2);
+    assert!(
+        lab.run_until(250, 60_000, |l| l
+            .routers
+            .values()
+            .filter_map(|r| r.bgp())
+            .all(|b| b.peers().iter().all(|p| p.carries_evpn()))),
+        "the leaves never negotiated L2VPN EVPN"
+    );
+
+    for (leaf, remote_as) in [("leaf1", AS2), ("leaf2", AS1)] {
+        let bgp = lab.router(leaf).unwrap().bgp().unwrap();
+        let peer = &bgp.peers()[0];
+        assert!(peer.negotiated.supports(AfiSafi::IPV4_UNICAST));
+        assert!(peer.negotiated.supports(AfiSafi::L2VPN_EVPN));
+        assert_eq!(peer.remote_as, remote_as);
+        // The session is between the loopbacks, so every BGP segment was
+        // forwarded by the spine rather than sent over a shared wire.
+        assert!(peer.local_addr == VTEP1 || peer.local_addr == VTEP2);
+    }
+
+    // The spine carried it all without speaking BGP or knowing any VNI.
+    let spine = lab.router("spine").unwrap();
+    assert!(spine.bgp().is_none());
+    assert!(spine.vtep().is_none());
+}
+
+// ============================================================================
+// The acceptance chain
+// ============================================================================
+
+#[test]
+fn test_a_remote_mac_learned_over_bgp_programs_vxlan_forwarding() {
+    let lab = converged_fabric();
+
+    // Leaf1 advertised host A, leaf2 advertised host B, and each imported the
+    // other by Route Target. Nothing in this test wrote either entry.
+    assert_eq!(
+        remote_mac(&lab, "leaf1", MAC_B),
+        Some(VTEP2),
+        "leaf1 never learned host B through EVPN"
+    );
+    assert_eq!(
+        remote_mac(&lab, "leaf2", MAC_A),
+        Some(VTEP1),
+        "leaf2 never learned host A through EVPN"
+    );
+
+    // A leaf must not learn its own local host as a remote one.
+    assert_eq!(remote_mac(&lab, "leaf1", MAC_A), None);
+    assert_eq!(remote_mac(&lab, "leaf2", MAC_B), None);
+
+    // The remote entry carries the host IP the Type 2 route advertised.
+    let inst = lab
+        .router("leaf2")
+        .unwrap()
+        .vtep()
+        .unwrap()
+        .instance(VNI)
+        .unwrap();
+    let entry = inst.remote_macs.get(&MAC_A).unwrap();
+    assert_eq!(entry.ip, Some(HOST_A));
+    assert_eq!(entry.vtep, VTEP1);
+}
+
+#[test]
+fn test_the_evpn_route_really_travelled_as_mp_reach_nlri() {
+    let lab = converged_fabric();
+    let bgp = lab.router("leaf2").unwrap().bgp().unwrap();
+
+    let path = bgp
+        .evpn_adj_rib_in
+        .iter_paths()
+        .find(|p| p.route.mac() == Some(MAC_A))
+        .expect("no EVPN path for host A in leaf2's Adj-RIB-In");
+
+    // It came from the peer, not from local configuration.
+    assert!(!path.local);
+    assert_eq!(path.peer_addr, VTEP1);
+    assert_eq!(path.peer_as, AS1);
+    assert_eq!(path.route.next_hop, VTEP1);
+    assert_eq!(path.route.vni(), VNI);
+    assert_eq!(path.route.host_ip(), Some(HOST_A));
+    // eBGP prepended the originating AS.
+    assert_eq!(path.as_path.flatten(), vec![AS1]);
+
+    match &path.route.nlri {
+        EvpnNlri::MacIpAdv(m) => {
+            assert_eq!(m.mac, MAC_A);
+            assert_eq!(m.rd.to_string(), "10.0.0.1:5001");
+        }
+        other => panic!("expected a Type 2 route, got {:?}", other),
+    }
+
+    // And a Type 3 route from the same leaf built the flood list.
+    assert!(
+        bgp.evpn_adj_rib_in
+            .iter_paths()
+            .any(|p| matches!(p.route.nlri, EvpnNlri::InclusiveMulticast(_))),
+        "no Type 3 route arrived"
+    );
+    assert!(
+        lab.router("leaf2")
+            .unwrap()
+            .vtep()
+            .unwrap()
+            .instance(VNI)
+            .unwrap()
+            .remote_vteps
+            .contains(&VTEP1)
+    );
+
+    assert!(bgp.peers()[0].counters.evpn_received >= 2);
+    assert!(bgp.peers()[0].counters.evpn_advertised >= 2);
+}
+
+#[test]
+fn test_tenant_traffic_crosses_the_overlay_in_both_directions() {
+    let mut lab = converged_fabric();
+
+    // The ping in `converged_fabric` had to ARP first, so by now host A knows
+    // host B's MAC. Send a fresh echo request and watch it complete.
+    let frame = lab
+        .host_mut("host_a")
+        .unwrap()
+        .stack
+        .ping4(HOST_B, 0x4242, 7, b"overlay")
+        .expect("host_a produced no frame");
+    // A frame that still needed ARP would be an ARP request, not an IP packet.
+    let eth = EthernetFrame::parse(&frame).unwrap();
+    assert_eq!(
+        eth.ethertype,
+        EtherType::IPv4,
+        "host A still had to ARP: the first exchange never completed"
+    );
+    assert_eq!(eth.dst_mac, MAC_B);
+
+    lab.send_from_host("host_a", frame);
+    lab.run_until(250, 60_000, |_| false);
+
+    // Host B answered, and the answer got back.
+    let replies = &lab.host("host_a").unwrap().stack.received_icmp_replies;
+    assert!(
+        replies
+            .iter()
+            .any(|(src, id, seq)| *src == HOST_B && *id == 0x4242 && *seq == 7),
+        "no echo reply came back across the overlay; got {:?}",
+        replies
+    );
+}
+
+#[test]
+fn test_the_underlay_carried_real_vxlan_on_udp_4789() {
+    let mut lab = build_evpn_fabric(AS1, AS2);
+    lab.enable_pcap("leaf1spine");
+    lab.run_until(250, 60_000, |l| {
+        l.routers
+            .values()
+            .filter_map(|r| r.bgp())
+            .all(|b| b.peers().iter().all(|p| p.carries_evpn()))
+    });
+    let frame = lab
+        .host_mut("host_a")
+        .unwrap()
+        .stack
+        .ping4(HOST_B, 0x1234, 1, b"evpn")
+        .unwrap();
+    lab.send_from_host("host_a", frame);
+    lab.run_until(250, 60_000, |_| false);
+
+    let pcap = lab.export_pcap("leaf1spine").expect("no capture");
+    let vxlan = captured_vxlan(&pcap);
+    assert!(
+        !vxlan.is_empty(),
+        "nothing on the underlay was a VXLAN packet"
+    );
+
+    // Every VXLAN packet went between the two loopbacks and carried the tenant VNI.
+    for (src, dst, vni, inner) in &vxlan {
+        assert!(
+            (*src == VTEP1 && *dst == VTEP2) || (*src == VTEP2 && *dst == VTEP1),
+            "VXLAN between unexpected endpoints {} -> {}",
+            src,
+            dst
+        );
+        assert_eq!(*vni, VNI);
+        let eth = EthernetFrame::parse(inner).expect("inner frame is not Ethernet");
+        assert!(
+            eth.src_mac == MAC_A || eth.src_mac == MAC_B,
+            "inner frame from an unexpected MAC {}",
+            eth.src_mac
+        );
+    }
+
+    // At least one carried the tenant ICMP echo request between the tenant IPs.
+    let carried_echo = vxlan.iter().any(|(_, _, _, inner)| {
+        let Ok(eth) = EthernetFrame::parse(inner) else {
+            return false;
+        };
+        let Ok(pkt) = Ipv4Packet::parse(eth.payload, false) else {
+            return false;
+        };
+        pkt.header.src_ip == HOST_A
+            && pkt.header.dst_ip == HOST_B
+            && IcmpPacket::parse(pkt.payload, false)
+                .is_ok_and(|i| i.icmp_type == IcmpType::EchoRequest)
+    });
+    assert!(
+        carried_echo,
+        "no VXLAN packet carried the tenant echo request"
+    );
+}
+
+// ============================================================================
+// Unknown unicast and Type 3
+// ============================================================================
+
+#[test]
+fn test_a_known_unicast_is_sent_to_one_vtep_rather_than_flooded() {
+    use toy_tcpip::evpn_vtep::OverlayDecision;
+
+    let lab = converged_fabric();
+    let vtep = lab.router("leaf1").unwrap().vtep().unwrap();
+
+    assert_eq!(
+        vtep.forward("eth0", MAC_B),
+        OverlayDecision::Unicast {
+            vni: VNI,
+            vtep: VTEP2
+        },
+        "a MAC with a Type 2 route was flooded instead of sent to its VTEP"
+    );
+
+    // A MAC nothing advertised is flooded to the Type 3 list, which is the only
+    // thing that should ever produce replication.
+    let unknown = MacAddress([0x02, 0x00, 0x00, 0x00, 0xEE, 0xEE]);
+    assert_eq!(
+        vtep.forward("eth0", unknown),
+        OverlayDecision::Flood {
+            vni: VNI,
+            vteps: vec![VTEP2]
+        }
+    );
+    assert_eq!(
+        vtep.forward("eth0", MacAddress::BROADCAST),
+        OverlayDecision::Flood {
+            vni: VNI,
+            vteps: vec![VTEP2]
+        }
+    );
+}
+
+#[test]
+fn test_a_leaf_with_no_type_3_route_has_nowhere_to_flood() {
+    // Before any EVPN route arrives, a broadcast has no ingress-replication list
+    // and must be dropped rather than sent somewhere invented.
+    use toy_tcpip::evpn_vtep::OverlayDecision;
+
+    let lab = build_evpn_fabric(AS1, AS2);
+    let vtep = lab.router("leaf1").unwrap().vtep().unwrap();
+    assert_eq!(
+        vtep.forward("eth0", MacAddress::BROADCAST),
+        OverlayDecision::Drop
+    );
+}
+
+// ============================================================================
+// What this speaker puts on the wire
+// ============================================================================
+
+#[test]
+fn test_a_converged_fabric_stops_talking() {
+    // The strongest statement available about duplicate advertisement: once the
+    // overlay has converged, an idle fabric must send no further UPDATEs. A
+    // speaker that re-originated an unchanged route, or re-advertised what the
+    // Adj-RIB-Out already holds, would keep the count climbing forever.
+    let mut lab = converged_fabric();
+
+    let updates = |l: &VirtualLab| -> u64 {
+        l.routers
+            .values()
+            .filter_map(|r| r.bgp())
+            .flat_map(|b| b.peers())
+            .map(|p| p.counters.updates_sent)
+            .sum()
+    };
+    let decisions = |l: &VirtualLab| -> u64 {
+        l.routers
+            .values()
+            .filter_map(|r| r.bgp())
+            .map(|b| b.decision_runs)
+            .sum()
+    };
+
+    let before = updates(&lab);
+    let decisions_before = decisions(&lab);
+    assert!(before > 0, "the fabric never advertised anything");
+
+    // Thirty simulated seconds of nothing happening: several hold and keepalive
+    // intervals, so KEEPALIVEs still flow but no UPDATE should.
+    lab.run_until(1_000, 30_000, |_| false);
+
+    assert_eq!(
+        updates(&lab),
+        before,
+        "an idle fabric kept sending EVPN UPDATEs"
+    );
+    assert_eq!(
+        decisions(&lab),
+        decisions_before,
+        "an idle fabric kept rerunning the decision process"
+    );
+    // And it stayed up, so the silence is quiescence rather than a dead session.
+    assert!(
+        lab.routers
+            .values()
+            .filter_map(|r| r.bgp())
+            .all(|b| b.peers().iter().all(|p| p.carries_evpn()))
+    );
+    assert_eq!(remote_mac(&lab, "leaf2", MAC_A), Some(VTEP1));
+}
+
+#[test]
+fn test_a_vni_that_does_not_fit_24_bits_is_refused() {
+    use toy_tcpip::evpn::RouteDistinguisher;
+    use toy_tcpip::evpn_vtep::{MAX_VNI, Vtep};
+    use toy_tcpip::lab::evpn_rt;
+
+    let mut vtep = Vtep::new(VTEP1, "eth1");
+    let rd = RouteDistinguisher::new(VTEP1, 1);
+    let rts = [evpn_rt(65001, 1)];
+
+    // Masking would create an instance under a number nobody asked for, and the
+    // mismatch would only show up later as encapsulation quietly failing.
+    assert!(!vtep.add_instance(MAX_VNI + 1, rd.clone(), &rts, &rts));
+    assert!(!vtep.has_vni(MAX_VNI + 1));
+    assert!(!vtep.has_vni(0));
+
+    assert!(vtep.add_instance(MAX_VNI, rd, &rts, &rts));
+    assert!(vtep.has_vni(MAX_VNI));
+}
+
+#[test]
+fn test_routes_with_different_next_hops_are_never_merged_into_one_update() {
+    use toy_tcpip::bgp::BgpPdu;
+    use toy_tcpip::bgp_evpn::{EvpnRoute, RouteTarget, decode_evpn_nlri_list};
+    use toy_tcpip::evpn::RouteDistinguisher;
+
+    // Several EVPN routes may share an UPDATE, but only if everything outside
+    // the NLRI list is identical - and the next hop is part of that. It lives
+    // inside MP_REACH_NLRI beside the NLRI, so merging on "the attributes minus
+    // MP_REACH" silently drops it out of the comparison and every route in the
+    // group goes out with whichever VTEP happened to be first.
+    //
+    // Two routes with the same Route Target and the same AS_PATH, differing
+    // only in next hop, are exactly the case that would collapse.
+    let mut peer = RawBgpPeer::connect_configured(65001, 65002, ip(9, 9, 9, 9), |r| {
+        // The family has to be offered before the OPEN goes out, so it is
+        // enabled here rather than after the session is up.
+        r.bgp_mut().unwrap().enable_family(AfiSafi::L2VPN_EVPN);
+    });
+    peer.establish();
+    assert!(peer.victim_bgp().peers()[0].carries_evpn());
+
+    let rt = RouteTarget::as2(65001, VNI);
+    let far = Ipv4Address::new(10, 0, 0, 9);
+    for (m, next_hop, rd_ip) in [(MAC_A, VTEP1, VTEP1), (MAC_B, far, far)] {
+        peer.lab
+            .router_mut("victim")
+            .unwrap()
+            .bgp_mut()
+            .unwrap()
+            .originate_evpn(EvpnRoute::new(
+                EvpnNlri::build_mac_ip(RouteDistinguisher::new(rd_ip, VNI as u16), m, None, VNI),
+                next_hop,
+                vec![rt],
+            ));
+    }
+    peer.run_until(30_000, |_| false);
+
+    // Collect what each MAC was actually advertised with.
+    let mut seen: Vec<(MacAddress, Ipv4Address)> = Vec::new();
+    for m in peer.drain() {
+        let BgpPdu::Update(u) = m else { continue };
+        let Some(mp) = u.mp_reach() else { continue };
+        let next_hop = mp.ipv4_next_hop().expect("an IPv4 VTEP next hop");
+        for nlri in decode_evpn_nlri_list(&mp.nlri).unwrap() {
+            if let EvpnNlri::MacIpAdv(adv) = nlri {
+                seen.push((adv.mac, next_hop));
+            }
+        }
+    }
+
+    assert!(
+        seen.contains(&(MAC_A, VTEP1)),
+        "MAC A was not advertised with its own VTEP; saw {:?}",
+        seen
+    );
+    assert!(
+        seen.contains(&(MAC_B, far)),
+        "MAC B was advertised with the wrong VTEP; saw {:?}",
+        seen
+    );
+}
+
+// ============================================================================
+// PCAP proof
+// ============================================================================
+
+/// Captures the whole scenario on the leaf1-spine link and checks that every
+/// layer of the stack this phase claims to use is visibly present on the wire.
+///
+/// The capture is read back with this repository's own `PcapReader`, and every
+/// protocol is decoded with the repository's own parsers, so nothing here is
+/// taken on trust from the code that wrote it.
+#[test]
+fn test_the_capture_contains_the_whole_evpn_vxlan_scenario() {
+    use toy_tcpip::arp::ArpPacket;
+    use toy_tcpip::bgp::{BGP_PORT, BgpPdu};
+    use toy_tcpip::bgp_caps::AfiSafi as Af;
+    use toy_tcpip::evpn::EvpnNlri as Nlri;
+
+    let mut lab = build_evpn_fabric(AS1, AS2);
+    lab.enable_pcap("leaf1spine");
+
+    lab.run_until(250, 60_000, |l| {
+        l.routers
+            .values()
+            .filter_map(|r| r.bgp())
+            .all(|b| b.peers().iter().all(|p| p.carries_evpn()))
+    });
+    let frame = lab
+        .host_mut("host_a")
+        .unwrap()
+        .stack
+        .ping4(HOST_B, 0x9999, 3, b"capture")
+        .unwrap();
+    lab.send_from_host("host_a", frame);
+    lab.run_until(250, 60_000, |_| false);
+
+    // Long enough for a KEEPALIVE to fall due (hold 9s, so one every 3s).
+    lab.run_until(1_000, 20_000, |_| false);
+
+    // Then take host A away, which produces the withdrawal.
+    lab.router_mut("leaf1")
+        .unwrap()
+        .vtep_mut()
+        .unwrap()
+        .forget_local(VNI, &MAC_A);
+    lab.run_until(250, 30_000, |_| false);
+
+    let pcap = lab.export_pcap("leaf1spine").expect("no capture");
+    let packets = read_capture(&pcap);
+    assert!(
+        packets.len() > 10,
+        "the capture holds only {} packets",
+        packets.len()
+    );
+
+    // --- ARP: the underlay resolving the spine before anything else works ---
+    let arp = packets
+        .iter()
+        .filter(|p| p.ethertype == EtherType::Arp)
+        .filter_map(|p| ArpPacket::parse(&p.payload).ok())
+        .count();
+    assert!(arp > 0, "no ARP in the capture");
+
+    // --- TCP: a real three-way handshake to port 179 ---
+    let tcp: Vec<_> = packets
+        .iter()
+        .filter(|p| p.protocol == Some(toy_tcpip::ipv4::IpProtocol::Tcp))
+        .filter_map(|p| {
+            toy_tcpip::tcp::TcpSegment::parse(p.src, p.dst, &p.payload, false)
+                .ok()
+                .map(|s| (p.src, p.dst, s))
+        })
+        .collect();
+    assert!(
+        tcp.iter()
+            .any(|(_, _, s)| s.dst_port == BGP_PORT && s.flags.syn),
+        "no SYN to TCP port 179"
+    );
+    assert!(
+        tcp.iter()
+            .any(|(_, _, s)| s.src_port == BGP_PORT && s.flags.syn && s.flags.ack),
+        "no SYN/ACK from TCP port 179"
+    );
+
+    // --- BGP: reassembled from the captured byte stream, not from memory ---
+    let messages = bgp_stream(&packets, VTEP1, VTEP2);
+    assert!(!messages.is_empty(), "no BGP messages in the capture");
+
+    let open = messages
+        .iter()
+        .find_map(|m| match m {
+            BgpPdu::Open(o) => Some(o),
+            _ => None,
+        })
+        .expect("no OPEN in the capture");
+    let caps = open
+        .capabilities()
+        .expect("the OPEN capabilities do not parse");
+    assert!(
+        caps.supports(Af::L2VPN_EVPN),
+        "the OPEN on the wire does not advertise L2VPN EVPN"
+    );
+    assert!(caps.supports(Af::IPV4_UNICAST));
+    assert!(caps.supports_four_octet_as());
+
+    assert!(
+        messages.iter().any(|m| matches!(m, BgpPdu::Keepalive)),
+        "no KEEPALIVE in the capture"
+    );
+
+    // --- MP-BGP EVPN UPDATE, announcing a Type 2 and a Type 3 route ---
+    let announced: Vec<Nlri> = messages
+        .iter()
+        .filter_map(|m| match m {
+            BgpPdu::Update(u) => u.mp_reach(),
+            _ => None,
+        })
+        .filter(|mp| mp.family() == Af::L2VPN_EVPN)
+        .flat_map(|mp| toy_tcpip::bgp_evpn::decode_evpn_nlri_list(&mp.nlri).unwrap_or_default())
+        .collect();
+    assert!(
+        announced
+            .iter()
+            .any(|n| matches!(n, Nlri::MacIpAdv(m) if m.mac == MAC_A)),
+        "no EVPN Type 2 route for host A on the wire"
+    );
+    assert!(
+        announced
+            .iter()
+            .any(|n| matches!(n, Nlri::InclusiveMulticast(_))),
+        "no EVPN Type 3 route on the wire"
+    );
+
+    // --- EVPN withdrawal, as MP_UNREACH_NLRI ---
+    let withdrawn: Vec<Nlri> = messages
+        .iter()
+        .filter_map(|m| match m {
+            BgpPdu::Update(u) => u.mp_unreach(),
+            _ => None,
+        })
+        .filter(|mp| mp.family() == Af::L2VPN_EVPN)
+        .flat_map(|mp| toy_tcpip::bgp_evpn::decode_evpn_nlri_list(&mp.nlri).unwrap_or_default())
+        .collect();
+    assert!(
+        withdrawn
+            .iter()
+            .any(|n| matches!(n, Nlri::MacIpAdv(m) if m.mac == MAC_A)),
+        "the withdrawal of host A never reached the wire"
+    );
+
+    // --- VXLAN on UDP 4789, carrying the tenant frame ---
+    let vxlan = captured_vxlan(&pcap);
+    assert!(!vxlan.is_empty(), "no VXLAN packets in the capture");
+    let carried_tenant_ip = vxlan.iter().any(|(src, dst, vni, inner)| {
+        if *vni != VNI || *src != VTEP1 || *dst != VTEP2 {
+            return false;
+        }
+        let Ok(eth) = EthernetFrame::parse(inner) else {
+            return false;
+        };
+        eth.src_mac == MAC_A
+            && Ipv4Packet::parse(eth.payload, false)
+                .is_ok_and(|p| p.header.src_ip == HOST_A && p.header.dst_ip == HOST_B)
+    });
+    assert!(
+        carried_tenant_ip,
+        "no VXLAN packet carried the tenant IP payload from host A to host B"
+    );
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+/// One captured frame, decoded down to the IPv4 payload where there is one.
+struct Captured {
+    ethertype: EtherType,
+    src: Ipv4Address,
+    dst: Ipv4Address,
+    protocol: Option<toy_tcpip::ipv4::IpProtocol>,
+    /// The IPv4 payload, or the Ethernet payload for a non-IPv4 frame.
+    payload: Vec<u8>,
+}
+
+fn read_capture(pcap: &[u8]) -> Vec<Captured> {
+    use toy_tcpip::pcap::PcapReader;
+
+    let mut reader = PcapReader::new(std::io::Cursor::new(pcap)).expect("PcapReader");
+    let mut out = Vec::new();
+    while let Ok(Some(pkt)) = reader.next_packet() {
+        let Ok(eth) = EthernetFrame::parse(&pkt.data) else {
+            continue;
+        };
+        match eth.ethertype {
+            EtherType::IPv4 => {
+                if let Ok(ipv4) = Ipv4Packet::parse(eth.payload, false) {
+                    out.push(Captured {
+                        ethertype: EtherType::IPv4,
+                        src: ipv4.header.src_ip,
+                        dst: ipv4.header.dst_ip,
+                        protocol: Some(ipv4.header.protocol),
+                        payload: ipv4.payload.to_vec(),
+                    });
+                }
+            }
+            other => out.push(Captured {
+                ethertype: other,
+                src: Ipv4Address::UNSPECIFIED,
+                dst: Ipv4Address::UNSPECIFIED,
+                protocol: None,
+                payload: eth.payload.to_vec(),
+            }),
+        }
+    }
+    out
+}
+
+/// Reassembles the BGP messages one speaker sent, from the captured TCP segments.
+///
+/// This is the same problem the speaker's own framer solves, with two extra
+/// complications a capture brings: a retransmission appears twice, and a
+/// segment may be missing entirely if the link model dropped it. Keying by
+/// sequence number handles the first, and stopping at the first gap handles the
+/// second - a stream reassembled across a hole would decode nonsense.
+fn bgp_stream(
+    packets: &[Captured],
+    from: Ipv4Address,
+    to: Ipv4Address,
+) -> Vec<toy_tcpip::bgp::BgpPdu> {
+    use std::collections::BTreeMap;
+    use toy_tcpip::bgp::{BGP_PORT, BgpFramer, BgpPdu};
+    use toy_tcpip::tcp::TcpSegment;
+
+    let mut by_seq: BTreeMap<u32, Vec<u8>> = BTreeMap::new();
+    for p in packets {
+        if p.src != from || p.dst != to || p.protocol != Some(toy_tcpip::ipv4::IpProtocol::Tcp) {
+            continue;
+        }
+        let Ok(seg) = TcpSegment::parse(p.src, p.dst, &p.payload, false) else {
+            continue;
+        };
+        if seg.src_port != BGP_PORT && seg.dst_port != BGP_PORT {
+            continue;
+        }
+        if seg.payload.is_empty() {
+            continue;
+        }
+        by_seq.insert(seg.seq_num, seg.payload.to_vec());
+    }
+
+    let mut framer = BgpFramer::new();
+    let mut out = Vec::new();
+    let mut expect: Option<u32> = None;
+    for (seq, payload) in by_seq {
+        if expect.is_some_and(|e| e != seq) {
+            break;
+        }
+        if framer.push(&payload).is_err() {
+            break;
+        }
+        expect = Some(seq.wrapping_add(payload.len() as u32));
+        while let Ok(Some(frame)) = framer.next_frame() {
+            // The fabric negotiated 4-octet ASNs, so that is how the AS_PATH on
+            // this session is written.
+            if let Ok(pdu) = BgpPdu::parse_width(&frame, true) {
+                out.push(pdu);
+            }
+        }
+    }
+    out
+}
+
+/// Pulls `(outer src, outer dst, VNI, inner frame)` out of every VXLAN packet in
+/// a capture, using this repository's own PCAP reader.
+fn captured_vxlan(pcap: &[u8]) -> Vec<(Ipv4Address, Ipv4Address, u32, Vec<u8>)> {
+    use toy_tcpip::pcap::PcapReader;
+
+    let mut reader = PcapReader::new(std::io::Cursor::new(pcap)).expect("PcapReader");
+    let mut out = Vec::new();
+    while let Ok(Some(pkt)) = reader.next_packet() {
+        let Ok(eth) = EthernetFrame::parse(&pkt.data) else {
+            continue;
+        };
+        if eth.ethertype != EtherType::IPv4 {
+            continue;
+        }
+        let Ok(ipv4) = Ipv4Packet::parse(eth.payload, false) else {
+            continue;
+        };
+        if ipv4.header.protocol != toy_tcpip::ipv4::IpProtocol::Udp {
+            continue;
+        }
+        let Ok(udp) =
+            UdpDatagram::parse(ipv4.header.src_ip, ipv4.header.dst_ip, ipv4.payload, false)
+        else {
+            continue;
+        };
+        if udp.dst_port != VXLAN_UDP_PORT {
+            continue;
+        }
+        let Ok(vx) = VxlanPacket::parse(udp.payload) else {
+            continue;
+        };
+        out.push((
+            ipv4.header.src_ip,
+            ipv4.header.dst_ip,
+            vx.header.vni,
+            vx.inner_frame,
+        ));
+    }
+    out
+}
+
+#[test]
+fn test_the_helpers_agree_with_the_constants() {
+    // A guard on the fabric builder: if the addressing ever changes, these
+    // tests should fail here rather than mysteriously somewhere else.
+    let lab = build_evpn_fabric(AS1, AS2);
+    assert_eq!(
+        lab.router("leaf1").unwrap().vtep().unwrap().source_ip,
+        VTEP1
+    );
+    assert_eq!(
+        lab.router("leaf2").unwrap().vtep().unwrap().source_ip,
+        VTEP2
+    );
+    assert_eq!(lab.host("host_a").unwrap().stack.config.ip, HOST_A);
+    assert_eq!(lab.host("host_b").unwrap().stack.config.mac, MAC_B);
+    assert_eq!(ip(10, 0, 0, 1), VTEP1);
+    let _ = (ETHERTYPE_IPV4, IP_PROTO_UDP);
+}
