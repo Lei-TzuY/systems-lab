@@ -1,0 +1,48 @@
+name: Mini Container Runtime migration
+
+on:
+  pull_request:
+    paths:
+      - 'projects/mini-container-runtime/**'
+      - 'projects/manifest.json'
+      - '.github/workflows/mini-container-runtime.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'projects/mini-container-runtime/**'
+      - 'projects/manifest.json'
+      - '.github/workflows/mini-container-runtime.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: ${{ hashFiles('projects/mini-container-runtime/go.mod') != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: projects/mini-container-runtime/go.mod
+          cache: true
+          cache-dependency-path: projects/mini-container-runtime/go.sum
+      - name: Verify preserved source ancestry and tree identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_sha=3b96aca6d23289147fe1f21132a4503edaf19a06
+          git cat-file -e "${source_sha}^{commit}"
+          git merge-base --is-ancestor "$source_sha" HEAD
+          source_tree="$(git rev-parse "${source_sha}^{tree}")"
+          subtree_tree="$(git rev-parse HEAD:projects/mini-container-runtime)"
+          test "$source_tree" = "$subtree_tree"
+      - name: Vet
+        working-directory: projects/mini-container-runtime
+        run: go vet ./...
+      - name: Test
+        working-directory: projects/mini-container-runtime
+        run: go test ./...
