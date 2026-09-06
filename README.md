@@ -4,9 +4,9 @@ A portfolio-oriented umbrella for low-level systems projects spanning virtualiza
 
 The goal is **not** to dump similarly themed repositories into one directory or pretend that every project already composes into one operating system. Projects enter this umbrella through history-preserving migration, source-equivalent CI, and explicit integration contracts. An edge is shown as verified only when an executable regression proves it.
 
-## Five-import checkpoint
+## Six-import checkpoint
 
-Five source histories are independently imported and verified:
+Six source histories are independently imported and verified:
 
 | Project | Systems layer | Status |
 | --- | --- | --- |
@@ -15,7 +15,7 @@ Five source histories are independently imported and verified:
 | [filesystem-lab](https://github.com/Lei-TzuY/filesystem-lab) | filesystem / storage semantics | **IMPORTED / VERIFIED** — source `1414e9fc...`, subtree `8b2d286e...` |
 | [systems-conformance-lab](https://github.com/Lei-TzuY/systems-conformance-lab) | differential/fuzz/fault/repro correctness substrate | **IMPORTED / VERIFIED** — source `b7df22b7...`, subtree `3ba8a9c3...` |
 | [userspace-tcpip-stack](https://github.com/Lei-TzuY/userspace-tcpip-stack) | userspace networking / protocols | **IMPORTED / VERIFIED** — source `2e4a58c0...`, subtree `24b53760...` |
-| [mini-container-runtime](https://github.com/Lei-TzuY/mini-container-runtime) | Linux namespaces/cgroups/process lifecycle | **HOLD** — draft implementation PR #392 active |
+| [mini-container-runtime](https://github.com/Lei-TzuY/mini-container-runtime) | Linux namespaces/cgroups/process lifecycle | **IMPORTED / VERIFIED** — source `3b96aca6...`, subtree `8dda315c...` |
 
 Each verified import is a non-squashed subtree migration whose exact source commit remains reachable as Git ancestry and whose imported subtree was checked for exact tree equality. Permanent migration workflows are read-only and repeat source-equivalent validation on pull requests and exact merged main.
 
@@ -97,14 +97,15 @@ Every arrow labeled `future` is an architecture hypothesis, **not** a current in
 - `minios-x86`: source `e63d4218ea91069506b05944ead5a9198bf8568a`; subtree `56fec38f4af154e8c8dd7a993dcf70327c4ad7d0`; PR #9 and exact merged-main build/static/QEMU/ASan/UBSan/stress-mutant gates passed.
 - `systems-conformance-lab`: source `b7df22b7004838b55054ec3d8d7b7a3b34df8137`; subtree `3ba8a9c3adbddb39121b82691a93573286d555e3`; PR #11 and exact merged-main ancestry/tree plus Ubuntu/macOS/Windows × Python 3.11/3.13 `pytest` + `ruff` matrix passed.
 - `userspace-tcpip-stack`: source `2e4a58c027a18a4c3dc1d466d3adbe8b13550a0d`; subtree `24b537605193adf21b20849255eff3279ae26f7a`; PR #14 and exact merged-main ancestry/tree, rustfmt, Clippy, Ubuntu/macOS/Windows all-target tests + doctests + release builds, and Rust 1.88 MSRV gates passed.
+- `mini-container-runtime`: source `3b96aca6d23289147fe1f21132a4503edaf19a06`; subtree `8dda315c9af7d5710de0e6b63ca4bf4e5155ad1b`; PR #21 and exact merged-main ancestry/tree, `go vet ./...`, and `go test ./...` gates passed.
 
 `projects/manifest.json` remains the machine-checked import evidence ledger. Pull requests and `main` validate both the project-import ledger and the independent integration ledger.
 
 ## Flagship checkpoint
 
-The original Phase 4 flagship criteria remain met and the architecture has moved beyond the minimum: five histories are preserved with exact merged-main CI and there are now **two non-trivial verified cross-project edges**, one correctness/protocol edge and one virtualization/OS real-KVM edge.
+The original Phase 4 flagship criteria remain met and the architecture has moved beyond the minimum: all six selected source histories are preserved with exact merged-main CI and there are now **two non-trivial verified cross-project edges**, one correctness/protocol edge and one virtualization/OS real-KVM edge.
 
-That makes this a stronger **Systems flagship checkpoint**, not the end state of the repository. Deeper work still includes extending the VM/OS contract beyond the first unsupported PIC access, defining a real filesystem artifact contract, integrating networking through a concrete device/packet boundary, and importing `mini-container-runtime` only after its source lane becomes stable.
+That makes this a stronger **Systems flagship checkpoint**, not the end state of the repository. Deeper work still includes extending the VM/OS contract beyond the first unsupported PIC access, defining a real filesystem artifact contract, integrating networking through a concrete device/packet boundary, and evaluating a bounded container/network edge from the now verified Container import.
 
 ## Migration and integration invariants
 

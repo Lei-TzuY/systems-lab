@@ -10,7 +10,7 @@ This document is the durable preflight, migration, and cross-project integration
 - **IMPORTED / VERIFIED** — non-squashed source history is retained as umbrella ancestry, selected tree matches source, and source-equivalent umbrella CI is green.
 - **INTEGRATION VERIFIED** — an executable cross-project contract is permanently tested in addition to import verification.
 
-## Candidate ledger — five-import checkpoint 2026-09-06
+## Candidate ledger — six-import checkpoint 2026-09-06
 
 | Project | Layer | Frozen / observed source | Source CI evidence | Status / blocker |
 | --- | --- | --- | --- | --- |
@@ -19,7 +19,7 @@ This document is the durable preflight, migration, and cross-project integration
 | `filesystem-lab` | filesystem/storage | `1414e9fc4646b6c482d23d0741a0e420e8fd396c` | CI `33971985113` | **IMPORTED / VERIFIED** |
 | `systems-conformance-lab` | cross-cutting correctness | `b7df22b7004838b55054ec3d8d7b7a3b34df8137` | CI `33974760080` | **IMPORTED / VERIFIED** |
 | `userspace-tcpip-stack` | userspace networking/protocols | `2e4a58c027a18a4c3dc1d466d3adbe8b13550a0d` | Rust CI `34024025353` + Clippy `34024025409` | **IMPORTED / VERIFIED** |
-| `mini-container-runtime` | Linux container/process isolation | observed `b660e8d14aebf181e29ad844c18f7133ad0334ea` | prior source evidence successful | **HOLD** — draft implementation PR #392 active |
+| `mini-container-runtime` | Linux container/process isolation | `3b96aca6d23289147fe1f21132a4503edaf19a06` | Tests `34037281275` | **IMPORTED / VERIFIED** |
 
 Every future import or refresh is rechecked immediately before execution; historical green evidence never overrides a moving head, active implementation PR, or new failure.
 
@@ -121,6 +121,29 @@ The source was not frozen while PR #330 was red or active. Its checked PTP trans
 - exact merged main passed manifest `34025487651` and Userspace TCP/IP migration `34025487653`, repeating all seven migration jobs successfully.
 
 The permanent TCP/IP workflow is read-only. This import proves preserved history, exact tree identity, and source-equivalent standalone correctness only. It does **not** prove a MinIOS network stack, container-network integration, TAP/TUN interoperability, or any other cross-project networking edge.
+
+## Completed import 6 — `mini-container-runtime`
+
+Frozen source: `3b96aca6d23289147fe1f21132a4503edaf19a06` after source PR #392 completed OCI Entrypoint/Cmd run admission and the public rootfs-only CLI path.
+
+### Pre-import evidence
+
+- exact source-main Tests `34037281275` success with `go vet ./...` and `go test ./...`;
+- zero open source PRs at freeze and again inside bootstrap;
+- configured full-history attribution searches returned no configured disallowed matches;
+- no `.gitmodules` declaration or obvious committed top-level build/cache payload was observed.
+
+### History and umbrella evidence
+
+- bootstrap `34037630438` rechecked exact source main and zero open PRs before importing;
+- subtree commit `8dda315c9af7d5710de0e6b63ca4bf4e5155ad1b` has exact source `3b96aca6d23289147fe1f21132a4503edaf19a06` as second parent;
+- imported subtree tree `85ddb78af539a8821fa37922036079db07e3b586` exactly equals the frozen source tree;
+- temporary write-capable bootstrap workflow and trigger were removed before the import PR;
+- import PR #21 head `fd4fb843bf7d42654dfa219e4ab48fa9559b4975` passed manifest `34037860520` and Container migration `34037860577`, including preserved ancestry/tree, Vet, and Test;
+- PR #21 normal-merged as `1fae9839c566128002867fef48f7b03a67841b98`;
+- exact merged main passed manifest `34037936580` and Container migration `34037936532`, repeating ancestry/tree, `go vet ./...`, and `go test ./...`.
+
+The permanent Container workflow is read-only. This import verifies a Linux-host container runtime checkpoint; it does **not** claim MinIOS compatibility or userspace-TCP/IP namespace/TAP/TUN integration.
 
 ## Verified integration 1 — TFTP parser differential conformance
 
