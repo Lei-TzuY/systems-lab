@@ -18,3 +18,5 @@ jobs:
           python-version: "3.13"
       - name: Validate migration manifest
         run: python scripts/validate_manifest.py
+      - name: Validate integration manifest
+        run: python scripts/validate_integrations.py
