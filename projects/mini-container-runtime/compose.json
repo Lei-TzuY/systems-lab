@@ -1,0 +1,16 @@
+{
+  "version": "1.0",
+  "services": {
+    "web-server": {
+      "image": "./rootfs",
+      "command": ["/bin/nc", "-l", "-p", "8080"],
+      "hostname": "web-srv",
+      "workdir": "/",
+      "overlay": true,
+      "environment": {
+        "ENV": "production",
+        "PORT": "8080"
+      }
+    }
+  }
+}

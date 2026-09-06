@@ -1,0 +1,25 @@
+# Binaries and build artifacts
+/minictl
+minictl.exe
+/bin/
+/build/
+/rootfs/
+*.exe
+*.test
+*.out
+coverage.out
+*.tar
+*.tar.gz
+
+# Runtime state / temporary containers
+.minicontainer/
+*.log
+/tmp/
+
+# OS / IDE files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
