@@ -44,7 +44,7 @@ Frozen source: `d32685b5453c3d1ae86ff76d0beac2b4af47094f` after source PR #94 wa
 - final import PR #6 head `238a8695f00515ad1540fa847fbbedab880776db` passed manifest `33973305830` and verification `33973305829`;
 - normal merge `f436b8863a688fcc34300577263d7dab7d00407f` passed exact merged-main manifest `33973353798` and hypervisor verification `33973353484`.
 
-The permanent gate covers format, Clippy, tests, build, rustdoc, the source Rust 1.74 shipped-target contract, and strict real-KVM virtio-blk INTx proof. No hypervisor → MinIOS guest compatibility is claimed.
+The permanent gate covers format, Clippy, tests, build, rustdoc, the source Rust 1.74 shipped-target contract, and strict real-KVM virtio-blk INTx proof. Import verification alone did not claim hypervisor → MinIOS compatibility; that claim is separately bounded by Verified integration 2 below.
 
 ## Completed import 3 — `minios-x86`
 
@@ -69,7 +69,7 @@ Before freezing, source PR #35 was repaired rather than imported around a known 
 - PR #9 normal-merged as `2ba4b6cb2b394456df5319e7b9c980ae493aace2`;
 - exact merged main passed manifest `33975669912` and MinIOS verification `33975669767`, repeating build, static analysis, QEMU/native regression, ASan/UBSan, and stress-mutant proof.
 
-The temporary write-capable bootstrap workflow and trigger were removed before the import PR. The permanent MinIOS workflow is read-only. No VM/filesystem/network interoperability is claimed by import verification.
+The temporary write-capable bootstrap workflow and trigger were removed before the import PR. The permanent MinIOS workflow is read-only. Import verification itself does not imply VM/filesystem/network interoperability.
 
 ## Completed import 4 — `systems-conformance-lab`
 
@@ -147,7 +147,33 @@ The reviewed corpus covers valid and malformed RRQ/WRQ, DATA, ACK and ERROR pack
 
 This is an **INTEGRATION VERIFIED** edge only for the parser semantics exercised by that contract. It does not claim whole-stack or whole-RFC TFTP conformance, UDP/socket transport, file-transfer/server behavior, MinIOS networking, container networking, security, performance, or correctness of unrelated protocols.
 
-`integrations/manifest.json` records this edge separately from project import state. `scripts/validate_integrations.py` cross-checks participant source SHAs against the import ledger, requires existing integration/workflow paths, and requires explicit scope, limitations, PR evidence and exact merged-main evidence.
+## Verified integration 2 — `mini-hypervisor` → MinIOS real-KVM early boot
+
+Participants:
+
+- `mini-hypervisor@d32685b5453c3d1ae86ff76d0beac2b4af47094f`;
+- `minios-x86@e63d4218ea91069506b05944ead5a9198bf8568a`.
+
+Boundary: `integrations/hypervisor-minios-boot/`.
+
+This edge uses the already imported, frozen project versions; no source-subtree refresh or source modification is part of the proof. The workflow builds the real MinIOS `kernel.bin` ELF32 artifact, parses and loads its `PT_LOAD` segments into 64 MiB of registered KVM guest memory, installs a minimal Multiboot v1 memory-info structure, and writes the real ELF entry point into a bounded low-memory handoff slot. vCPU0 starts through the imported hypervisor's public real-mode API at a guest-owned bridge. The bridge installs a flat GDT, enables CR0.PE, performs a 16-bit → 32-bit far jump, sets `EAX=0x2BADB002` and `EBX` to the Multiboot-info GPA, and jumps to the real MinIOS entry.
+
+The proof then captures MinIOS's existing port-`0xE9` debug console through the imported hypervisor `PortIoBus`. Success requires the exact banner `Booting Advanced OS...\n`, followed by the exact first unsupported hardware boundary from MinIOS `idt_install()`: one-byte `OUT 0x20` with count 1. Triple faults, wrong entries, malformed ELF loads, missing/wrong banners, other unsupported ports, or normal termination cannot satisfy the contract.
+
+### Integration evidence
+
+- integration PR #18 final head `b5299b6a06fe1d4ee0a89bb03b9c91128c2c3d98`;
+- exact PR-head umbrella manifest `34035518088` success;
+- exact PR-head Hypervisor MinIOS boot integration `34035518070` success, including real MinIOS build, bridge build, Rust 1.74 rustfmt/Clippy/build and real `/dev/kvm` execution;
+- PR #18 normal-merged as `0f33fc597b4930e3586d9ba32c636c20e3c9c0b3`;
+- exact merged-main umbrella manifest `34035659029` success;
+- exact merged-main Hypervisor MinIOS boot integration `34035659001` success;
+- exact merged-main KVM log reported MinIOS ELF32 entry `0x10000c`, 3 `PT_LOAD` segments, Multiboot magic `0x2badb002`, debug proof `Booting Advanced OS...\n`, exact boundary `OUT port=0x20 size=1 count=1`, and final `VERIFIED` marker;
+- permanent `.github/workflows/hypervisor-minios-boot.yml` is read-only and retriggers when the integration or either participating imported subtree changes.
+
+This is an **INTEGRATION VERIFIED** edge only for early MinIOS boot through the first intentionally unsupported legacy PIC I/O access. It does not claim PIC/PIT/keyboard/ATA emulation, interrupt delivery, a shell or userspace session, filesystem/network interoperability, security, performance, or a complete MinIOS boot.
+
+`integrations/manifest.json` records both verified edges separately from project import state. `scripts/validate_integrations.py` cross-checks participant source SHAs against the import ledger, requires existing integration/workflow paths, and requires explicit scope, limitations, PR evidence and exact merged-main evidence.
 
 ## Current HOLD lane
 
@@ -182,13 +208,16 @@ For refreshes, use a non-squashed `git subtree pull` and separately audit newly 
 
 ## Integration evidence rule
 
-The current checkpoint verifies **five imports and one cross-project integration edge**. Import verification and integration verification remain separate claims.
+The current checkpoint verifies **five imports and two cross-project integration edges**. Import verification and integration verification remain separate claims.
 
 A verified edge needs a named artifact/protocol/device/process boundary, deterministic setup where practical, executable assertions, honest platform constraints, and claims no broader than the exercised contract. Each verified edge is recorded in `integrations/manifest.json` with pinned participant source SHAs, exact PR and merged-main evidence, verification contract and limitations.
 
-The first verified edge is `systems-conformance-lab` → `userspace-tcpip-stack` for TFTP parser differential conformance. The deeper `mini-hypervisor` → `minios-x86` edge remains unverified because the current imported hypervisor's reusable public boot paths do not provide the protected-mode/Multiboot contract required by MinIOS; the existing ELF64/long-mode path must not be treated as equivalent.
+The two verified edges intentionally cover distinct architectural surfaces:
 
-The originally defined Phase 4 criteria are now met, so the umbrella may claim its **first Systems flagship checkpoint**. This is a milestone, not a terminal state: additional imports and deeper executable edges remain open work.
+1. `systems-conformance-lab` → `userspace-tcpip-stack`: TFTP parser differential conformance through real subprocess execution and deterministic mutation scheduling.
+2. `mini-hypervisor` → `minios-x86`: real-KVM ELF32/Multiboot early kernel boot through the exact first unsupported PIC-remap I/O boundary.
+
+The originally defined Phase 4 criteria remain met, so the umbrella may claim a strengthened **Systems flagship checkpoint**. This is a milestone, not a terminal state: `mini-container-runtime` remains on HOLD, the VM/OS edge deliberately stops at the PIC boundary, and filesystem/network/device integrations remain open work.
 
 ## Original repository policy
 

@@ -21,20 +21,36 @@ Each verified import is a non-squashed subtree migration whose exact source comm
 
 No source repository is deleted as part of consolidation.
 
-## First verified cross-project integration
+## Verified cross-project integrations
 
-`systems-conformance-lab` → `userspace-tcpip-stack` now has one deliberately narrow executable edge: **TFTP parser differential conformance**.
+The umbrella now has **two independently verified executable edges**. They intentionally exercise different kinds of composition rather than multiplying cosmetic arrows.
 
-The integration under `integrations/tftp-conformance/` links a Rust process adapter directly to the imported `toy_tcpip::tftp::TftpPacket::parse` implementation. An independent Python oracle parses the same bytes. `systems-conformance-lab` drives both as real subprocess targets through `DifferentialHarness`, first across a reviewed valid/malformed corpus and then across the complete deterministic single-bit mutation schedule for representative RRQ, ACK, and ERROR seeds.
+### 1. `systems-conformance-lab` → `userspace-tcpip-stack`
+
+The bounded contract is **TFTP parser differential conformance**. `integrations/tftp-conformance/` links a Rust process adapter directly to the imported `toy_tcpip::tftp::TftpPacket::parse` implementation. An independent Python oracle parses the same bytes. `systems-conformance-lab` drives both as real subprocess targets through `DifferentialHarness`, first across a reviewed valid/malformed corpus and then across the complete deterministic single-bit mutation schedule for representative RRQ, ACK, and ERROR seeds.
 
 Evidence:
 
 - integration PR #16 exact head `f2dc8bae2e77dfde0d14b428ac3e782717b3a264` passed umbrella manifest `34029446301` and TFTP conformance `34029446281`;
 - PR #16 was normal-merged as `a38b878a28b80c08e2e034210dcbf1377b578df0`;
-- exact merged main passed umbrella manifest `34029528608` and TFTP conformance `34029528620`;
-- the permanent integration workflow is read-only and retriggers when the integration, TCP/IP subtree, or conformance subtree changes.
+- exact merged main passed umbrella manifest `34029528608` and TFTP conformance `34029528620`.
 
-This is **not** a whole-stack networking claim. It does not prove UDP/socket transport, TFTP file transfer/server behavior, MinIOS networking, container networking, security, performance, or protocols outside the exercised TFTP parser boundary.
+This is not a whole-stack networking claim. It does not prove UDP/socket transport, TFTP file transfer/server behavior, MinIOS networking, container networking, security, performance, or protocols outside the exercised parser boundary.
+
+### 2. `mini-hypervisor` → `minios-x86`
+
+The bounded contract is **real-KVM early MinIOS kernel boot through the first intentionally unsupported legacy PIC access**. `integrations/hypervisor-minios-boot/` builds the real imported MinIOS ELF32 `kernel.bin`, parses and loads its `PT_LOAD` segments into guest RAM, installs a minimal Multiboot v1 memory-info structure, and starts vCPU0 through the imported mini-hypervisor public real-mode API. A guest-owned bridge installs a flat GDT, switches 16-bit real mode to 32-bit protected mode, sets `EAX=0x2BADB002` and `EBX` to the Multiboot info, then jumps to the real MinIOS ELF entry.
+
+The real KVM execution must emit the exact debug-port banner `Booting Advanced OS...\n` and then stop at the exact first unsupported MinIOS PIC-remap boundary: `OUT 0x20`, size 1, count 1. That proves the ELF loader, real→protected transition, Multiboot handoff, `_start`, stack setup, `kernel_main`, VGA initialization and early kernel control flow actually executed under KVM.
+
+Evidence:
+
+- integration PR #18 exact head `b5299b6a06fe1d4ee0a89bb03b9c91128c2c3d98` passed umbrella manifest `34035518088` and Hypervisor MinIOS boot integration `34035518070`;
+- PR #18 was normal-merged as `0f33fc597b4930e3586d9ba32c636c20e3c9c0b3`;
+- exact merged main passed umbrella manifest `34035659029` and Hypervisor MinIOS boot integration `34035659001`;
+- exact merged-main real-KVM output reported ELF32 entry `0x10000c`, 3 `PT_LOAD` segments, Multiboot magic `0x2badb002`, the exact boot banner, and the exact `OUT 0x20` boundary.
+
+This is **not** a full MinIOS boot. It does not claim PIC/PIT/keyboard/ATA emulation, interrupts, shell/userspace execution, filesystem/network interoperability, security, or performance.
 
 `integrations/manifest.json` is the machine-checked edge ledger. `scripts/validate_integrations.py` requires each verified edge to name at least two verified imported participants, pin their imported source SHAs, point to an existing integration path and workflow, and retain PR plus exact merged-main evidence and explicit scope/limitations.
 
@@ -43,21 +59,17 @@ This is **not** a whole-stack networking claim. It does not prove UDP/socket tra
 ```text
                     cross-cutting correctness
                 systems-conformance-lab
-                    │              ╲
-                    │               ╲ VERIFIED, narrow
-                    │                ╲ TFTP parser differential contract
-                    │                 ╲
-                    │                  ▼
-                    │          userspace-tcpip-stack
-                    │
-                    │ future target adapters
-                    ▼
-              other systems boundaries
+                         │
+                         │ VERIFIED, narrow
+                         │ TFTP parser differential contract
+                         ▼
+                userspace-tcpip-stack
 
                    virtualization layer
                     mini-hypervisor
                           │
-                          │ future verified guest contract
+                          │ VERIFIED, bounded real-KVM
+                          │ ELF32 + Multiboot early boot
                           ▼
                      minios-x86
                  kernel / OS services
@@ -76,7 +88,7 @@ Linux-host systems lane
                host-facing protocol/data-plane experiments
 ```
 
-Every arrow labeled `future` is an architecture hypothesis, **not** a current interoperability claim. The only currently verified cross-project edge is the explicitly bounded TFTP parser differential contract above. `mini-container-runtime` remains a Linux-host lane rather than being falsely placed inside `minios-x86`.
+Every arrow labeled `future` is an architecture hypothesis, **not** a current interoperability claim. The two arrows labeled `VERIFIED` have permanent executable workflows and exact PR plus merged-main evidence. `mini-container-runtime` remains a Linux-host lane rather than being falsely placed inside `minios-x86`.
 
 ## Verified migration evidence
 
@@ -90,9 +102,9 @@ Every arrow labeled `future` is an architecture hypothesis, **not** a current in
 
 ## Flagship checkpoint
 
-The original Phase 4 flagship criteria are now met: multiple histories are preserved with exact merged-main CI, one non-trivial cross-project edge is executable and permanently tested, verified edges are distinguished from hypotheses in both human and machine ledgers, original source repositories remain available, and no unresolved umbrella migration PR is represented as completed work.
+The original Phase 4 flagship criteria remain met and the architecture has moved beyond the minimum: five histories are preserved with exact merged-main CI and there are now **two non-trivial verified cross-project edges**, one correctness/protocol edge and one virtualization/OS real-KVM edge.
 
-That makes this the **first Systems flagship checkpoint**, not the end state of the repository. Deeper edges remain open work; in particular, `mini-hypervisor` → `minios-x86` still requires a real protected-mode/Multiboot guest contract rather than forcing the current ELF64/long-mode path to impersonate compatibility.
+That makes this a stronger **Systems flagship checkpoint**, not the end state of the repository. Deeper work still includes extending the VM/OS contract beyond the first unsupported PIC access, defining a real filesystem artifact contract, integrating networking through a concrete device/packet boundary, and importing `mini-container-runtime` only after its source lane becomes stable.
 
 ## Migration and integration invariants
 
