@@ -20,10 +20,18 @@ fn field_token(field: &'static str) -> &'static str {
 fn canonical_packet(packet: TftpPacket) -> String {
     match packet {
         TftpPacket::Rrq { filename, mode } => {
-            format!("ok|rrq|{}|{}", hex(filename.as_bytes()), hex(mode.as_bytes()))
+            format!(
+                "ok|rrq|{}|{}",
+                hex(filename.as_bytes()),
+                hex(mode.as_bytes())
+            )
         }
         TftpPacket::Wrq { filename, mode } => {
-            format!("ok|wrq|{}|{}", hex(filename.as_bytes()), hex(mode.as_bytes()))
+            format!(
+                "ok|wrq|{}|{}",
+                hex(filename.as_bytes()),
+                hex(mode.as_bytes())
+            )
         }
         TftpPacket::Data { block_num, data } => {
             format!("ok|data|{block_num}|{}", hex(&data))
