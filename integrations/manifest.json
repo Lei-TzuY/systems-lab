@@ -73,6 +73,42 @@
         "does not claim a complete MinIOS boot or interactive userspace session",
         "does not make security or performance claims"
       ]
+    },
+    {
+      "name": "filesystem-directory-record-differential-conformance",
+      "status": "integration-verified",
+      "participants": [
+        "systems-conformance-lab",
+        "filesystem-lab"
+      ],
+      "participant_source_shas": {
+        "systems-conformance-lab": "b7df22b7004838b55054ec3d8d7b7a3b34df8137",
+        "filesystem-lab": "1414e9fc4646b6c482d23d0741a0e420e8fd396c"
+      },
+      "target_path": "integrations/filesystem-directory-conformance",
+      "workflow_path": ".github/workflows/filesystem-directory-conformance.yml",
+      "scope": "Real-process differential conformance for the imported filesystem-lab persisted DNT1 directory-entry decoder against an independent Python oracle. The contract compares canonical decoded parent/target/name results and stable error classes across reviewed valid/malformed records and exhausts deterministic single-bit mutations of two valid persisted records.",
+      "pr_number": 23,
+      "pr_head_sha": "93aaeb22c7f2ea7e9f0b73b98caeb4168c740c49",
+      "pr_manifest_run_id": 34063201170,
+      "pr_verification_run_id": 34063201197,
+      "merged_umbrella_sha": "637ad2012d22058d961825bae2b07bac5f595de3",
+      "umbrella_post_merge_manifest_run_id": 34063294027,
+      "umbrella_post_merge_verification_run_id": 34063294035,
+      "verification_contract": [
+        "Rust 1.81 adapter formatting and Clippy -D warnings",
+        "build the real-process adapter directly against the imported filesystem-lab crate",
+        "ruff-check the independent Python oracle and differential tests",
+        "DifferentialHarness executes the Rust filesystem candidate and Python oracle as real subprocess targets",
+        "reviewed ASCII, Unicode, max-length, torn, trailing, reserved-field, zero-inode, invalid-UTF-8, invalid-component, and checksum-corruption cases must produce equivalent canonical results",
+        "DeterministicByteMutations plus run_fuzz_campaign must exhaust all configured single-bit mutations of two valid persisted records without a mismatch or infrastructure failure"
+      ],
+      "limitations": [
+        "proves only the persisted DNT1 directory-record codec semantics exercised by this contract",
+        "does not claim complete filesystem image or on-disk-format interoperability",
+        "does not prove journal, recovery, crash-consistency, or MinIOS filesystem integration",
+        "does not make security or performance claims"
+      ]
     }
   ]
 }
