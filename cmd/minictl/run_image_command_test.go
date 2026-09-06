@@ -79,3 +79,34 @@ func TestImageCommandForRootFSRejectsConflictingMetadata(t *testing.T) {
 		t.Fatalf("error = %v, want conflict", err)
 	}
 }
+
+func TestRootFSOnlyRunConfigResolvesImageDefaults(t *testing.T) {
+	st, err := state.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer st.Close()
+
+	rootfs := t.TempDir()
+	if err := st.SaveImage(&state.Image{Name: "example:latest", RootFS: rootfs, LoadedAt: time.Now()}); err != nil {
+		t.Fatalf("SaveImage() error = %v", err)
+	}
+	if err := st.SaveImageCommand("example:latest", state.ImageCommand{
+		Entrypoint: []string{"/bin/app"},
+		Cmd:        []string{"serve", "--foreground"},
+	}); err != nil {
+		t.Fatalf("SaveImageCommand() error = %v", err)
+	}
+
+	cfg, err := parseRunConfig([]string{rootfs})
+	if err != nil {
+		t.Fatalf("parseRunConfig rootfs-only error = %v", err)
+	}
+	got, err := imageCommandForRootFS(st, cfg.RootFS, cfg.Command)
+	if err != nil {
+		t.Fatalf("imageCommandForRootFS() error = %v", err)
+	}
+	if want := []string{"/bin/app", "serve", "--foreground"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("resolved command = %#v, want %#v", got, want)
+	}
+}

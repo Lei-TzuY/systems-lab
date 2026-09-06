@@ -40,7 +40,7 @@ const usage = `
 minictl — a minimal Linux container runtime (educational)
 
 Usage:
-  minictl run     [flags] <rootfs-dir> <command> [args...]   Launch a new container
+  minictl run     [flags] <rootfs-dir> [command [args...]]  Launch a new container
   minictl build   -t <tag> [-f Dockerfile] <context-dir>       Build image from Dockerfile
   minictl exec    <id> <command> [args...]                    Run command in a container
   minictl top     <id>                                        List processes inside a container
@@ -252,7 +252,7 @@ func cmdRun(args []string) {
 	cfg, err := parseRunConfig(args)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		fmt.Fprintln(os.Stderr, "Usage: minictl run [flags] <rootfs-dir> <command> [args...]")
+		fmt.Fprintln(os.Stderr, "Usage: minictl run [flags] <rootfs-dir> [command [args...]]")
 		os.Exit(1)
 	}
 
@@ -1505,8 +1505,8 @@ func parseRunConfig(args []string) (container.Config, error) {
 	}
 
 	rest := fs.Args()
-	if len(rest) < 2 {
-		return container.Config{}, fmt.Errorf("missing rootfs or command")
+	if len(rest) < 1 {
+		return container.Config{}, fmt.Errorf("missing rootfs")
 	}
 
 	memoryBytes, err := parseByteSize(*memory)

@@ -178,3 +178,26 @@ func TestCmdRunLeavesGenerationLifecycleToRuntime(t *testing.T) {
 		t.Fatalf("cmdRun no longer publishes the CLI create event")
 	}
 }
+
+func TestParseRunConfigAllowsRootFSOnlyForImageDefaults(t *testing.T) {
+	cfg, err := parseRunConfig([]string{"./rootfs"})
+	if err != nil {
+		t.Fatalf("parseRunConfig rootfs-only returned error: %v", err)
+	}
+	if cfg.RootFS != "./rootfs" {
+		t.Fatalf("RootFS = %q, want ./rootfs", cfg.RootFS)
+	}
+	if len(cfg.Command) != 0 {
+		t.Fatalf("Command = %#v, want empty so image defaults can resolve it", cfg.Command)
+	}
+}
+
+func TestParseRunConfigStillRequiresRootFS(t *testing.T) {
+	_, err := parseRunConfig(nil)
+	if err == nil {
+		t.Fatal("parseRunConfig(nil) succeeded, want missing-rootfs error")
+	}
+	if !strings.Contains(err.Error(), "missing rootfs") {
+		t.Fatalf("parseRunConfig(nil) error = %q, want missing rootfs", err)
+	}
+}
