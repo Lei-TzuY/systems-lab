@@ -1,0 +1,9 @@
+[package]
+name = "filesystem-directory-conformance-adapter"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.81"
+publish = false
+
+[dependencies]
+filesystem-lab = { path = "../../projects/filesystem-lab" }
