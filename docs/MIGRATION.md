@@ -1,6 +1,6 @@
 # Systems Lab Migration Protocol & Ledger
 
-This document is the durable preflight and migration evidence ledger for `systems-lab`.
+This document is the durable preflight, migration, and cross-project integration evidence ledger for `systems-lab`.
 
 ## Status vocabulary
 
@@ -94,7 +94,7 @@ The source is treated as target-independent correctness infrastructure: differen
 - PR #11 normal-merged as `7f639e3ec6e12f14a370e874faad837409c0ccec`;
 - exact merged main passed manifest `33976275067` and Conformance migration `33976275089`, repeating the same history/tree and six-cell source-equivalent matrix.
 
-The permanent Conformance workflow is read-only. No conformance → target integration is claimed until a named adapter and executable regression exercise a real boundary.
+The permanent Conformance workflow is read-only. No conformance → target integration is implied by the import itself.
 
 ## Completed import 5 — `userspace-tcpip-stack`
 
@@ -121,6 +121,33 @@ The source was not frozen while PR #330 was red or active. Its checked PTP trans
 - exact merged main passed manifest `34025487651` and Userspace TCP/IP migration `34025487653`, repeating all seven migration jobs successfully.
 
 The permanent TCP/IP workflow is read-only. This import proves preserved history, exact tree identity, and source-equivalent standalone correctness only. It does **not** prove a MinIOS network stack, container-network integration, TAP/TUN interoperability, or any other cross-project networking edge.
+
+## Verified integration 1 — TFTP parser differential conformance
+
+Participants:
+
+- `systems-conformance-lab@b7df22b7004838b55054ec3d8d7b7a3b34df8137`;
+- `userspace-tcpip-stack@2e4a58c027a18a4c3dc1d466d3adbe8b13550a0d`.
+
+Boundary: `integrations/tftp-conformance/`.
+
+The candidate is a Rust process adapter linked directly to the imported `toy_tcpip` crate and invoking `toy_tcpip::tftp::TftpPacket::parse`. The oracle is an independent Python implementation of the deliberately bounded parser grammar. `systems-conformance-lab` runs both through `CommandTarget`/`DifferentialHarness` as real subprocesses and uses `DeterministicByteMutations` plus `run_fuzz_campaign` to exhaust the configured representative single-bit mutation schedule.
+
+The reviewed corpus covers valid and malformed RRQ/WRQ, DATA, ACK and ERROR packets, including C-string termination, case-insensitive transfer modes, UTF-8 failures, trailing data, exact ACK length, unknown opcodes and the 512-byte DATA limit.
+
+### Integration evidence
+
+- integration PR #16 final head `f2dc8bae2e77dfde0d14b428ac3e782717b3a264`;
+- exact PR-head umbrella manifest `34029446301` success;
+- exact PR-head TFTP conformance `34029446281` success after rustfmt, Clippy, Rust 1.88 build, ruff, reviewed differential corpus and deterministic mutation campaign;
+- PR #16 normal-merged as `a38b878a28b80c08e2e034210dcbf1377b578df0`;
+- exact merged-main umbrella manifest `34029528608` success;
+- exact merged-main TFTP conformance `34029528620` success, repeating the executable integration contract;
+- permanent `.github/workflows/tftp-conformance.yml` uses read-only repository permissions and retriggers when the integration or either participating imported subtree changes.
+
+This is an **INTEGRATION VERIFIED** edge only for the parser semantics exercised by that contract. It does not claim whole-stack or whole-RFC TFTP conformance, UDP/socket transport, file-transfer/server behavior, MinIOS networking, container networking, security, performance, or correctness of unrelated protocols.
+
+`integrations/manifest.json` records this edge separately from project import state. `scripts/validate_integrations.py` cross-checks participant source SHAs against the import ledger, requires existing integration/workflow paths, and requires explicit scope, limitations, PR evidence and exact merged-main evidence.
 
 ## Current HOLD lane
 
@@ -155,11 +182,13 @@ For refreshes, use a non-squashed `git subtree pull` and separately audit newly 
 
 ## Integration evidence rule
 
-The current checkpoint verifies **five imports, zero cross-project integration edges**. That distinction is intentional.
+The current checkpoint verifies **five imports and one cross-project integration edge**. Import verification and integration verification remain separate claims.
 
-A verified edge needs a named artifact/protocol/device/process boundary, deterministic setup where practical, executable assertions, honest platform constraints, and claims no broader than the exercised contract. Candidate examples include a MinIOS guest artifact booted by the hypervisor, a shared filesystem image contract, an explicit TAP/TUN/network device fixture, or a conformance adapter against a real target.
+A verified edge needs a named artifact/protocol/device/process boundary, deterministic setup where practical, executable assertions, honest platform constraints, and claims no broader than the exercised contract. Each verified edge is recorded in `integrations/manifest.json` with pinned participant source SHAs, exact PR and merged-main evidence, verification contract and limitations.
 
-Phase 4 flagship status is therefore not yet claimed. The most valuable likely next edge is `mini-hypervisor` → `minios-x86`, but only executable proof can advance it.
+The first verified edge is `systems-conformance-lab` → `userspace-tcpip-stack` for TFTP parser differential conformance. The deeper `mini-hypervisor` → `minios-x86` edge remains unverified because the current imported hypervisor's reusable public boot paths do not provide the protected-mode/Multiboot contract required by MinIOS; the existing ELF64/long-mode path must not be treated as equivalent.
+
+The originally defined Phase 4 criteria are now met, so the umbrella may claim its **first Systems flagship checkpoint**. This is a milestone, not a terminal state: additional imports and deeper executable edges remain open work.
 
 ## Original repository policy
 
