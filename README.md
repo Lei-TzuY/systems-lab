@@ -6,7 +6,7 @@ The goal is **not** to dump similarly themed repositories into one directory or 
 
 ## Phase 0 checkpoint
 
-Four source histories are now independently imported and verified:
+Five source histories are now independently imported and verified:
 
 | Project | Systems layer | Status |
 | --- | --- | --- |
@@ -14,7 +14,7 @@ Four source histories are now independently imported and verified:
 | [minios-x86](https://github.com/Lei-TzuY/minios-x86) | x86 operating-system kernel | **IMPORTED / VERIFIED** — source `e63d4218...`, subtree `56fec38f...` |
 | [filesystem-lab](https://github.com/Lei-TzuY/filesystem-lab) | filesystem / storage semantics | **IMPORTED / VERIFIED** — source `1414e9fc...`, subtree `8b2d286e...` |
 | [systems-conformance-lab](https://github.com/Lei-TzuY/systems-conformance-lab) | differential/fuzz/fault/repro correctness substrate | **IMPORTED / VERIFIED** — source `b7df22b7...`, subtree `3ba8a9c3...` |
-| [userspace-tcpip-stack](https://github.com/Lei-TzuY/userspace-tcpip-stack) | userspace networking / protocols | **HOLD** — implementation PR #330 active |
+| [userspace-tcpip-stack](https://github.com/Lei-TzuY/userspace-tcpip-stack) | userspace networking / protocols | **IMPORTED / VERIFIED** — source `2e4a58c0...`, subtree `24b53760...` |
 | [mini-container-runtime](https://github.com/Lei-TzuY/mini-container-runtime) | Linux namespaces/cgroups/process lifecycle | **HOLD** — draft implementation PR #392 active |
 
 Each verified import is a non-squashed subtree migration whose exact source commit remains reachable as Git ancestry and whose imported subtree was checked for exact tree equality. Permanent migration workflows are read-only and repeat source-equivalent validation on pull requests and exact merged main.
@@ -59,6 +59,7 @@ Every arrow labeled `future` is an architecture hypothesis, **not** a current in
 - `mini-hypervisor`: source `d32685b5453c3d1ae86ff76d0beac2b4af47094f`; subtree `709291040efb288315d3d81e26b6f4e2dfe5760b`; PR #6 and exact merged-main format/Clippy/test/build/rustdoc/MSRV/strict-KVM gates passed.
 - `minios-x86`: source `e63d4218ea91069506b05944ead5a9198bf8568a`; subtree `56fec38f4af154e8c8dd7a993dcf70327c4ad7d0`; PR #9 and exact merged-main build/static/QEMU/ASan/UBSan/stress-mutant gates passed.
 - `systems-conformance-lab`: source `b7df22b7004838b55054ec3d8d7b7a3b34df8137`; subtree `3ba8a9c3adbddb39121b82691a93573286d555e3`; PR #11 and exact merged-main ancestry/tree plus Ubuntu/macOS/Windows × Python 3.11/3.13 `pytest` + `ruff` matrix passed.
+- `userspace-tcpip-stack`: source `2e4a58c027a18a4c3dc1d466d3adbe8b13550a0d`; subtree `24b537605193adf21b20849255eff3279ae26f7a`; PR #14 and exact merged-main ancestry/tree, rustfmt, Clippy, Ubuntu/macOS/Windows all-target tests + doctests + release builds, and Rust 1.88 MSRV gates passed.
 
 `projects/manifest.json` is a machine-checked evidence ledger. Pull requests and `main` run `scripts/validate_manifest.py`, which rejects malformed freezes, HOLD entries without blockers, READY entries without successful source-CI evidence, duplicate project identities, and verified imports whose target subtree is missing.
 
