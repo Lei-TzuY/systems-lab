@@ -37,6 +37,42 @@
         "does not prove MinIOS networking or container networking interoperability",
         "does not make security or performance claims"
       ]
+    },
+    {
+      "name": "hypervisor-minios-early-boot",
+      "status": "integration-verified",
+      "participants": [
+        "mini-hypervisor",
+        "minios-x86"
+      ],
+      "participant_source_shas": {
+        "mini-hypervisor": "d32685b5453c3d1ae86ff76d0beac2b4af47094f",
+        "minios-x86": "e63d4218ea91069506b05944ead5a9198bf8568a"
+      },
+      "target_path": "integrations/hypervisor-minios-boot",
+      "workflow_path": ".github/workflows/hypervisor-minios-boot.yml",
+      "scope": "Real-KVM early MinIOS kernel boot using the imported mini-hypervisor public VM/vCPU/memory/debug-port APIs. The integration builds the real MinIOS ELF32 kernel, loads PT_LOAD segments, executes a guest-owned real-to-protected-mode Multiboot v1 bridge, reaches kernel_main and the exact debug banner, then proves the next execution boundary is the first intentionally unsupported PIC-remap OUT 0x20 access.",
+      "pr_number": 18,
+      "pr_head_sha": "b5299b6a06fe1d4ee0a89bb03b9c91128c2c3d98",
+      "pr_manifest_run_id": 34035518088,
+      "pr_verification_run_id": 34035518070,
+      "merged_umbrella_sha": "0f33fc597b4930e3586d9ba32c636c20e3c9c0b3",
+      "umbrella_post_merge_manifest_run_id": 34035659029,
+      "umbrella_post_merge_verification_run_id": 34035659001,
+      "verification_contract": [
+        "build the real imported MinIOS kernel.bin ELF32 artifact with the 32-bit freestanding toolchain",
+        "assemble and link a bounded guest-owned Multiboot bridge below the 64 KiB real-mode window",
+        "Rust 1.74 formatting, Clippy -D warnings, and harness build against the imported mini-hypervisor crate",
+        "require a real /dev/kvm execution rather than a mocked vCPU or synthetic exit",
+        "parse and load the MinIOS ELF32 PT_LOAD segments into registered guest memory and pass Multiboot magic 0x2BADB002 plus a minimal valid memory-info structure",
+        "require the exact MinIOS debug-port proof Booting Advanced OS... followed by the exact first unsupported PIC boundary OUT port 0x20 size 1 count 1"
+      ],
+      "limitations": [
+        "proves early MinIOS kernel boot only through the first legacy PIC I/O boundary",
+        "does not claim PIC, PIT, keyboard, ATA, interrupt, shell, filesystem, or networking device support under mini-hypervisor",
+        "does not claim a complete MinIOS boot or interactive userspace session",
+        "does not make security or performance claims"
+      ]
     }
   ]
 }
