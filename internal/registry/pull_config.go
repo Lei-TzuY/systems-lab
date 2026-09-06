@@ -18,6 +18,8 @@ type imageConfigDocument struct {
 		StopSignal string   `json:"StopSignal"`
 		Env        []string `json:"Env,omitempty"`
 		WorkingDir string   `json:"WorkingDir,omitempty"`
+		Entrypoint []string `json:"Entrypoint,omitempty"`
+		Cmd        []string `json:"Cmd,omitempty"`
 	} `json:"config"`
 }
 
@@ -25,6 +27,8 @@ type imageRuntimeConfig struct {
 	StopSignal string
 	Env        []string
 	WorkingDir string
+	Entrypoint []string
+	Cmd        []string
 }
 
 func pullImageRuntimeConfig(client *http.Client, imageName, token, tmpDir string, desc Descriptor) (imageRuntimeConfig, error) {
@@ -52,6 +56,16 @@ func pullImageStopSignal(client *http.Client, imageName, token, tmpDir string, d
 		return "", err
 	}
 	return cfg.StopSignal, nil
+}
+
+func validateImageArgvField(name string, values []string) ([]string, error) {
+	out := append([]string(nil), values...)
+	for _, value := range out {
+		if strings.IndexByte(value, 0) >= 0 {
+			return nil, fmt.Errorf("invalid image %s entry %q: contains NUL", name, value)
+		}
+	}
+	return out, nil
 }
 
 func parseImageRuntimeConfig(data []byte) (imageRuntimeConfig, error) {
@@ -84,7 +98,21 @@ func parseImageRuntimeConfig(data []byte) (imageRuntimeConfig, error) {
 		}
 		workingDir = filepath.Clean(workingDir)
 	}
-	return imageRuntimeConfig{StopSignal: signal, Env: env, WorkingDir: workingDir}, nil
+	entrypoint, err := validateImageArgvField("Entrypoint", cfg.Config.Entrypoint)
+	if err != nil {
+		return imageRuntimeConfig{}, err
+	}
+	cmd, err := validateImageArgvField("Cmd", cfg.Config.Cmd)
+	if err != nil {
+		return imageRuntimeConfig{}, err
+	}
+	return imageRuntimeConfig{
+		StopSignal: signal,
+		Env:        env,
+		WorkingDir: workingDir,
+		Entrypoint: entrypoint,
+		Cmd:        cmd,
+	}, nil
 }
 
 func parseImageConfigStopSignal(data []byte) (string, error) {
@@ -103,11 +131,12 @@ func persistPulledImageRuntimeMetadata(imageRef, destDir string, cfg imageRuntim
 	defer st.Close()
 
 	if err := st.SaveImage(&state.Image{
-		Name:      imageRef,
-		RootFS:    destDir,
-		LoadedAt:  time.Now(),
-		WorkDir:   cfg.WorkingDir,
-		Env:       append([]string(nil), cfg.Env...),
+		Name:     imageRef,
+		RootFS:   destDir,
+		LoadedAt: time.Now(),
+		WorkDir:  cfg.WorkingDir,
+		Env:      append([]string(nil), cfg.Env...),
+		Cmd:      append([]string(nil), cfg.Cmd...),
 	}); err != nil {
 		return fmt.Errorf("save pulled image: %w", err)
 	}
@@ -116,6 +145,12 @@ func persistPulledImageRuntimeMetadata(imageRef, destDir string, cfg imageRuntim
 	}
 	if err := st.SaveImageWorkingDir(imageRef, cfg.WorkingDir); err != nil {
 		return fmt.Errorf("save pulled image WorkingDir: %w", err)
+	}
+	if err := st.SaveImageCommand(imageRef, state.ImageCommand{
+		Entrypoint: cfg.Entrypoint,
+		Cmd:        cfg.Cmd,
+	}); err != nil {
+		return fmt.Errorf("save pulled image command: %w", err)
 	}
 	if err := st.SaveImageStopSignal(imageRef, cfg.StopSignal); err != nil {
 		return fmt.Errorf("save pulled image StopSignal: %w", err)
