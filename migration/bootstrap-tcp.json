@@ -1,0 +1,6 @@
+{
+  "source_repository": "Lei-TzuY/userspace-tcpip-stack",
+  "source_sha": "2e4a58c027a18a4c3dc1d466d3adbe8b13550a0d",
+  "target_path": "projects/userspace-tcpip-stack",
+  "import_branch": "migration/userspace-tcpip-stack-2e4a58c0"
+}
